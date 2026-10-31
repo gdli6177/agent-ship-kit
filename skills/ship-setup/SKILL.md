@@ -19,7 +19,7 @@ Everything this installs stays in the owner's clone. Other developers of the sam
 - `.agent-ship/`, `.env*`, and `*.storage-state.json` are added to `.git/info/exclude`, not to the shared `.gitignore`.
 - The rules block is merged into `AGENTS.md` between `<!-- agent-ship:rules:start -->` and `<!-- agent-ship:rules:end -->` only when `AGENTS.md` is not already tracked. That file is then excluded too. A tracked `AGENTS.md` is left untouched; the same block is written to `.agent-ship/AGENTS.local.md`.
 - `agent-ship setup --shared` is the explicit opt-in that writes a marked block in the shared `.gitignore` and merges the rules into `AGENTS.md` even when that file is tracked. Hooks stay local even then.
-- `agent-ship setup --uninstall` removes the kit hooks (restoring a chained hook), the rules block, and the marked exclude or gitignore block. It does not delete contracts, the inbox, or packets.
+- `agent-ship setup --uninstall` removes the kit hooks (restoring a chained hook) and the rules block. Kept `.agent-ship/` data stays, and a minimal `.agent-ship/` line remains in `.git/info/exclude` so `git status` stays clean. `--purge` deletes `.agent-ship/` and removes that line too.
 
 Do not tell the human to commit `.git/hooks`, `.git/info/exclude`, or a local `AGENTS.md`.
 

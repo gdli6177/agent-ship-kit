@@ -123,11 +123,35 @@ test("setup is local, idempotent, chains hooks, and uninstalls cleanly", async (
     assert.equal(await readFile(join(root, ".git", "hooks", "pre-commit"), "utf8"), foreign);
     await assert.rejects(readFile(join(root, "AGENTS.md"), "utf8"));
     const excludeAfter = await readFile(join(root, ".git", "info", "exclude"), "utf8");
-    assert.equal(excludeAfter.includes("agent-ship-exclude-start"), false);
+    assert.match(excludeAfter, /# agent-ship-exclude-start\n\.agent-ship\/\n# agent-ship-exclude-end/);
+    assert.equal(excludeAfter.includes(".env*"), false);
     assert.equal(await readFile(join(root, ".gitignore"), "utf8"), ignoreBefore);
     await assert.rejects(git(root, ["config", "--local", "--get", "core.hooksPath"]));
   } finally {
     await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("uninstall leaves git status empty when data is kept and when it is purged", async () => {
+  for (const purge of [false, true]) {
+    const root = await repo();
+    try {
+      assert.equal(await main(["setup", "--root", root], capture().io), 0);
+      const args = ["setup", "--uninstall", "--root", root];
+      if (purge) args.push("--purge");
+      assert.equal(await main(args, capture().io), 0);
+      assert.equal((await git(root, ["status", "--porcelain"])).trim(), "");
+      const exclude = await readFile(join(root, ".git", "info", "exclude"), "utf8");
+      if (purge) {
+        await assert.rejects(readFile(join(root, ".agent-ship", "e2e", "index.md"), "utf8"));
+        assert.equal(exclude.includes("agent-ship-exclude-start"), false);
+      } else {
+        assert.match(await readFile(join(root, ".agent-ship", "e2e", "index.md"), "utf8"), /E2E index/);
+        assert.match(exclude, /# agent-ship-exclude-start\n\.agent-ship\/\n# agent-ship-exclude-end/);
+      }
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
   }
 });
 

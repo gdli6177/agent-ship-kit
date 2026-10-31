@@ -31,7 +31,7 @@ const defaultIo: Io = {
 const USAGE = `agent-ship — local inbox, path check, and notify
 
 Usage:
-  agent-ship setup|init [--shared] [--uninstall] [--root DIR]
+  agent-ship setup|init [--shared] [--uninstall] [--purge] [--root DIR]
   agent-ship check --contract ID [--base REF] [--head REF] [--staged] [--root DIR]
   agent-ship inbox add --title TEXT --summary TEXT --source-task-id ID
                        [--type needs_review|blocked|needs_approval]
@@ -79,7 +79,7 @@ const VALUE_OPTIONS = new Set([
   "sort",
 ]);
 const REPEATABLE = new Set(["evidence"]);
-const BOOL_FLAGS = new Set(["json", "latest", "help", "all", "shared", "uninstall", "staged"]);
+const BOOL_FLAGS = new Set(["json", "latest", "help", "all", "shared", "uninstall", "purge", "staged"]);
 
 interface ParsedArgs {
   positionals: string[];
@@ -289,11 +289,14 @@ async function notifyCommand(parsed: ParsedArgs, io: Io, execute: boolean): Prom
 }
 
 async function runSetup(parsed: ParsedArgs, io: Io): Promise<number> {
-  if (parsed.positionals.length > 1) throw new Error("usage: agent-ship setup [--shared] [--uninstall]");
+  if (parsed.positionals.length > 1) {
+    throw new Error("usage: agent-ship setup [--shared] [--uninstall] [--purge]");
+  }
   const root = one(parsed.values, "root") ?? process.cwd();
   const report = await setupProject(root, {
     shared: parsed.flags.has("shared"),
     uninstall: parsed.flags.has("uninstall"),
+    purge: parsed.flags.has("purge"),
   });
   io.stdout(`${JSON.stringify(report, null, 2)}\n`);
   return report.ok ? 0 : 1;

@@ -128,7 +128,7 @@ Default is local:
 
 `agent-ship setup --shared` is the opt-in that writes a marked block in the shared `.gitignore` and merges the rules into `AGENTS.md` even when that file is already tracked. Hooks stay in `.git/hooks` either way.
 
-`agent-ship setup --uninstall` removes the kit hook (restoring the chained file), the rules block, and the marked exclude or gitignore block. Contracts and the inbox stay.
+`agent-ship setup --uninstall` removes the kit hook (restoring the chained file) and the rules block. `.agent-ship/` stays on disk, and `.git/info/exclude` keeps a marked `.agent-ship/` line so the leftover directory does not show as untracked. `--uninstall --purge` deletes `.agent-ship/` and that line.
 
 `pre-commit` runs `agent-ship check --staged` for `.agent-ship/active-contract` when that file exists, then chains. `pre-push` refuses `main`, `master`, and names in `.agent-ship/protected-branches` unless a human sets `AGENT_SHIP_ALLOW_PROTECTED_PUSH=1`. The captain must not set it.
 

@@ -62,6 +62,7 @@ export interface SetupReport {
 export interface SetupOptions {
   shared?: boolean;
   uninstall?: boolean;
+  purge?: boolean;
 }
 
 function escapeRegExp(value: string): string {
@@ -104,6 +105,9 @@ export function mergeAgents(existing: string | null): { text: string; action: Se
 function ignoreBlock(start: string, end: string, extra: string[]): string {
   return `${start}\n${[...LOCAL_PATTERNS, ...extra].join("\n")}\n${end}`;
 }
+
+/** Left behind after uninstall so a kept `.agent-ship/` directory stays untracked. */
+export const KEPT_EXCLUDE_BLOCK = `${EXCLUDE_START}\n.agent-ship/\n${EXCLUDE_END}`;
 
 async function readOptional(path: string): Promise<string | null> {
   try {
@@ -392,7 +396,7 @@ async function selfCheck(root: string, shared: boolean, rulesInAgents: boolean):
 }
 
 export async function setupProject(root: string, options: SetupOptions = {}): Promise<SetupReport> {
-  if (options.uninstall) return uninstallProject(root);
+  if (options.uninstall || options.purge) return uninstallProject(root, options.purge === true);
   const shared = options.shared === true;
   const kit = kitRoot();
   const actions: SetupAction[] = [];
@@ -459,7 +463,16 @@ export async function setupProject(root: string, options: SetupOptions = {}): Pr
   };
 }
 
-async function uninstallProject(root: string): Promise<SetupReport> {
+async function directoryExists(path: string): Promise<boolean> {
+  try {
+    const info = await stat(path);
+    return info.isDirectory();
+  } catch {
+    return false;
+  }
+}
+
+async function uninstallProject(root: string, purge: boolean): Promise<SetupReport> {
   const actions: SetupAction[] = [];
   if (!(await isGitRepo(root))) {
     return {
@@ -494,13 +507,25 @@ async function uninstallProject(root: string): Promise<SetupReport> {
     actions.push({ path: ".agent-ship/AGENTS.local.md", action: "removed" });
   }
 
+  const dataDir = join(root, ".agent-ship");
+  if (purge && (await directoryExists(dataDir))) {
+    await rm(dataDir, { recursive: true, force: true });
+    actions.push({ path: ".agent-ship/", action: "removed" });
+  }
+
   try {
     const excludePath = await excludeFile(root);
     const exclude = await readOptional(excludePath);
-    if (exclude && exclude.includes(EXCLUDE_START)) {
-      const removed = removeMarked(exclude, EXCLUDE_START, EXCLUDE_END);
-      await writeText(excludePath, removed.text, exclude);
-      actions.push({ path: ".git/info/exclude", action: "updated" });
+    if (purge || !(await directoryExists(dataDir))) {
+      if (exclude && exclude.includes(EXCLUDE_START)) {
+        const removed = removeMarked(exclude, EXCLUDE_START, EXCLUDE_END);
+        await writeText(excludePath, removed.text, exclude);
+        actions.push({ path: ".git/info/exclude", action: "updated" });
+      }
+    } else {
+      const next = ensureTrailingNewline(replaceMarked(exclude ?? "", EXCLUDE_START, EXCLUDE_END, KEPT_EXCLUDE_BLOCK));
+      const action = await writeText(excludePath, next, exclude);
+      actions.push({ path: ".git/info/exclude", action: exclude === null ? "created" : action });
     }
   } catch {
     actions.push({ path: ".git/info/exclude", action: "unchanged" });
@@ -519,8 +544,10 @@ async function uninstallProject(root: string): Promise<SetupReport> {
     }
   }
 
-  await rm(join(root, ".agent-ship", "kit-root"), { force: true });
-  await rm(join(root, ".agent-ship", "node-bin"), { force: true });
+  if (!purge) {
+    await rm(join(root, ".agent-ship", "kit-root"), { force: true });
+    await rm(join(root, ".agent-ship", "node-bin"), { force: true });
+  }
 
   const hooksPath = await hooksPathConfigured(root);
   const pre = await readOptional(join(root, ".git", "hooks", "pre-commit"));
@@ -541,6 +568,14 @@ async function uninstallProject(root: string): Promise<SetupReport> {
       name: "hooks-path",
       ok: !hooksPath,
       detail: hooksPath ? "core.hooksPath is set" : "core.hooksPath unset",
+    },
+    {
+      name: "kept-data",
+      ok: purge
+        ? !(await directoryExists(dataDir))
+        : !(await directoryExists(dataDir)) ||
+          ((await readOptional(await excludeFile(root).catch(() => ""))) ?? "").includes(".agent-ship/"),
+      detail: purge ? "directory removed" : "kept directory stays excluded",
     },
   ];
   return {

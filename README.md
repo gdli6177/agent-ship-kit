@@ -42,7 +42,7 @@ These names are for the captain thread. They do not depend on a forge.
 
 | Command | What the captain does |
 | --- | --- |
-| `/ship-setup` | `agent-ship setup` in this clone only. Hooks go in `.git/hooks` and chain to any hook already there. Ignore rules go in `.git/info/exclude`, not the shared `.gitignore`. `--shared` opts into a committed ignore block and a shared `AGENTS.md` rules section. `--uninstall` removes the hooks and the rules block. Setup never sets `core.hooksPath`. |
+| `/ship-setup` | `agent-ship setup` in this clone only. Hooks go in `.git/hooks` and chain to any hook already there. Ignore rules go in `.git/info/exclude`, not the shared `.gitignore`. `--shared` opts into a committed ignore block and a shared `AGENTS.md` rules section. `--uninstall` removes the hooks and the rules block but keeps `.agent-ship/` excluded. `--uninstall --purge` deletes that directory too. Setup never sets `core.hooksPath`. |
 | `/ship-inbox` | List open inbox items, high priority first. |
 | `/ship-review` | One open item at a time: contract, evidence, verifier, risks. The owner replies `pass`, `changes` plus a reason, or `reject`. |
 | `/ship-review <id>` | Jump to that item. Notify messages include this deep link. |
@@ -134,7 +134,7 @@ agent-ship-kit 是并行 AI 编程交付的验收与注意力层。人从进需�
 
 工人做到一半要拍板或卡住时，只回给船长，收件箱用 `blocked` / `needs_approval`。人用 `inbox decide` 答复，不用打开工人会话。普通待审默认拉取，不推送；高优先级没有证据 URL 不会呼叫。`notify run` 只在允许列表通过后按 argv 执行，不经过 shell。登录冒烟每个项目一份 `auth.setup.ts`，会话文件 gitignore；生产只读，密码留在密码管理器或本机环境变量里，不进 git、技能或对话。
 
-人在船长线程里用这些命令：`/ship-setup` 只初始化当前克隆（钩子在 `.git/hooks`，忽略规则在 `.git/info/exclude`，不改共享 `.gitignore`，不设置 `core.hooksPath`；`--shared` 才写给其他开发者；`--uninstall` 卸掉钩子和规则块）、`/ship-inbox` 看未决项、`/ship-review` 一次审一条，通知里的深链是 `/ship-review <id>`。工人报完成之后先过独立只读核验，再进收件箱。改冻结合同要新开合同号并重新冻结，不受影响的已完成工作保留。
+人在船长线程里用这些命令：`/ship-setup` 只初始化当前克隆（钩子在 `.git/hooks`，忽略规则在 `.git/info/exclude`，不改共享 `.gitignore`，不设置 `core.hooksPath`；`--shared` 才写给其他开发者；`--uninstall` 卸掉钩子和规则块但保留 `.agent-ship/` 的本地排除项，`--purge` 连目录一起删）、`/ship-inbox` 看未决项、`/ship-review` 一次审一条，通知里的深链是 `/ship-review <id>`。工人报完成之后先过独立只读核验，再进收件箱。改冻结合同要新开合同号并重新冻结，不受影响的已完成工作保留。
 
 安装：克隆本仓库，把 `skills/` 下的 `ship-setup`、`ship-contract`、`ship-dispatch`、`ship-review`、`ship-notify`、`ship-e2e` 拷进船长代理的 skill 目录（Cursor 为 `~/.cursor/skills`）。不依赖 Multica 的最短路径是上面的 Quickstart。产品边界见 [docs/PRODUCT.md](docs/PRODUCT.md)，交付流程见 [templates/workflow.md](templates/workflow.md)，登录索引见 [templates/e2e.md](templates/e2e.md)。
 

@@ -24,7 +24,7 @@ npm run agent-ship -- setup --shared --root ..
 npm run agent-ship -- setup --uninstall --root ..
 ```
 
-`--shared` writes a marked block in `.gitignore` and merges the rules into `AGENTS.md` even when that file is tracked. Hooks remain uncommitted. `--uninstall` restores a chained hook and removes the rules block and the marked ignore block.
+`--shared` writes a marked block in `.gitignore` and merges the rules into `AGENTS.md` even when that file is tracked. Hooks remain uncommitted. `--uninstall` restores a chained hook and removes the rules block. Data under `.agent-ship/` is kept, and `.git/info/exclude` keeps a single `.agent-ship/` line so the directory does not show up as untracked. `--uninstall --purge` deletes `.agent-ship/` and that exclude line.
 
 ## Check
 
