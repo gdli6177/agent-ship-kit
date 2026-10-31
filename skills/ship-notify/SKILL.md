@@ -45,7 +45,7 @@ npm run agent-ship -- notify dry-run --root .. --latest \
 
 Use `--event <file.json>` instead of `--latest` when the event is not the newest open inbox item. Add `--action 'multica issue create --assignee me --title from-captain'` only when the free-text section told you to plan an argv the rules did not already name.
 
-`notify run` takes the same flags and, only when `allow` is true, executes that argv with no shell. Dry-run first. Do not run when `allow` is false.
+`notify run` takes the same flags and, only when `allow` is true, executes that argv with no shell. Dry-run first. Do not run when `allow` is false. The example actions include `/ship-review {id}`, which the planner fills with the inbox id so the owner can open that one item.
 
 Read the JSON plan:
 

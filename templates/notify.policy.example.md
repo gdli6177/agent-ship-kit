@@ -33,20 +33,20 @@ allowlisted argv with no shell, and only when `allow` is true.
 when.priority: high
 when.type: needs_review
 when.evidence_urls: nonempty
-action: curl -X POST https://hooks.example/ship
-note: Page only when evidence exists. Do not merge or deploy.
+action: curl -X POST https://hooks.example/ship?review=/ship-review/{id}
+note: Page only when evidence exists. Deep link /ship-review {id}. Do not merge or deploy.
 
 ## Rule: blocked
 
 when.type: blocked
-action: multica issue create --assignee me --title blocked
-note: Mid-task block. The owner answers in the captain thread, not in the worker session.
+action: multica issue create --assignee me --title blocked /ship-review/{id}
+note: Mid-task block. Open /ship-review {id}. The owner does not open the worker session.
 
 ## Rule: needs approval
 
 when.type: needs_approval
-action: multica issue create --assignee me --title needs-approval
-note: Mid-task approval. Same path as blocked: captain inbox, then the owner.
+action: multica issue create --assignee me --title needs-approval /ship-review/{id}
+note: Mid-task approval. Open /ship-review {id}. The owner does not open the worker session.
 
 ## Never
 

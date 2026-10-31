@@ -66,11 +66,14 @@ freeze, and do not spawn a worker.
 6. Leave the dispatch log empty. `ship-dispatch` appends to it.
 7. Tell the human the contract id and that workers have not been started.
 
-## Immutability
+## Changing a frozen contract
 
-Do not edit a file whose status is `frozen`. Write a new contract id, set
-`Supersedes` to the old id, and wait for a new freeze. In-flight slices keep
-the old contract until the human says to stop them.
+Do not edit a file whose status is `frozen`.
+
+1. Stop the slices the change affects. Leave finished slices that the new text does not touch; their branches and packets stay.
+2. Draft a new contract id. Set `Supersedes` to the old id. Do not spawn from the draft.
+3. The owner re-freezes the new contract. Until that freeze, the old contract still covers slices you did not stop.
+4. Dispatch only the stopped slices, against the new id, and only after the new freeze.
 
 ## Worker boundary, written into the contract
 

@@ -40,13 +40,14 @@ agent-ship-kit 是并行 AI 编程交付的验收与注意力层。人从需求�
 | 通知 | 策略里有给人读的自由文本，也有 CLI 解析的规则。允许列表始终生效 |
 | 端到端登录 | 每个项目一份 Playwright `auth.setup.ts`，冒烟复用 gitignore 的 storageState。见 `templates/e2e.md` |
 
-技能五份，复制到代理的 skill 目录即可用：
+技能六份，复制到代理的 skill 目录即可用：
 
 - `ship-contract`：讨论模式维护一张方案卡，人冻结后才是合同。卡上写明允许路径和禁止路径
 - `ship-dispatch`：派工门禁、合同并行上限、全局并行上限。工人要拍板时只回给船长
 - `ship-review`：待审证据包。E2E 结果写进证据行
 - `ship-notify`：默认为拉取；推送要过允许列表。可选 `notify run`
 - `ship-e2e`：共享登录、测试账号前提、生产只读冒烟
+- `ship-setup`：只初始化当前这份克隆。钩子写在 `.git/hooks`，忽略规则写在 `.git/info/exclude`，不改别人的 `.gitignore`，也不设置 `core.hooksPath`。`--shared` 才写入仓库共用的忽略规则和 `AGENTS.md`。`--uninstall` 卸掉钩子和规则块
 
 ## 船长体验
 
@@ -80,6 +81,12 @@ agent-ship-kit 是并行 AI 编程交付的验收与注意力层。人从需求�
 ## 一次交付怎么走
 
 流程在 `templates/workflow.md`。登录和冒烟在 `templates/e2e.md`、`templates/e2e-testing.md`。压缩起来是：讨论并维持一张方案卡、人冻结、在两道并行上限内派工、中途问题进收件箱、证据（含 E2E）写成待审包、普通项拉取、需要推送时先 dry-run 再按允许列表 `notify run`、`inbox decide`、人自己合并或发布。
+
+改冻结合同不是改原文件。船长停掉受影响的切片，新开合同号并指向旧号，等人重新冻结。没被新文本影响、已经做完的切片保留。
+
+工人说做完之后，船长另开一个只读核验，只给冻结合同和分支，不给工人对话。核验重跑验收、`agent-ship check` 和相关冒烟。不一致就退回工人，不把这圈交给人。一致之后才进收件箱。
+
+人用 `/ship-inbox` 看未决项，用 `/ship-review` 一次审一条（通知里的链接是 `/ship-review <id>`）。回复 `pass` / `通过`、`changes` / `要改` 加原因、或 `reject` / `拒绝`。
 
 状态词：方案是 `draft`（旧稿是 `superseded`）；合同是 `frozen`；工人是 `queued`、`running`、`needs_review`、`blocked`、`needs_approval`、`failed`、`cancelled`；人的决定是 `accept`、`changes_requested`、`reject`。`accept` 不是合并。
 

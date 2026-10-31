@@ -57,7 +57,9 @@ If any line fails, do not spawn. Tell the human which line failed.
 2. Call adapter `spawn` with the contract path, slice id, and that prompt.
    Fail closed if the adapter cannot show that the contract is frozen.
 3. Record `task_id` and `worker_ref` on the contract's dispatch log. Appending
-   a log row is not editing the frozen terms.
+   a log row is not editing the frozen terms. Write the contract id to
+   `.agent-ship/active-contract` so the local pre-commit hook checks this
+   contract. That file is local to the clone.
 4. The worker returns evidence or an escalation to the captain. It does not
    notify the human. Notification is `ship-notify`, after the captain has
    filed an inbox item.
@@ -113,5 +115,9 @@ agent in the human's thread. Do not pretend that session is a standing worker.
 
 ## Handoff
 
-When `collect` returns evidence, or the worker session posts a packet, stop
-dispatching and use `ship-review`.
+When the worker reports done, do not file the inbox and do not call `/ship-review` yet.
+
+1. Spawn a separate read-only verifier. Its only prompt is `templates/verifier-prompt.md` plus the frozen contract path and the branch name. Do not attach the worker chat.
+2. The verifier re-runs the acceptance commands, `agent-ship check --contract <id>`, and any E2E smoke the contract requires.
+3. If the verifier disagrees, send that result back to the same worker. Do not tell the owner.
+4. If the verifier agrees, fill the packet's Verifier section and hand off to `ship-review`, which files `needs_review`. The notify text includes `/ship-review <id>`.

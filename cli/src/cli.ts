@@ -10,6 +10,8 @@ import {
 } from "./inbox.js";
 import { loadAllowlistFile, loadPolicyFile, planNotification, type NotifyEvent } from "./notify.js";
 import { executeArgv } from "./run.js";
+import { checkContract } from "./check.js";
+import { setupProject } from "./setup.js";
 import type { AttentionType, EventLinks, InboxRecord, Priority } from "./types.js";
 
 export interface Io {
@@ -26,16 +28,18 @@ const defaultIo: Io = {
   },
 };
 
-const USAGE = `agent-ship — local inbox and notify
+const USAGE = `agent-ship — local inbox, path check, and notify
 
 Usage:
+  agent-ship setup|init [--shared] [--uninstall] [--root DIR]
+  agent-ship check --contract ID [--base REF] [--head REF] [--staged] [--root DIR]
   agent-ship inbox add --title TEXT --summary TEXT --source-task-id ID
                        [--type needs_review|blocked|needs_approval]
                        [--priority normal|high] [--evidence URL ...]
                        [--pr URL] [--issue URL] [--path PATH]
                        [--id evt_...] [--root DIR]
   agent-ship inbox list [--type TYPE] [--priority normal|high]
-                       [--all] [--json] [--root DIR]
+                       [--sort priority] [--all] [--json] [--root DIR]
   agent-ship inbox decide ID accept|changes_requested|reject
                        [--note TEXT] [--root DIR]
   agent-ship notify dry-run --policy FILE --allowlist FILE
@@ -43,8 +47,10 @@ Usage:
   agent-ship notify run --policy FILE --allowlist FILE
                        (--latest | --event FILE) [--action ARGV] [--root DIR]
 
-The inbox is <root>/.agent-ship/inbox.jsonl (root defaults to the working directory).
-inbox list shows open items unless --all is set.
+Captain-facing names: /ship-setup, /ship-inbox, /ship-review [id].
+setup is local to this clone: hooks go in .git/hooks only, and ignore rules
+go in .git/info/exclude. Pass --shared to write a .gitignore block and a
+shared AGENTS.md rules section. setup never sets core.hooksPath.
 notify dry-run prints a plan and does not start a command.
 notify run starts the allowlisted argv with no shell, and only when the plan allows it.
 A high-priority needs_review with no evidence URLs is not paged.
@@ -67,9 +73,13 @@ const VALUE_OPTIONS = new Set([
   "type",
   "note",
   "action",
+  "contract",
+  "base",
+  "head",
+  "sort",
 ]);
 const REPEATABLE = new Set(["evidence"]);
-const BOOL_FLAGS = new Set(["json", "latest", "help", "all"]);
+const BOOL_FLAGS = new Set(["json", "latest", "help", "all", "shared", "uninstall", "staged"]);
 
 interface ParsedArgs {
   positionals: string[];
@@ -207,6 +217,10 @@ async function inboxList(parsed: ParsedArgs, io: Io): Promise<number> {
     type,
     openOnly: !parsed.flags.has("all"),
   });
+  if (one(parsed.values, "sort") === "priority") {
+    const rank = (item: InboxRecord) => (item.type === "review_decided" ? 0 : item.priority === "high" ? 2 : 1);
+    items.sort((left, right) => rank(right) - rank(left));
+  }
   if (parsed.flags.has("json")) {
     io.stdout(`${JSON.stringify(items, null, 2)}\n`);
     return 0;
@@ -274,6 +288,28 @@ async function notifyCommand(parsed: ParsedArgs, io: Io, execute: boolean): Prom
   return exitCode === 0 ? 0 : exitCode;
 }
 
+async function runSetup(parsed: ParsedArgs, io: Io): Promise<number> {
+  if (parsed.positionals.length > 1) throw new Error("usage: agent-ship setup [--shared] [--uninstall]");
+  const root = one(parsed.values, "root") ?? process.cwd();
+  const report = await setupProject(root, {
+    shared: parsed.flags.has("shared"),
+    uninstall: parsed.flags.has("uninstall"),
+  });
+  io.stdout(`${JSON.stringify(report, null, 2)}\n`);
+  return report.ok ? 0 : 1;
+}
+
+async function runCheck(parsed: ParsedArgs, io: Io): Promise<number> {
+  const root = one(parsed.values, "root") ?? process.cwd();
+  const result = await checkContract(root, requireOne(parsed.values, "contract"), {
+    staged: parsed.flags.has("staged"),
+    base: one(parsed.values, "base"),
+    head: one(parsed.values, "head"),
+  });
+  io.stdout(`${JSON.stringify(result, null, 2)}\n`);
+  return result.ok ? 0 : 1;
+}
+
 export async function main(argv: string[], io: Io = defaultIo): Promise<number> {
   let parsed: ParsedArgs;
   try {
@@ -291,6 +327,8 @@ export async function main(argv: string[], io: Io = defaultIo): Promise<number> 
 
   const [group, sub] = parsed.positionals;
   try {
+    if ((group === "setup" || group === "init") && sub === undefined) return await runSetup(parsed, io);
+    if (group === "check" && sub === undefined) return await runCheck(parsed, io);
     if (group === "inbox" && sub === "add") return await inboxAdd(parsed, io);
     if (group === "inbox" && sub === "list") return await inboxList(parsed, io);
     if (group === "inbox" && sub === "decide") return await inboxDecide(parsed, io);

@@ -79,6 +79,8 @@ The contract file is written only after an explicit freeze:
 
 "Looks good" without a proposal id is not a freeze. Silence is not a freeze.
 
+Changing a frozen contract does not edit that file. The captain stops the slices the change affects, drafts a new id with `Supersedes` pointing at the old one, and waits for another freeze. Finished work the new text does not touch is kept.
+
 ## One slice, one branch, one packet
 
 - Branch from the repo's default integration branch.
@@ -98,14 +100,19 @@ The contract file is written only after an explicit freeze:
    `inbox add --type blocked` or `--type needs_approval`. The owner does not
    open the worker session. `inbox decide` records the answer; the captain
    relays it.
-6. Each finished slice returns evidence, including E2E rows when the contract
-   asked for them (`ship-e2e`).
-7. Captain writes the review packet and `inbox add`s a `needs_review` event.
-8. Normal items are pull: they sit in `inbox list`. `notify dry-run` before
-   any push. `notify run` only when the plan says `allow: true` and the human
-   wants that push. High priority with empty `evidence_urls` does not page.
-9. Human decides with `inbox decide <id> accept|changes_requested|reject`.
-   The default list then hides that item.
+6. When a worker reports done, a separate read-only verifier sees only the
+   frozen contract and the branch (`templates/verifier-prompt.md`). It re-runs
+   acceptance, `agent-ship check`, and relevant E2E smoke. Disagreement goes
+   back to the worker, not to the owner.
+7. On agreement, the captain writes the review packet, including the verifier
+   section and E2E rows, and `inbox add`s a `needs_review` event.
+8. Normal items are pull: they sit in `/ship-inbox`. `notify dry-run` before
+   any push. The message includes `/ship-review <id>`. `notify run` only when
+   the plan says `allow: true`. High priority with empty `evidence_urls` does
+   not page.
+9. The owner reviews with `/ship-review` (or `/ship-review <id>` from a
+   notification): one item at a time, then `inbox decide`. The default list
+   then hides that item.
 10. On `changes_requested`, continue the same task if the adapter allows it.
     A changed contract is a new contract id.
 11. Merge or release happens only when the human does it with their own tools.

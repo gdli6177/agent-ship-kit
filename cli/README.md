@@ -14,6 +14,26 @@ cd cli
 npm install
 ```
 
+## Setup
+
+`setup` and `init` are the same command. Default mode touches only this clone: `.git/hooks` (chaining any hook that was already there) and `.git/info/exclude`. It does not edit `.gitignore` and it does not set `core.hooksPath`.
+
+```bash
+npm run agent-ship -- setup --root ..
+npm run agent-ship -- setup --shared --root ..
+npm run agent-ship -- setup --uninstall --root ..
+```
+
+`--shared` writes a marked block in `.gitignore` and merges the rules into `AGENTS.md` even when that file is tracked. Hooks remain uncommitted. `--uninstall` restores a chained hook and removes the rules block and the marked ignore block.
+
+## Check
+
+```bash
+npm run agent-ship -- check --root .. --contract contract_auth --base main
+```
+
+Prints JSON and exits 1 when a path is forbidden or outside Allowed paths. `--staged` checks the index. No forge and no CI are required. A project may also run this command in CI; that is an extra, not the enforcement.
+
 ## Commands
 
 Run from `cli/` so the example policy paths resolve. `--root ..` writes the

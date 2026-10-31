@@ -269,6 +269,13 @@ export function assertDirectArgv(argv: readonly string[]): void {
   if (SHELL_PROGRAMS.has(programBase(program))) throw new Error("shell_interpreter");
 }
 
+/** Replace `{id}` with the inbox id so a notify message can deep-link `/ship-review <id>`. */
+export function fillReviewHint(text: string, id: string): string {
+  if (!text.includes("{id}")) return text;
+  if (!/^evt_[A-Za-z0-9_-]+$/.test(id)) return text;
+  return text.replaceAll("{id}", id);
+}
+
 function unmatched(eventId: string): NotifyPlan {
   return {
     mode: "dry-run",
@@ -303,11 +310,13 @@ export function planNotification(
         );
   if (!rule) return unmatched(event.id);
 
+  const action = fillReviewHint(rule.action, event.id);
+  const note = rule.note === null ? null : fillReviewHint(rule.note, event.id);
   const plan: NotifyPlan = {
     ...unmatched(event.id),
     matched_rule: rule.name,
-    action: rule.action,
-    note: rule.note,
+    action,
+    note,
     reason: "not_allowlisted",
   };
 
@@ -316,12 +325,12 @@ export function planNotification(
     return plan;
   }
 
-  if (SHELL_META.test(rule.action)) {
+  if (SHELL_META.test(action)) {
     plan.reason = "shell_metacharacter";
     return plan;
   }
 
-  const argv = rule.action.trim().split(/\s+/).filter(Boolean);
+  const argv = action.trim().split(/\s+/).filter(Boolean);
   const program = argv[0];
   if (!program) {
     plan.reason = "empty_action";

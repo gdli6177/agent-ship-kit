@@ -116,6 +116,36 @@ are the blanks.
 
 Conventions for ids, branch names, freeze phrases, and the global worker cap: `templates/workflow.md`. Login and smoke tests: `templates/e2e.md` and `templates/e2e-testing.md`.
 
+## Local setup
+
+`agent-ship setup` (alias `init`, captain command `/ship-setup`) prepares one clone. It does not call a forge and it never sets `core.hooksPath`.
+
+Default is local:
+
+- Hooks live only in `.git/hooks`. An existing hook is saved as `pre-commit.agent-ship-chain` or `pre-push.agent-ship-chain` and run after the kit hook. Nothing under `.git/` is committed.
+- `.agent-ship/`, `.env*`, and `*.storage-state.json` are written to `.git/info/exclude`, not `.gitignore`.
+- The rules block is merged into an untracked `AGENTS.md`, which is then excluded. A tracked `AGENTS.md` is not edited; the block goes to `.agent-ship/AGENTS.local.md`.
+
+`agent-ship setup --shared` is the opt-in that writes a marked block in the shared `.gitignore` and merges the rules into `AGENTS.md` even when that file is already tracked. Hooks stay in `.git/hooks` either way.
+
+`agent-ship setup --uninstall` removes the kit hook (restoring the chained file), the rules block, and the marked exclude or gitignore block. Contracts and the inbox stay.
+
+`pre-commit` runs `agent-ship check --staged` for `.agent-ship/active-contract` when that file exists, then chains. `pre-push` refuses `main`, `master`, and names in `.agent-ship/protected-branches` unless a human sets `AGENT_SHIP_ALLOW_PROTECTED_PUSH=1`. The captain must not set it.
+
+## Path check
+
+`agent-ship check --contract <id>` reads `.agent-ship/contracts/<id>.md`, lists paths with plain `git diff` against the base branch (`main` or `master`, or `--base`), and prints JSON. A changed path that matches Forbidden paths, or that matches none of the Allowed paths, fails the check. `--staged` is what the pre-commit hook uses. The JSON belongs in the review packet's verifier section.
+
+This does not need GitHub, GitLab, or CI. An optional extra, on any host, is to run the same command on the branch. A green extra check does not replace the verifier or the human.
+
+## Verifier
+
+After a worker reports done, the captain spawns a second agent with `templates/verifier-prompt.md`. That agent sees the frozen contract and the branch, not the worker chat. It re-runs acceptance commands, `agent-ship check`, and the relevant E2E smoke. Disagreement goes back to the worker. Agreement is what allows `needs_review`.
+
+## Changing a frozen contract
+
+The captain stops slices the change affects, drafts a new contract id with `Supersedes` set to the old id, and waits for the owner to freeze it again. Finished slices the new text does not touch are kept.
+
 ## Adapters
 
 ```text
@@ -156,14 +186,14 @@ A rule:
 when.priority: high
 when.type: needs_review
 when.evidence_urls: nonempty
-action: curl -X POST https://hooks.example/ship
-note: Page only when evidence exists. Do not merge or deploy.
+action: curl -X POST https://hooks.example/ship?review=/ship-review/{id}
+note: Page only when evidence exists. Deep link /ship-review {id}. Do not merge or deploy.
 ```
 
 - Conditions: `when.type`, `when.priority`, `when.source_task_id`, and `when.evidence_urls` (`nonempty` or `empty`). An unknown `when.*` key is an error.
 - Every `when.` line must match. A rule with no conditions is an error.
 - The first matching rule wins. `--action` replaces the matched action with the captain's argv and labels the rule `captain action`.
-- `action` is one line of whitespace-separated argv. No quoting.
+- `action` is one line of whitespace-separated argv. No quoting. `{id}` is replaced with the event id so the message can name `/ship-review <id>`. No other placeholders are expanded.
 - If `priority` is `high`, the type is not `blocked` or `needs_approval`, and `evidence_urls` is missing or empty, the plan is `missing_evidence` with `allow: false` even when a looser rule would have matched.
 
 `notify dry-run` prints the plan and does not start a process. `executed` on

@@ -1,15 +1,31 @@
 ---
 name: ship-review
 description: >-
-  Build a needs_review evidence packet and inbox event from a worker's
-  returned proof. Use when a slice finishes, when filing a review for the
-  human, or when someone asks whether a change is ready to merge.
+  Run /ship-review: present one open inbox item at a time after an independent
+  verifier agrees. Use when the human says /ship-review, /ship-inbox, pass,
+  changes, or reject, or when a notification deep-links /ship-review <id>.
 ---
 
 # ship-review
 
-The human reviews evidence. The captain files it. A worker's summary is not
-evidence until it points at something the human can open.
+`/ship-review` is how the owner reviews. `/ship-review <id>` jumps to one inbox item, which is also the deep link in notify messages. `/ship-inbox` only lists open items, highest priority first (`agent-ship inbox list --sort priority`). It does not decide.
+
+The human reviews evidence. The captain files it only after the verifier agrees. A worker's summary is not evidence until it points at something the human can open.
+
+## /ship-review
+
+1. If the owner passed an id, load that open item. If it is missing or already decided, say so and stop.
+2. Otherwise list open items and sort `priority: high` first.
+3. Present ONE item: contract id, allowed and forbidden paths, evidence pointers, the verifier section, and open risks. Do not paste the worker chat.
+4. Wait. Map the reply:
+   - `pass` or `通过` → `inbox decide <id> accept`
+   - `changes` or `要改` plus a reason → `inbox decide <id> changes_requested --note "<reason>"`
+   - `reject` or `拒绝` → `inbox decide <id> reject --note "<reason>"`
+5. Record the decision, then present the next open item. Stop when the owner says stop or the list is empty.
+
+## Verifier first
+
+Do not file `needs_review` when the worker says it is done. Spawn the read-only verifier in `templates/verifier-prompt.md` with only the frozen contract and the branch. It re-runs acceptance commands, `agent-ship check --contract <id>`, and the relevant E2E smoke. If it disagrees, send the diff back to the worker. The owner does not see that loop.
 
 Copy `templates/review-packet.md` to `.agent-ship/packets/<task_id>.md`.
 The event shape is `events/schema.json`. A finished slice is `needs_review`.

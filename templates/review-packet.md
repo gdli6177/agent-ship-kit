@@ -41,6 +41,16 @@ Not run, and why:
 - Issue: `<url or none>`
 - Branch 分支: `<name>`
 
+## Verifier 独立核验
+
+独立的只读核验，没有看过工人对话。不同意就不进收件箱，退回工人，不要打扰人。
+
+- Verifier ref:
+- `agent-ship check`: `<ok true/false，violations 摘要>`
+- Acceptance commands rerun 重跑的验收命令:
+- E2E smoke rerun:
+- Agrees with the worker 与工人一致: yes / no
+
 ## Risks left open 仍开放的风险
 
 接受之前人应该看到的风险。
