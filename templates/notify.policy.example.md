@@ -1,33 +1,55 @@
 # Notify policy (example)
 
-The v0 runner does not call a model. It parses each `## Rule:` block below
-and takes the first rule whose `when.` lines all match the event. Prose
-outside those blocks is for the captain to read and is ignored by the parser.
+## Instructions
 
-A match only produces a dry-run plan. The plan names an argv list. It does
-not start that program, expand environment variables, or read a secret.
-Merging to main and deploying to production are out of scope even when
-`allow` is true.
+The parser ignores this section. The captain reads it and may turn it into an
+argv with `notify dry-run --action` or `notify run --action`. The allowlist
+is still enforced. A free-text plan does not bypass it, and it does not bypass
+the empty-evidence refusal below.
+
+Pull is the default. A normal `needs_review` stays in the inbox. Do not plan
+a push for it. The owner looks at `inbox list`.
+
+Push only when all of the following are true for the chosen rule:
+
+- the event is `needs_review` with `priority: high` and a non-empty `evidence_urls`, or
+- the event is `blocked`, or
+- the event is `needs_approval`
+
+High-priority `needs_review` with an empty `evidence_urls` must not page, even
+if a rule or `--action` names a command. `blocked` and `needs_approval` may
+push without evidence, because the owner is stuck mid-task and does not open
+the worker session.
 
 Do not put tokens, signing keys, or webhook secrets in this file. Do not add
-a rule whose action is a shell pipeline. The example allowlist is
-`templates/notify.allowlist.example.json`.
+a shell pipeline. Merging and production deploy are out of scope even when
+`allow` is true.
+
+`notify dry-run` only prints the plan. `notify run` is opt-in: it starts the
+allowlisted argv with no shell, and only when `allow` is true.
 
 ## Rule: high priority page
 
 when.priority: high
 when.type: needs_review
+when.evidence_urls: nonempty
 action: curl -X POST https://hooks.example/ship
-note: Tell the human a high-priority review is waiting. Do not merge or deploy.
+note: Page only when evidence exists. Do not merge or deploy.
 
-## Rule: captain inbox
+## Rule: blocked
 
-when.type: needs_review
-action: multica inbox push
-note: Surface the packet where the captain already looks. Still no merge or deploy.
+when.type: blocked
+action: multica issue create --assignee me --title blocked
+note: Mid-task block. The owner answers in the captain thread, not in the worker session.
+
+## Rule: needs approval
+
+when.type: needs_approval
+action: multica issue create --assignee me --title needs-approval
+note: Mid-task approval. Same path as blocked: captain inbox, then the owner.
 
 ## Never
 
-- Do not treat `executed: false` as a suggestion to run the action yourself.
-- Do not widen the allowlist to `*`, to a shell, or to `sudo`.
-- Do not add a second channel that the allowlist does not already name.
+- Do not add a push rule for normal `needs_review`.
+- Do not treat a dry-run as permission to run a command the plan did not allow.
+- Do not widen the allowlist to `multica *`, `*`, a shell, or `sudo`.

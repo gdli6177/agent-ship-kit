@@ -27,7 +27,9 @@ to merge or deploy.
 
 In: `task_id`
 
-Out: one of `queued`, `running`, `needs_review`, `failed`, `cancelled`.
+Out: one of `queued`, `running`, `needs_review`, `blocked`, `needs_approval`, `failed`, `cancelled`.
+
+`blocked` and `needs_approval` come back to the captain. The captain files the inbox item. The human does not open the worker session.
 
 Translate the orchestrator's words into that set in the adapter note. Do not
 leak orchestrator-specific states into the contract card.

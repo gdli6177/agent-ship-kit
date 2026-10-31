@@ -1,4 +1,4 @@
-# Review packet
+# Review packet 待审证据包
 
 Contract id: `<contract_id>`
 Slice id: `<slice_id>`
@@ -6,21 +6,23 @@ Task id: `<source_task_id>`
 Worker ref: `<worker_ref>`
 Packet path: `.agent-ship/packets/<source_task_id>.md`
 
-The captain writes this from evidence the worker returned. The worker does
-not decide. The human decides. This packet does not merge and does not deploy.
+船长根据工人交回的证据填写。工人不做决定，人做决定。这份包不合并、不部署。
 
-## Summary
+## Summary 摘要
 
-`<what changed, in a few sentences a reviewer can check>`
+用几句人能对照 diff 核对的话写清改了什么。
 
-## Evidence
+`<what changed>`
 
-Every claim above needs a row. If a row is missing, the packet is not ready
-for `priority: high`.
+## Evidence 证据
 
-| Claim | Kind | Pointer | Result |
+上面每条主张都要有一行。没有指针的行，不能把优先级标成 `high`。
+E2E 冒烟也写进行里。不要把 storageState、cookie 或密码贴进这张表。
+
+| Claim 主张 | Kind 类型 | Pointer 指针 | Result 结果 |
 | --- | --- | --- | --- |
-| `<acceptance line>` | `<test / diff / log / screenshot>` | `<evidence url or repo path>` | `<pass / fail / not run>` |
+| `<acceptance line 验收项>` | `<test / diff / log / screenshot>` | `<evidence url or repo path>` | `<pass / fail / not run>` |
+| E2E smoke `<project>` `<environment>` | e2e | `<report path or URL，不要写 storageState>` | `<pass / fail / not run>` |
 
 Commands that were run, with exit codes:
 
@@ -33,31 +35,35 @@ Not run, and why:
 
 - `<check>` — `<reason>`
 
-## Links
+## Links 链接
 
 - PR: `<url or none>`
 - Issue: `<url or none>`
-- Branch: `<name>`
+- Branch 分支: `<name>`
 
-## Risks left open
+## Risks left open 仍开放的风险
 
-- `<risk the human should see before accepting>`
+接受之前人应该看到的风险。
 
-## Decision requested
+- `<risk>`
 
-The captain asks for one of: `accept`, `changes_requested`, `reject`.
+## Decision requested 请人决定
 
-The human's decision:
+船长只能请求 `accept`、`changes_requested` 或 `reject`。决定由人来填，或用 `inbox decide`。
 
-- Decision:
-- Notes:
+- Decision 决定:
+- Notes 备注:
 
 Accepting a packet means the evidence matches the frozen contract. It does
 not merge the branch and it does not deploy.
 
-## Inbox event
+## Inbox event 收件箱
 
-File this as `type: needs_review` (see `events/schema.json`):
+做完的切片用 `inbox add`（默认 `needs_review`）。中途卡住用 `--type blocked`，中途要拍板用 `--type needs_approval`。人不要去打开工人会话。决定用 `inbox decide <id> accept|changes_requested|reject`。`inbox list` 默认只显示还没决定的项。
+
+`priority: high` 且没有证据 URL 时，通知不会呼叫。
+
+File a finished slice as `type: needs_review` (see `events/schema.json`):
 
 ```json
 {

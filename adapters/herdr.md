@@ -7,7 +7,7 @@ task or agent-run API:
 | Kit call | On the Herdr side |
 | --- | --- |
 | `spawn` | Create one run whose prompt is the frozen slice, not the captain chat. |
-| `status` | Read that run and report `queued`, `running`, `needs_review`, `failed`, or `cancelled`. |
+| `status` | Read that run and report `queued`, `running`, `needs_review`, `blocked`, `needs_approval`, `failed`, or `cancelled`. |
 | `collect` | Return the summary, evidence URLs, and links the run actually produced. |
 
 Use Herdr's documented create and status operations. Do not invent endpoint

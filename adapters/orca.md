@@ -7,7 +7,7 @@ workflow or task API:
 | Kit call | On the Orca side |
 | --- | --- |
 | `spawn` | Start one task whose input is the frozen slice, not the captain chat. |
-| `status` | Read that task and report `queued`, `running`, `needs_review`, `failed`, or `cancelled`. |
+| `status` | Read that task and report `queued`, `running`, `needs_review`, `blocked`, `needs_approval`, `failed`, or `cancelled`. |
 | `collect` | Return the summary, evidence URLs, and links the task actually produced. |
 
 Use Orca's documented create and status operations. Do not invent endpoint

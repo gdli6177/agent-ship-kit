@@ -1,11 +1,11 @@
 # agent-ship CLI
 
-Local inbox and notify dry-run for the captain. Node 20 or newer. The only
+Local inbox and notify for the captain. Node 20 or newer. The only
 dependency is `tsx`, used to run TypeScript directly.
 
-This CLI appends JSONL under `.agent-ship/` and prints a notification plan.
-It does not start a shell, does not run the planned command, and does not
-merge or deploy.
+This CLI appends JSONL under `.agent-ship/`. `notify dry-run` prints a plan.
+`notify run` starts an allowlisted argv with no shell. It does not merge or
+deploy.
 
 ## Setup
 
@@ -30,29 +30,40 @@ npm run agent-ship -- inbox add --root .. \
   --path .agent-ship/packets/task_auth_mw.md
 
 npm run agent-ship -- inbox list --root ..
-npm run agent-ship -- inbox list --root .. --json --priority high
+npm run agent-ship -- inbox list --root .. --all --json
+
+npm run agent-ship -- inbox decide evt_<id> accept --root .. --note "Evidence matches."
 
 npm run agent-ship -- notify dry-run --root .. --latest \
   --policy ../templates/notify.policy.example.md \
   --allowlist ../templates/notify.allowlist.example.json
 ```
 
-`inbox add` prints the `needs_review` event. `notify dry-run` prints a plan
-with `executed: false`. Exit 0 means the plan was produced, including a plan
-that denies the action. Exit 1 means the arguments, policy, allowlist, or
-inbox could not be read.
+`inbox add` defaults to `needs_review`. `--type blocked` and
+`--type needs_approval` are the mid-task inbox. `inbox list` shows open items
+only; `--all` includes `review_decided` rows. `inbox decide` appends the
+decision and the item drops off the open list.
+
+`notify dry-run` prints a plan with `executed: false` and exits 0 even when
+`allow` is false. A normal review matches no push rule (pull). A high review
+with evidence matches `high priority page`. A high review with no evidence
+URLs is not paged.
+
+`notify run` uses the same flags. It executes the argv only when `allow` is
+true, with `shell: false`. A refusal exits 1 and starts nothing. `--action`
+is the captain's reading of the policy's free-text section; the allowlist
+still applies.
 
 Pass `--event file.json` instead of `--latest` to plan a specific event.
 `--help` prints the flag list.
-
-There is no `notify run` subcommand.
 
 ## Safety
 
 - Allowlist patterns are argv templates. See `docs/ARCHITECTURE.md`.
 - Shell metacharacters, shells, and `sudo` are rejected.
 - `$VARS` are not expanded, so secrets are not pulled from the environment.
-- A high-priority item with no `--evidence` is still stored, and the CLI warns on stderr. The review skill treats that as not ready to interrupt the human.
+- A high-priority `needs_review` with no `--evidence` is still stored, the CLI warns on stderr, and notify refuses to page it.
+- `blocked` and `needs_approval` may notify without evidence URLs. The example action is `multica issue create --assignee me ...`, not `multica *`.
 
 ## Tests
 
@@ -62,5 +73,6 @@ npm test
 npm run typecheck
 ```
 
-`npm test` uses `node:test` via `tsx`. The tests cover inbox append/list,
-the example policy dry-run, allowlist denials, and the CLI entrypoint.
+`npm test` uses `node:test` via `tsx`. The tests cover the open inbox,
+`inbox decide`, the pull-by-default policy, the empty-evidence refusal, and
+`notify run` against an allowlisted argv (no shell).

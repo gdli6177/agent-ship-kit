@@ -3,5 +3,9 @@ node_modules/
 .agent-ship/proposals/
 .agent-ship/contracts/
 .agent-ship/packets/
+.agent-ship/e2e/
+.agent-ship/limits.json
+playwright/.auth/
+*.storage-state.json
 *.log
 .DS_Store

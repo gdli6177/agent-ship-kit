@@ -3,7 +3,7 @@ import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
-import { addInboxItem, inboxFile, listInbox } from "../src/inbox.js";
+import { addInboxItem, decideInboxItem, inboxFile, listInbox } from "../src/inbox.js";
 
 async function withRoot(fn: (root: string) => Promise<void>): Promise<void> {
   const root = await mkdtemp(join(tmpdir(), "agent-ship-inbox-"));
@@ -45,8 +45,8 @@ test("inbox add appends a needs_review line and list reads it back", async () =>
     assert.equal(listed.length, 1);
     assert.equal(listed[0]?.source_task_id, "task_auth_mw");
 
-    const high = await listInbox(root, "high");
-    const normal = await listInbox(root, "normal");
+    const high = await listInbox(root, { priority: "high" });
+    const normal = await listInbox(root, { priority: "normal" });
     assert.equal(high.length, 1);
     assert.equal(normal.length, 0);
   });
@@ -80,5 +80,45 @@ test("inbox rejects a duplicate id and a blank title", async () => {
         }),
       /already contains/,
     );
+  });
+});
+
+test("decide closes an item so the default open list hides it", async () => {
+  await withRoot(async (root) => {
+    const blocked = await addInboxItem(root, {
+      id: "evt_blocked_login",
+      type: "blocked",
+      title: "Captcha on staging login",
+      summary: "Worker cannot continue without a test-env bypass.",
+      priority: "high",
+      sourceTaskId: "task_login",
+    });
+    const approval = await addInboxItem(root, {
+      id: "evt_need_ok",
+      type: "needs_approval",
+      title: "Touch the billing client?",
+      summary: "Slice wants to edit a path outside the contract.",
+      sourceTaskId: "task_billing",
+    });
+
+    const openBefore = await listInbox(root, { openOnly: true });
+    assert.deepEqual(
+      openBefore.map((item) => item.id),
+      [blocked.id, approval.id],
+    );
+
+    const decision = await decideInboxItem(root, blocked.id, "accept", "Use the staging bypass.");
+    assert.equal(decision.type, "review_decided");
+    assert.equal(decision.decision, "accept");
+    assert.equal(decision.subject_id, blocked.id);
+
+    const openAfter = await listInbox(root, { openOnly: true });
+    assert.deepEqual(
+      openAfter.map((item) => item.id),
+      [approval.id],
+    );
+    const all = await listInbox(root, { openOnly: false });
+    assert.equal(all.length, 3);
+    await assert.rejects(() => decideInboxItem(root, blocked.id, "reject"), /already decided/);
   });
 });

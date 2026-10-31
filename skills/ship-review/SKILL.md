@@ -12,7 +12,10 @@ The human reviews evidence. The captain files it. A worker's summary is not
 evidence until it points at something the human can open.
 
 Copy `templates/review-packet.md` to `.agent-ship/packets/<task_id>.md`.
-The event shape is `events/schema.json`, type `needs_review`.
+The event shape is `events/schema.json`. A finished slice is `needs_review`.
+Mid-task `blocked` and `needs_approval` items are filed by `ship-dispatch`,
+not as review packets. E2E smoke is an evidence row (`ship-e2e`), pointing at
+a report, never at a storageState file.
 
 ## When to use
 
@@ -41,6 +44,7 @@ From the agent-ship-kit repo:
 ```bash
 cd cli
 npm run agent-ship -- inbox add --root .. \
+  --type needs_review \
   --title "<slice> is ready for review" \
   --summary "<one paragraph>" \
   --priority normal \
@@ -50,8 +54,10 @@ npm run agent-ship -- inbox add --root .. \
   --path ".agent-ship/packets/<task id>.md"
 ```
 
-Repeat `--evidence` for each pointer. The command prints the `needs_review`
-event as JSON. Do not hand-edit `inbox.jsonl` if the CLI is available.
+Repeat `--evidence` for each pointer, including the E2E report when one ran.
+The command prints the event as JSON. Do not hand-edit `inbox.jsonl` if the
+CLI is available. `--type` is `needs_review` (the default), `blocked`, or
+`needs_approval`.
 
 If the CLI is not installed, write one JSON object with the fields required
 for `needs_review`: `id`, `type`, `title`, `summary`, `evidence_urls`,
@@ -63,9 +69,14 @@ channel this packet invented.
 
 ## Human decision
 
-Record the answer on the packet and, when you write an event by hand, as
-`type: review_decided` with `decision` set to `accept`, `changes_requested`,
-or `reject`.
+Record the answer on the packet and in the inbox:
+
+```bash
+npm run agent-ship -- inbox decide <id> accept|changes_requested|reject --root ..
+```
+
+That appends `review_decided` with `subject_id` set to the inbox item.
+`inbox list` then hides it. `inbox list --all` still shows the pair.
 
 - `accept` means the evidence matches the frozen contract. It does not merge and does not deploy. Tell the human the branch and PR are ready for whatever their repo usually requires.
 - `changes_requested` sends the notes back to the same task if the adapter can continue it. A new spawn needs the human's say-so and still uses the same frozen contract (`ship-dispatch`).

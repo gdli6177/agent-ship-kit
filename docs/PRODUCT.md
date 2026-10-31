@@ -13,9 +13,10 @@ agent-ship-kit 是并行 AI 编程交付的验收与注意力层。人从需求�
 做这些事：
 
 - 把一次需求收成方案卡（proposal），再由人冻成合同（contract）
-- 只按冻结合同派工，并遵守合同里的并行上限
-- 把待审证据包放进本地收件箱（`needs_review` 事件）
-- 用策略和允许列表做通知演练（dry-run），让人看见将会触达什么
+- 只按冻结合同派工。本合同有 `max_parallel`，所有合同加在一起还有全局上限，默认都是 3
+- 把待审、卡住、中途要拍板放进本地收件箱（`needs_review`、`blocked`、`needs_approval`）
+- 普通待审默认拉取：人看收件箱，不推送。只有带证据的高优先级，或 `blocked` / `needs_approval`，才推送
+- 用策略和允许列表做通知。`notify dry-run` 只打印计划；`notify run` 在 `allow: true` 时按 argv 执行，不经过 shell
 
 不做这些事：
 
@@ -23,8 +24,8 @@ agent-ship-kit 是并行 AI 编程交付的验收与注意力层。人从需求�
 - 不自动合并到 main，也不代人按合并按钮
 - 不自动部署到生产
 - 不托管模型运行时
-- 不保存密钥，不执行允许列表之外的命令
-- v0 连允许列表之内的命令也不执行，只打印计划
+- 不保存密钥，不执行允许列表之外的命令，不把密码、cookie 或 storageState 写进仓库、技能或对话
+- 生产环境的端到端验收只做只读冒烟。登录态由人在浏览器里导出，会话过期就重新导出
 
 ## 形态
 
@@ -35,15 +36,17 @@ agent-ship-kit 是并行 AI 编程交付的验收与注意力层。人从需求�
 | 适配器 | 把 `spawn` / `status` / `collect` 翻译成具体编排器的调用。见 `adapters/` |
 | 方案卡与合同 | `templates/proposal-card.md`、`templates/contract-card.md`。冻结合同不可就地修改 |
 | 证据包 | `templates/review-packet.md`。主张必须带可打开的指针 |
-| 收件箱 | `.agent-ship/inbox.jsonl`，一行一个 `needs_review` 事件 |
-| 通知 | 策略 Markdown + 允许列表。决策步骤在 v0 是规则解析，不是模型调用 |
+| 收件箱 | `.agent-ship/inbox.jsonl`。`inbox list` 默认只显示还没 `inbox decide` 的项 |
+| 通知 | 策略里有给人读的自由文本，也有 CLI 解析的规则。允许列表始终生效 |
+| 端到端登录 | 每个项目一份 Playwright `auth.setup.ts`，冒烟复用 gitignore 的 storageState。见 `templates/e2e.md` |
 
-技能四份，复制到代理的 skill 目录即可用：
+技能五份，复制到代理的 skill 目录即可用：
 
-- `ship-contract`：方案卡到冻结合同
-- `ship-dispatch`：派工门禁和并行上限
-- `ship-review`：待审证据包和收件箱事件
-- `ship-notify`：可配置触达，先 dry-run
+- `ship-contract`：讨论模式维护一张方案卡，人冻结后才是合同。卡上写明允许路径和禁止路径
+- `ship-dispatch`：派工门禁、合同并行上限、全局并行上限。工人要拍板时只回给船长
+- `ship-review`：待审证据包。E2E 结果写进证据行
+- `ship-notify`：默认为拉取；推送要过允许列表。可选 `notify run`
+- `ship-e2e`：共享登录、测试账号前提、生产只读冒烟
 
 ## 船长体验
 
@@ -51,10 +54,11 @@ agent-ship-kit 是并行 AI 编程交付的验收与注意力层。人从需求�
 
 船长可以做的：
 
-- 起草和修改方案卡
-- 建议怎么切片、并行度设多少（不能高于人同意的上限；模板默认 3）
-- 人冻结之后，按适配器派工
-- 把工人交回的证据整理成待审包，写入收件箱，并给出通知计划
+- 在讨论模式里和人把需求谈清楚。同一时间只摆一张方案卡，每轮写「本轮变更」
+- 建议怎么切片。合同内 `max_parallel` 和全局工人数默认都不超过 3，船长不自行提高
+- 人冻结之后，按适配器派工。工人提示词带上允许路径和禁止路径
+- 工人卡住或需要中途决定时，船长写入 `blocked` / `needs_approval`。人不用打开工人会话
+- 把证据（含 E2E 报告指针）整理成待审包。普通项留在收件箱里等人来看
 
 船长不能代劳的：
 
@@ -62,25 +66,27 @@ agent-ship-kit 是并行 AI 编程交付的验收与注意力层。人从需求�
 2. **审证据包。** 接受、退回修改、拒绝，都由人决定。工人说“测试过了”但没有指针，不算审完。
 3. **批准合并或发布。** 接受证据只表示证据符合冻结合同。合并到 main、打标签、部署生产，用人自己的工具完成。本仓库没有这条自动化路径。
 
-工人看不到整段船长对话，也拿不到密钥。工人只拿到已经冻结的那一个切片，以及这个切片要交的验收项。不需要事先创建一组常驻工人；没有切片，就没有工人。
+工人看不到整段船长对话，也拿不到密钥。工人只拿到已经冻结的那一个切片、它的验收项，以及允许/禁止路径。不需要事先创建一组常驻工人；没有切片，就没有工人。所有合同同时跑着的工人默认不超过 3 个。
 
 ## 使用场景
 
 1. **一个人同时推进多条独立改动。** 主对话只留船长。每条改动一份冻结合同，各自一个工人，证据回到同一个收件箱。
 2. **团队已经在用 Herdr、Orca 或 Multica。** 不换编排器。适配器只翻译开工、查状态、收回证据。编排器上的合并和发布按钮仍然给人用。
 3. **没有编排器。** 按 `adapters/generic.md` 的无编排器路径，每份冻结合同另开一个代理会话。收件箱和通知演练照常可用，这就是 README 里的 Quickstart。
-4. **高优先级待审需要打断人。** 策略把 `priority: high` 映到一条允许列表里的命令，先 dry-run。演练结果不是执行，更不是发布。
+4. **高优先级待审需要打断人。** 必须带非空 `evidence_urls`。没有证据时 CLI 拒绝呼叫。普通待审不推送。
+5. **工人做到一半要人拍板。** 这是收件箱要解决的事：`needs_approval` 或 `blocked` 回到船长，人用 `inbox decide` 答复。
+6. **登录后的短冒烟。** 测试环境用专用测试账号，一次登录保存 storageState。生产只读，登录态由人亲手导出，过期再导出。密码不进 git，也不进对话。
 
 ## 一次交付怎么走
 
-完整约定在 `templates/e2e-conventions.md`。压缩成十步：澄清需求、写方案卡、人冻结、按上限派工、工人交证据、船长写证据包并 `inbox add`、`notify dry-run`、人做决定、若要改合同则新开合同号、人自己合并或发布。
+流程在 `templates/workflow.md`。登录和冒烟在 `templates/e2e.md`、`templates/e2e-testing.md`。压缩起来是：讨论并维持一张方案卡、人冻结、在两道并行上限内派工、中途问题进收件箱、证据（含 E2E）写成待审包、普通项拉取、需要推送时先 dry-run 再按允许列表 `notify run`、`inbox decide`、人自己合并或发布。
 
-状态词：方案是 `draft`；合同是 `frozen`；工人是 `queued`、`running`、`needs_review`、`failed`、`cancelled`；人的决定是 `accept`、`changes_requested`、`reject`。`accept` 不是合并。
+状态词：方案是 `draft`（旧稿是 `superseded`）；合同是 `frozen`；工人是 `queued`、`running`、`needs_review`、`blocked`、`needs_approval`、`failed`、`cancelled`；人的决定是 `accept`、`changes_requested`、`reject`。`accept` 不是合并。
 
 ## v0 里有什么
 
-- 四份技能、六份模板、事件 schema、适配器说明
-- 一个本地 CLI：`inbox add`、`inbox list`、`notify dry-run`
-- 示例策略和示例允许列表，里面没有真实密钥，示例地址是 `hooks.example`
+- 五份技能、方案/合同/证据包（带中文提示）、交付流程、E2E 索引和测试说明、事件 schema、适配器说明
+- 一个本地 CLI：`inbox add`（含 `--type`）、`inbox list`（默认只看未决项）、`inbox decide`、`notify dry-run`、`notify run`
+- 示例策略和示例允许列表。推送示例是 `multica issue create --assignee me …` 和一条 `hooks.example` 的 curl。没有真实密钥
 
 事件字段以 `events/schema.json` 为准，行为细节在 `docs/ARCHITECTURE.md`。

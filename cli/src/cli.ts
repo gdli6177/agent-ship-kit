@@ -1,8 +1,16 @@
 import { readFile } from "node:fs/promises";
 import { pathToFileURL } from "node:url";
-import { addInboxItem, assertPriority, listInbox } from "./inbox.js";
+import {
+  addInboxItem,
+  assertAttentionType,
+  assertDecision,
+  assertPriority,
+  decideInboxItem,
+  listInbox,
+} from "./inbox.js";
 import { loadAllowlistFile, loadPolicyFile, planNotification, type NotifyEvent } from "./notify.js";
-import type { EventLinks, NeedsReviewEvent, Priority } from "./types.js";
+import { executeArgv } from "./run.js";
+import type { AttentionType, EventLinks, InboxRecord, Priority } from "./types.js";
 
 export interface Io {
   stdout: (chunk: string) => void;
@@ -18,19 +26,28 @@ const defaultIo: Io = {
   },
 };
 
-const USAGE = `agent-ship — local inbox and notify dry-run
+const USAGE = `agent-ship — local inbox and notify
 
 Usage:
   agent-ship inbox add --title TEXT --summary TEXT --source-task-id ID
+                       [--type needs_review|blocked|needs_approval]
                        [--priority normal|high] [--evidence URL ...]
                        [--pr URL] [--issue URL] [--path PATH]
                        [--id evt_...] [--root DIR]
-  agent-ship inbox list [--priority normal|high] [--json] [--root DIR]
+  agent-ship inbox list [--type TYPE] [--priority normal|high]
+                       [--all] [--json] [--root DIR]
+  agent-ship inbox decide ID accept|changes_requested|reject
+                       [--note TEXT] [--root DIR]
   agent-ship notify dry-run --policy FILE --allowlist FILE
-                       (--latest | --event FILE) [--root DIR]
+                       (--latest | --event FILE) [--action ARGV] [--root DIR]
+  agent-ship notify run --policy FILE --allowlist FILE
+                       (--latest | --event FILE) [--action ARGV] [--root DIR]
 
 The inbox is <root>/.agent-ship/inbox.jsonl (root defaults to the working directory).
-notify dry-run prints a plan and does not start a command. There is no execute command.
+inbox list shows open items unless --all is set.
+notify dry-run prints a plan and does not start a command.
+notify run starts the allowlisted argv with no shell, and only when the plan allows it.
+A high-priority needs_review with no evidence URLs is not paged.
 `;
 
 const VALUE_OPTIONS = new Set([
@@ -47,9 +64,12 @@ const VALUE_OPTIONS = new Set([
   "policy",
   "allowlist",
   "event",
+  "type",
+  "note",
+  "action",
 ]);
 const REPEATABLE = new Set(["evidence"]);
-const BOOL_FLAGS = new Set(["json", "latest", "help"]);
+const BOOL_FLAGS = new Set(["json", "latest", "help", "all"]);
 
 interface ParsedArgs {
   positionals: string[];
@@ -115,15 +135,16 @@ function requireOne(values: Map<string, string[]>, name: string): string {
   return value;
 }
 
-function formatRow(priority: string, created: string, id: string, title: string): string {
-  return `${priority.padEnd(8)}  ${created.padEnd(24)}  ${id.padEnd(28)}  ${title}`;
+function formatRow(type: string, priority: string, id: string, title: string): string {
+  return `${type.padEnd(16)}  ${priority.padEnd(8)}  ${id.padEnd(28)}  ${title}`;
 }
 
-function formatList(items: NeedsReviewEvent[]): string {
+function formatList(items: readonly InboxRecord[]): string {
   if (items.length === 0) return "inbox empty\n";
-  const lines = [formatRow("priority", "created_at", "id", "title")];
+  const lines = [formatRow("type", "priority", "id", "title")];
   for (const item of items) {
-    lines.push(formatRow(item.priority, item.created_at, item.id, item.title));
+    const priority = item.type === "review_decided" ? "-" : item.priority;
+    lines.push(formatRow(item.type, priority, item.id, item.title));
   }
   return `${lines.join("\n")}\n`;
 }
@@ -156,7 +177,10 @@ async function inboxAdd(parsed: ParsedArgs, io: Io): Promise<number> {
   if (path) links.path = path;
 
   const evidence = parsed.values.get("evidence") ?? [];
+  const typeText = one(parsed.values, "type");
+  const type: AttentionType | undefined = typeText === undefined ? undefined : assertAttentionType(typeText);
   const event = await addInboxItem(root, {
+    type,
     title: requireOne(parsed.values, "title"),
     summary: requireOne(parsed.values, "summary"),
     sourceTaskId: requireOne(parsed.values, "source-task-id"),
@@ -165,8 +189,8 @@ async function inboxAdd(parsed: ParsedArgs, io: Io): Promise<number> {
     links,
     id: one(parsed.values, "id"),
   });
-  if (event.priority === "high" && event.evidence_urls.length === 0) {
-    io.stderr("warning: high priority needs_review has no evidence URLs\n");
+  if (event.type === "needs_review" && event.priority === "high" && event.evidence_urls.length === 0) {
+    io.stderr("warning: high priority needs_review has no evidence URLs and will not be paged\n");
   }
   io.stdout(`${JSON.stringify(event, null, 2)}\n`);
   return 0;
@@ -175,8 +199,14 @@ async function inboxAdd(parsed: ParsedArgs, io: Io): Promise<number> {
 async function inboxList(parsed: ParsedArgs, io: Io): Promise<number> {
   const priorityText = one(parsed.values, "priority");
   const priority = priorityText === undefined ? undefined : assertPriority(priorityText);
+  const typeText = one(parsed.values, "type");
+  const type = typeText === undefined ? undefined : typeText === "review_decided" ? typeText : assertAttentionType(typeText);
   const root = one(parsed.values, "root") ?? process.cwd();
-  const items = await listInbox(root, priority);
+  const items = await listInbox(root, {
+    priority,
+    type,
+    openOnly: !parsed.flags.has("all"),
+  });
   if (parsed.flags.has("json")) {
     io.stdout(`${JSON.stringify(items, null, 2)}\n`);
     return 0;
@@ -185,31 +215,63 @@ async function inboxList(parsed: ParsedArgs, io: Io): Promise<number> {
   return 0;
 }
 
-async function notifyDryRun(parsed: ParsedArgs, io: Io): Promise<number> {
+async function inboxDecide(parsed: ParsedArgs, io: Io): Promise<number> {
+  const subjectId = parsed.positionals[2];
+  const decisionText = parsed.positionals[3];
+  if (!subjectId || !decisionText) {
+    throw new Error("usage: inbox decide <id> accept|changes_requested|reject");
+  }
   const root = one(parsed.values, "root") ?? process.cwd();
-  const policyPath = requireOne(parsed.values, "policy");
-  const allowlistPath = requireOne(parsed.values, "allowlist");
+  const event = await decideInboxItem(root, subjectId, assertDecision(decisionText), one(parsed.values, "note"));
+  io.stdout(`${JSON.stringify(event, null, 2)}\n`);
+  return 0;
+}
+
+async function resolveNotifyEvent(parsed: ParsedArgs): Promise<NotifyEvent> {
+  const root = one(parsed.values, "root") ?? process.cwd();
   const eventPath = one(parsed.values, "event")?.trim();
   const latest = parsed.flags.has("latest");
   if (latest === Boolean(eventPath)) {
     throw new Error("pass exactly one of --latest or --event FILE");
   }
-
-  let event: NotifyEvent;
-  if (eventPath) {
-    event = await readEventFile(eventPath);
-  } else {
-    const items = await listInbox(root);
-    const newest = items[items.length - 1];
-    if (!newest) throw new Error("inbox is empty; add an item or pass --event");
-    event = newest;
+  if (eventPath) return readEventFile(eventPath);
+  const items = await listInbox(root, { openOnly: true });
+  const newest = items[items.length - 1];
+  if (!newest || newest.type === "review_decided") {
+    throw new Error("inbox has no open item; add one or pass --event");
   }
+  return newest;
+}
 
+async function notifyCommand(parsed: ParsedArgs, io: Io, execute: boolean): Promise<number> {
+  const policyPath = requireOne(parsed.values, "policy");
+  const allowlistPath = requireOne(parsed.values, "allowlist");
+  const event = await resolveNotifyEvent(parsed);
   const rules = await loadPolicyFile(policyPath);
   const allowlist = await loadAllowlistFile(allowlistPath);
-  const plan = planNotification(event, rules, allowlist);
-  io.stdout(`${JSON.stringify(plan, null, 2)}\n`);
-  return 0;
+  const plan = planNotification(event, rules, allowlist, one(parsed.values, "action"));
+
+  if (!execute) {
+    io.stdout(`${JSON.stringify(plan, null, 2)}\n`);
+    return 0;
+  }
+
+  if (!plan.allow || !plan.argv) {
+    io.stdout(
+      `${JSON.stringify({ ...plan, mode: "run", executed: false, exit_code: null }, null, 2)}\n`,
+    );
+    return 1;
+  }
+
+  const exitCode = await executeArgv(plan.argv, io);
+  const result = {
+    ...plan,
+    mode: "run" as const,
+    executed: exitCode === 0,
+    exit_code: exitCode,
+  };
+  io.stderr(`${JSON.stringify(result, null, 2)}\n`);
+  return exitCode === 0 ? 0 : exitCode;
 }
 
 export async function main(argv: string[], io: Io = defaultIo): Promise<number> {
@@ -231,7 +293,9 @@ export async function main(argv: string[], io: Io = defaultIo): Promise<number> 
   try {
     if (group === "inbox" && sub === "add") return await inboxAdd(parsed, io);
     if (group === "inbox" && sub === "list") return await inboxList(parsed, io);
-    if (group === "notify" && sub === "dry-run") return await notifyDryRun(parsed, io);
+    if (group === "inbox" && sub === "decide") return await inboxDecide(parsed, io);
+    if (group === "notify" && sub === "dry-run") return await notifyCommand(parsed, io, false);
+    if (group === "notify" && sub === "run") return await notifyCommand(parsed, io, true);
   } catch (error) {
     io.stderr(`${error instanceof Error ? error.message : String(error)}\n`);
     return 1;

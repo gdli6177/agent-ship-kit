@@ -37,13 +37,20 @@ flowchart LR
    (`skills/ship-contract`).
 2. The human freezes a contract. Until that happens there is nothing to spawn.
 3. The captain dispatches one worker per slice, through the adapter, without
-   exceeding `max_parallel` (`skills/ship-dispatch`).
-4. The worker returns evidence. The captain writes a review packet and a
-   `needs_review` inbox line (`skills/ship-review`).
-5. The notify planner matches that event to a policy rule and an allowlist,
-   and prints a plan. It does not start the command (`skills/ship-notify`).
-6. The human accepts, requests changes, or rejects. Accepting is not a merge.
-   The human ships with their own tools.
+   exceeding the contract's `max_parallel` or the global cap of 3
+   (`skills/ship-dispatch`, `templates/workflow.md`).
+4. If the worker is blocked or needs a mid-task decision, it returns that to
+   the captain. The captain files `blocked` or `needs_approval`. The human
+   does not open the worker session.
+5. The worker returns evidence. The captain writes a review packet, including
+   E2E rows when smoke ran, and a `needs_review` inbox line (`skills/ship-review`,
+   `skills/ship-e2e`).
+6. Normal inbox items are pull. The notify planner pushes only for a
+   high-priority review that has evidence, or for `blocked` / `needs_approval`.
+   `notify dry-run` prints the plan. `notify run` may start that argv with no
+   shell (`skills/ship-notify`).
+7. The human accepts, requests changes, or rejects with `inbox decide`.
+   Accepting is not a merge. The human ships with their own tools.
 
 Workers are not a roster. No slice, no worker. The worker's prompt is the
 frozen slice, not the captain transcript.
@@ -69,20 +76,29 @@ Types:
 | `contract_frozen` | The human froze a contract | — |
 | `worker_dispatched` | Adapter `spawn` returned | — |
 | `needs_review` | A packet is waiting | `evidence_urls`, `priority`, `links` |
-| `review_decided` | The human decided | `decision`: `accept`, `changes_requested`, or `reject` |
-| `notify_planned` | A dry-run was shown | — |
+| `blocked` | The worker cannot continue | `priority` |
+| `needs_approval` | The worker needs a mid-task decision | `priority` |
+| `review_decided` | The human decided, closing one inbox item | `decision`, `subject_id` |
+| `notify_planned` | A plan was shown | — |
 
-`needs_review` is the attention event. Its fields:
+`needs_review`, `blocked`, and `needs_approval` are attention events. The inbox
+stores them. `inbox list` shows the ones that do not yet have a
+`review_decided` row whose `subject_id` is that item. `inbox list --all`
+shows the log, including decisions.
 
-- `evidence_urls` — array of strings. May be empty only as an explicit draft; `priority: high` should not be empty. The CLI warns in that case.
-- `priority` — `normal` or `high`.
+`needs_review` fields:
+
+- `evidence_urls` — array of strings. May be empty only as an explicit draft. `priority: high` with an empty array is not paged. The CLI warns on add and the planner sets `missing_evidence` (or matches no push rule).
+- `priority` — `normal` or `high`. Normal items are pull: no push rule in the example policy.
 - `links` — object with optional `pr`, `issue`, and `path`. The object is required; each key is optional.
+
+`blocked` and `needs_approval` carry `priority` and the same envelope. They may
+push without evidence URLs, because the owner is stuck and does not open the
+worker session.
 
 Optional cross-links on any type: `proposal_id`, `contract_id`, `slice_id`, `worker_ref`, `note`. Unknown keys are rejected by the schema (`additionalProperties: false`).
 
-The inbox CLI writes `needs_review` only. Other types are recorded by the captain in the packet or the contract log in v0; they share the schema so a later log can store them as JSONL too.
-
-An event does not authorize a merge or a deploy. `review_decided` with `accept` records that the evidence matched the contract.
+`inbox add --type` writes the three attention types. `inbox decide <id> accept|changes_requested|reject` appends `review_decided`. An event does not authorize a merge or a deploy. `accept` records that the evidence matched the contract, or that the owner answered an escalation.
 
 ## Storage
 
@@ -98,13 +114,13 @@ the directory, refuses a duplicate `id`, and refuses a priority other than
 `normal` or `high`. Runtime files are gitignored. Templates in `templates/`
 are the blanks.
 
-Conventions for ids, branch names, and freeze phrases: `templates/e2e-conventions.md`.
+Conventions for ids, branch names, freeze phrases, and the global worker cap: `templates/workflow.md`. Login and smoke tests: `templates/e2e.md` and `templates/e2e-testing.md`.
 
 ## Adapters
 
 ```text
 spawn(contract_path, slice_id, prompt) -> task_id, worker_ref
-status(task_id) -> queued | running | needs_review | failed | cancelled
+status(task_id) -> queued | running | needs_review | blocked | needs_approval | failed | cancelled
 collect(task_id) -> summary, evidence_urls, links
 ```
 
@@ -114,8 +130,9 @@ those products. v0 does not contain their clients and does not invent their
 HTTP paths.
 
 `spawn` fails closed when the contract is not `frozen`. None of the three
-calls merge or deploy. The example allowlist pattern `multica *` is a notify
-target, not a `spawn` implementation; see `adapters/multica.md`.
+calls merge or deploy. The example allowlist pattern
+`multica issue create --assignee me *` is a notify target, not a `spawn`
+implementation; see `adapters/multica.md`.
 
 With no orchestrator, `spawn` is one new agent session per slice. The human
 still speaks only to the captain.
@@ -123,7 +140,13 @@ still speaks only to the captain.
 ## Notify
 
 v0's decision step is a rule parser, not a model call. The policy markdown
-can still carry prose for the captain; the parser reads only `## Rule:` blocks.
+can still carry a free-text Instructions section. The parser ignores it and
+reads only `## Rule:` blocks. The captain may turn that prose into an argv and
+pass `--action`. The allowlist and the empty-evidence refusal still apply.
+
+Pull is the default. The example policy has no push rule for a normal
+`needs_review`. Push rules exist for high-priority reviews that have evidence,
+and for `blocked` and `needs_approval`.
 
 A rule:
 
@@ -132,17 +155,24 @@ A rule:
 
 when.priority: high
 when.type: needs_review
+when.evidence_urls: nonempty
 action: curl -X POST https://hooks.example/ship
-note: Tell the human. Do not merge or deploy.
+note: Page only when evidence exists. Do not merge or deploy.
 ```
 
-- Conditions that exist today: `when.type`, `when.priority`, `when.source_task_id`. An unknown `when.*` key is an error.
-- Every `when.` line must match (string equality on the event). A rule with no conditions is an error.
-- The first matching rule wins.
+- Conditions: `when.type`, `when.priority`, `when.source_task_id`, and `when.evidence_urls` (`nonempty` or `empty`). An unknown `when.*` key is an error.
+- Every `when.` line must match. A rule with no conditions is an error.
+- The first matching rule wins. `--action` replaces the matched action with the captain's argv and labels the rule `captain action`.
 - `action` is one line of whitespace-separated argv. No quoting.
+- If `priority` is `high`, the type is not `blocked` or `needs_approval`, and `evidence_urls` is missing or empty, the plan is `missing_evidence` with `allow: false` even when a looser rule would have matched.
 
-The planner in `cli/src/notify.ts` then classifies that argv. `executed` is
-always `false`. There is no execute subcommand.
+`notify dry-run` prints the plan and does not start a process. `executed` on
+that plan is false. Exit 0 means the plan was produced, including a denial.
+
+`notify run` is opt-in. It prints a refusal and exits 1 when `allow` is false.
+When `allow` is true it starts that argv from `cli/src/run.ts` with
+`shell: false` and no environment expansion, then records the child's exit
+code. It does not merge or deploy.
 
 ### Allow and deny reasons
 
@@ -150,27 +180,28 @@ always `false`. There is no execute subcommand.
 | --- | --- |
 | `allowlisted` | `allow: true`. A pattern matched the full argv. |
 | `not_allowlisted` | A rule matched and the argv is ordinary, but no pattern fits. |
-| `no_matching_rule` | No rule's conditions matched. |
+| `no_matching_rule` | No rule's conditions matched. This is the pull outcome for a normal review. |
+| `missing_evidence` | A high-priority page was selected but `evidence_urls` is empty. `allow` is false and argv is null. |
 | `shell_metacharacter` | The action contains a semicolon, ampersand, pipe, backtick, dollar sign, angle bracket, backslash, carriage return, newline, or NUL. Argv is null. |
 | `shell_interpreter` | The program is a shell, `eval`, `busybox`, or `sudo` (basename, case-insensitive, optional path prefix). |
 | `empty_action` | The action had no tokens. |
 
 ### Allowlist patterns
 
-The file is JSON: `{ "patterns": ["multica *", "curl -X POST https://hooks.example/*"] }`. Extra keys such as `version` are ignored.
+The file is JSON: `{ "patterns": ["multica issue create --assignee me *", "curl -X POST https://hooks.example/*"] }`. Extra keys such as `version` are ignored. Prefer an exact subcommand over a broad `multica *`.
 
 Matching rules, implemented by `validatePattern` and `matchPattern`:
 
 - The pattern is split on whitespace.
 - The first token is a literal program name matching `[A-Za-z0-9._+/-]+`. It must not contain `*`.
-- A token that is exactly `*` matches one argument. If that token is last, it matches one or more remaining arguments. `multica` alone does not match `multica *`. `multica inbox push` does.
+- A token that is exactly `*` matches one argument. If that token is last, it matches one or more remaining arguments. `multica issue create --assignee me` does not match `multica issue create --assignee me *`. `multica issue create --assignee me --title blocked` does. `multica inbox push` does not.
 - A token ending in a single `*` with a non-empty prefix matches one argument that starts with that prefix. `https://hooks.example/*` matches `https://hooks.example/ship` and does not match `https://hooks.example.evil/ship`.
 - The whole argv must be consumed. An extra argument that the pattern did not account for does not match.
 - The loader rejects shell metacharacters in a pattern, a leading `*`, more than one `*` in a token, a `*` that is not a suffix, an empty pattern list, and non-string patterns.
 - The loader rejects program names whose basename is a shell, `eval`, `busybox`, or `sudo`.
 - The loader rejects a wildcard pattern whose program is `node`, `nodejs`, `deno`, `bun`, `python`, `python3`, `perl`, `ruby`, or `php`.
 
-Denied plans are still successful dry-runs: the process exits 0 and the JSON says `allow: false`. Missing files, a broken policy, or a broken allowlist exit 1.
+Denied dry-runs still exit 0: the JSON says `allow: false`. `notify run` on a denied plan exits 1 and does not spawn. Missing files, a broken policy, or a broken allowlist exit 1.
 
 Environment variables are not expanded, so a secret cannot be pulled into the plan by writing `$TOKEN`. The `$` is rejected first.
 
@@ -179,13 +210,13 @@ Environment variables are not expanded, so a secret cannot be pulled into the pl
 1. The human has one captain conversation from intake through ship.
 2. Workers are spawned per frozen contract slice. No standing roster is required.
 3. The human freezes contracts, reviews packets, and is the one who merges or ships.
-4. Notify never starts a shell. v0 never starts the allowlisted program either.
+4. Notify never starts a shell. `notify run` starts only an allowlisted argv, with `shell: false`, and refuses a high-priority page that has no evidence.
 5. No secrets in the repo, the cards, the events, or the policy files.
 6. Adapters are replaceable. The event and the contract card are not.
 
 ## What v0 leaves out
 
-- A real `notify run` that would `spawn` an allowlisted argv with `shell: false`.
-- Executable Herdr, Orca, or Multica bindings.
+- Executable Herdr, Orca, or Multica clients. `notify run` can start an allowlisted `multica issue create ...` argv; it does not implement Multica.
+- A Playwright suite inside this repo. `ship-e2e` is the procedure the captain copies into the project under test.
 - A model call inside the notify decision step. The markdown is ready for a later captain to read; the CLI does not need one.
 - Hosting model runtimes, multi-agent scheduling, auto-merge, and production deploy.

@@ -28,30 +28,43 @@ keep the same fields. Do not invent a second card format.
 - A frozen contract already covers the slice and its text is not changing. Use `ship-dispatch`.
 - The ask is to merge, release, or deploy. Refuse. This kit does not do those.
 
+## Discussion mode
+
+While the card is `draft`, talk freely. Do not treat the conversation as a
+freeze, and do not spawn a worker.
+
+- Keep exactly one current proposal. Alternatives go in "Other options" on
+  that card. If an older draft exists, set it to `superseded` and stop
+  showing it as a choice.
+- After every human turn that changes scope, acceptance, allowed paths,
+  forbidden paths, or slices, update the card in place and add a line under
+  "What changed 本轮变更" saying what moved since the previous draft.
+- Show that one card (or the delta plus the file path). Do not lay two
+  proposals side by side and ask the human to pick a file.
+- If acceptance or either path list is still vague, ask one question and
+  wait. Do not paper over it.
+
 ## Procedure
 
-1. Restate the ask in one paragraph. If you cannot name a check that someone
-   else could run, ask one question and stop. Do not paper over it with a vague
-   acceptance line.
-2. Copy `templates/proposal-card.md` to `.agent-ship/proposals/<proposal_id>.md`.
-   Status stays `draft`. Fill every section. Put merge and production deploy
-   in the out-of-scope list even if the human did not mention them.
-3. Show the card in the captain thread. List open questions. Do not spawn a
-   worker while any question would change acceptance, scope, or `max_parallel`.
-4. Revise the draft in place while it is still a proposal. Say what changed.
-5. Freeze only on an explicit human decision that names this proposal:
+1. Copy `templates/proposal-card.md` to `.agent-ship/proposals/<proposal_id>.md`
+   on the first drafting turn. Status stays `draft`. Fill Allowed paths and
+   Forbidden paths. Put merge and production deploy in the out-of-scope list
+   even if the human did not mention them.
+2. Stay in discussion mode until the human freezes.
+3. Freeze only on an explicit human decision that names this proposal:
    "freeze", "冻结合同", or a sentence that accepts this exact text.
    These do not freeze a contract: silence, "looks good" with no proposal id,
    the captain deciding for itself, a worker, or another agent.
-6. On freeze, copy the accepted text into
+4. On freeze, copy the accepted text into
    `.agent-ship/contracts/<contract_id>.md` using `templates/contract-card.md`.
-   Set status to `frozen`, record who froze it and when, and set
-   `max_parallel` (the template default is 3; use a lower number if the human
-   asked; never pick a higher one yourself).
-7. Split the work into slices. One slice is one worker. Each slice lists the
+   Set status to `frozen`, record who froze it and when, and copy Allowed
+   paths and Forbidden paths. Set `max_parallel` (the template default is 3;
+   use a lower number if the human asked; never pick a higher one, and never
+   higher than the global cap in `templates/workflow.md`).
+5. Split the work into slices. One slice is one worker. Each slice lists the
    inputs that worker may see and the acceptance lines it owns.
-8. Leave the dispatch log empty. `ship-dispatch` appends to it.
-9. Tell the human the contract id and that workers have not been started.
+6. Leave the dispatch log empty. `ship-dispatch` appends to it.
+7. Tell the human the contract id and that workers have not been started.
 
 ## Immutability
 
@@ -61,8 +74,10 @@ the old contract until the human says to stop them.
 
 ## Worker boundary, written into the contract
 
-The worker prompt is the slice plus its acceptance lines. It does not include
-the captain transcript, secrets, or any instruction to merge or deploy.
+The worker prompt is the slice, the acceptance lines it owns, and the Allowed
+paths and Forbidden paths copied verbatim. It does not include the captain
+transcript, secrets, or any instruction to merge or deploy. Empty path lists
+are not ready to freeze.
 
 ## Handoff
 

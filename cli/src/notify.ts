@@ -13,6 +13,7 @@ export interface NotifyEvent {
   summary?: string;
   priority?: string;
   source_task_id?: string;
+  evidence_urls?: string[];
 }
 
 export interface NotifyRule {
@@ -39,13 +40,15 @@ export interface NotifyPlan {
     | "shell_metacharacter"
     | "shell_interpreter"
     | "empty_action"
+    | "missing_evidence"
     | "not_allowlisted"
     | "allowlisted";
   pattern: string | null;
   note: string | null;
 }
 
-const WHEN_KEYS = new Set(["type", "priority", "source_task_id"]);
+const WHEN_KEYS = new Set(["type", "priority", "source_task_id", "evidence_urls"]);
+const EVIDENCE_CONDITIONS = new Set(["nonempty", "empty"]);
 
 /** Characters that would matter if a shell interpreted the action. */
 const SHELL_META = /[;&|`$<>\\\n\r\0]/;
@@ -144,6 +147,9 @@ export function parsePolicy(markdown: string): NotifyRule[] {
     if (!WHEN_KEYS.has(whenKey)) {
       throw new Error(`rule "${current.name}" has unknown condition ${key}`);
     }
+    if (whenKey === "evidence_urls" && !EVIDENCE_CONDITIONS.has(value)) {
+      throw new Error(`rule "${current.name}" when.evidence_urls must be nonempty or empty`);
+    }
     current.when[whenKey] = value;
   }
 
@@ -235,6 +241,34 @@ export function matchPattern(argv: string[], pattern: string): boolean {
   return index === argv.length;
 }
 
+function evidenceNonEmpty(event: NotifyEvent): boolean {
+  return Array.isArray(event.evidence_urls) && event.evidence_urls.length > 0;
+}
+
+function conditionMatches(event: NotifyEvent, key: string, expected: string): boolean {
+  if (key === "evidence_urls") {
+    return expected === "nonempty" ? evidenceNonEmpty(event) : !evidenceNonEmpty(event);
+  }
+  const actual = (event as unknown as Record<string, unknown>)[key];
+  return actual === expected;
+}
+
+/** High-priority paging requires evidence. blocked and needs_approval may still push. */
+export function refusesHighPriorityPage(event: NotifyEvent): boolean {
+  if (event.priority !== "high") return false;
+  if (event.type === "blocked" || event.type === "needs_approval") return false;
+  return !evidenceNonEmpty(event);
+}
+
+export function assertDirectArgv(argv: readonly string[]): void {
+  const program = argv[0];
+  if (!program) throw new Error("empty argv");
+  for (const token of argv) {
+    if (SHELL_META.test(token)) throw new Error("shell_metacharacter");
+  }
+  if (SHELL_PROGRAMS.has(programBase(program))) throw new Error("shell_interpreter");
+}
+
 function unmatched(eventId: string): NotifyPlan {
   return {
     mode: "dry-run",
@@ -250,13 +284,23 @@ function unmatched(eventId: string): NotifyPlan {
   };
 }
 
-export function planNotification(event: NotifyEvent, rules: NotifyRule[], allowlist: Allowlist): NotifyPlan {
-  const rule = rules.find((candidate) =>
-    Object.entries(candidate.when).every(([key, expected]) => {
-      const actual = (event as unknown as Record<string, unknown>)[key];
-      return actual === expected;
-    }),
-  );
+export function planNotification(
+  event: NotifyEvent,
+  rules: NotifyRule[],
+  allowlist: Allowlist,
+  actionOverride?: string,
+): NotifyPlan {
+  const rule =
+    actionOverride !== undefined
+      ? {
+          name: "captain action",
+          when: {},
+          action: actionOverride,
+          note: "Planned from the policy free-text section. The allowlist still applies.",
+        }
+      : rules.find((candidate) =>
+          Object.entries(candidate.when).every(([key, expected]) => conditionMatches(event, key, expected)),
+        );
   if (!rule) return unmatched(event.id);
 
   const plan: NotifyPlan = {
@@ -266,6 +310,11 @@ export function planNotification(event: NotifyEvent, rules: NotifyRule[], allowl
     note: rule.note,
     reason: "not_allowlisted",
   };
+
+  if (refusesHighPriorityPage(event)) {
+    plan.reason = "missing_evidence";
+    return plan;
+  }
 
   if (SHELL_META.test(rule.action)) {
     plan.reason = "shell_metacharacter";
