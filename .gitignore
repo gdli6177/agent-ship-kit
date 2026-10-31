@@ -1,0 +1,7 @@
+node_modules/
+.agent-ship/*.jsonl
+.agent-ship/proposals/
+.agent-ship/contracts/
+.agent-ship/packets/
+*.log
+.DS_Store

@@ -1,0 +1,7 @@
+{
+  "version": 1,
+  "patterns": [
+    "multica *",
+    "curl -X POST https://hooks.example/*"
+  ]
+}
