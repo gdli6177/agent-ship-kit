@@ -9,7 +9,10 @@
 人要求修改后的恢复也走 update，重新检查预算。
 
 Local inbox and notify for the captain. Node 20 or newer. The only
-dependency is `tsx`, used to run TypeScript directly.
+dependency is `tsx`, used to run TypeScript directly. `package.json` exposes
+the `agent-ship` bin. After the root `install.sh` run, that command is on
+`PATH` and the project directory is the default root. The examples below are
+for a checkout of this repo, run from `cli/`.
 
 This CLI appends JSONL under `.agent-ship/`. `notify dry-run` prints a plan.
 `notify run` starts an allowlisted argv with no shell. It does not merge or

@@ -33,8 +33,8 @@ The example policy has an Instructions section the captain reads. Structured
 free-text section into an argv and pass `--action`. The allowlist and the
 empty-evidence refusal still apply.
 
-Policy: `templates/notify.policy.example.md` (or the human's copy).
-Allowlist: `templates/notify.allowlist.example.json` (or the human's copy).
+Policy: `.agent-ship/notify.policy.md` after `/ship-setup`, or `$HOME/.agent-ship-kit/current/templates/notify.policy.example.md`.
+Allowlist: `.agent-ship/notify.allowlist.json`, or `$HOME/.agent-ship-kit/current/templates/notify.allowlist.example.json`.
 Prefer an exact subcommand such as `multica issue create --assignee me *`.
 Do not widen that to `multica *`.
 The parser and the match rules are normative in `docs/ARCHITECTURE.md`.
@@ -47,11 +47,12 @@ The parser and the match rules are normative in `docs/ARCHITECTURE.md`.
 
 ## Dry-run
 
+Run this in the project directory. Use `agent-ship` on `PATH`. If that command is not found, use `"$HOME/.agent-ship-kit/current/cli/bin/agent-ship.js"` with the same arguments.
+
 ```bash
-cd cli
-npm run agent-ship -- notify dry-run --root .. --latest \
-  --policy ../templates/notify.policy.example.md \
-  --allowlist ../templates/notify.allowlist.example.json
+agent-ship notify dry-run --latest \
+  --policy .agent-ship/notify.policy.md \
+  --allowlist .agent-ship/notify.allowlist.json
 ```
 
 Use `--event <file.json>` instead of `--latest` when the event is not the newest open inbox item. Add `--action 'multica issue create --assignee me --title from-captain'` only when the free-text section told you to plan an argv the rules did not already name.

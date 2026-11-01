@@ -14,7 +14,8 @@ description: >-
 
 The captain is a router, not an executor. Dispatch is a gate in front of
 whatever orchestrator the human already uses. This skill does not schedule a
-fleet, does not keep a worker roster, and does not merge or deploy.
+fleet, does not keep a worker roster, and does not merge or deploy. Templates
+and adapters live in the kit at `$HOME/.agent-ship-kit/current/`.
 
 ## Router
 
@@ -86,9 +87,10 @@ the execution repository. Never let parallel workers share a checkout or index.
    contract, slice membership, duplicate work and both parallel caps. The
    branch must exist. If admission fails, do not spawn anything.
 
+Run this in the project directory. Use `agent-ship` on `PATH`. If that command is not found, use `node $HOME/.agent-ship-kit/current/cli/bin/agent-ship.js` with the same arguments.
+
 ```bash
-cd cli
-npm run agent-ship -- slice start --root <shared_state_root> \
+agent-ship slice start --root <shared_state_root> \
   --repo <execution_checkout> --contract <contract_id> --slice <slice_id> \
   --source-task-id <stable_kit_task_id> --title "<slice>" --summary "<one line>" \
   --branch ship/<contract_id>/<slice_id> --base <base_ref>
@@ -139,8 +141,7 @@ mid-task decision, it returns a short note to the captain through `collect`
 2. Files the inbox item:
 
 ```bash
-cd cli
-npm run agent-ship -- inbox add --root .. \
+agent-ship inbox add \
   --type blocked \
   --title "<one line>" \
   --summary "<what the owner must decide>" \

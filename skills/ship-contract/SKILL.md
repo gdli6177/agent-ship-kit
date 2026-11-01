@@ -14,9 +14,10 @@ description: >-
 The captain talks to the human. This skill turns that conversation into a
 proposal, then into a frozen contract. A proposal never dispatches a worker.
 
-Read `templates/proposal-card.md` and `templates/contract-card.md` in the
-agent-ship-kit repo and copy them. If this skill was copied out of the repo,
-keep the same fields. Do not invent a second card format.
+Read `proposal-card.md` and `contract-card.md` from the installed kit at
+`$HOME/.agent-ship-kit/current/templates/` and copy them into the project. A
+manual clone keeps the same files under `templates/`. Do not invent a second
+card format.
 
 ## When to use
 
@@ -48,7 +49,7 @@ freeze, and do not spawn a worker.
 
 ## Procedure
 
-1. Copy `templates/proposal-card.md` to `.agent-ship/proposals/<proposal_id>.md`
+1. Copy `$HOME/.agent-ship-kit/current/templates/proposal-card.md` to `.agent-ship/proposals/<proposal_id>.md`
    on the first drafting turn. Status stays `draft`. Fill Allowed paths and
    Forbidden paths. Put merge and production deploy in the out-of-scope list
    even if the human did not mention them.
@@ -58,7 +59,7 @@ freeze, and do not spawn a worker.
    These do not freeze a contract: silence, "looks good" with no proposal id,
    the captain deciding for itself, a worker, or another agent.
 4. On freeze, copy the accepted text into
-   `.agent-ship/contracts/<contract_id>.md` using `templates/contract-card.md`.
+   `.agent-ship/contracts/<contract_id>.md` using `$HOME/.agent-ship-kit/current/templates/contract-card.md`.
    Set status to `frozen`, record who froze it and when, and copy Allowed
    paths and Forbidden paths. Set `max_parallel` (the template default is 3;
    use a lower number if the human asked; never pick a higher one, and never
