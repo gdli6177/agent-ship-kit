@@ -9,15 +9,24 @@ Fail closed: if the contract file is missing or its status is not `frozen`,
 
 ## spawn
 
+Before spawning a process, prepare its isolated checkout/branch and choose a
+stable kit task id. Reserve it with `slice start --root <shared-state>
+--repo <checkout> ...`. A rejected reservation must not spawn anything.
+Map this client task id to the platform run id; keep the platform id in
+`worker_ref` using `slice update --status running --worker <ref>`. If spawning
+fails, update the reservation to `failed`. See
+[`docs/workspace-parallel.md`](../docs/workspace-parallel.md) for the complete sequence.
+
 In:
 
 - `contract_path` — the frozen contract card
 - `slice_id` — one row of that contract
+- `task_id` — the stable id already admitted by `slice start`
 - `prompt` — the slice text and its acceptance lines, the repo, and the branch `ship/<contract_id>/<slice_id>`
 
 Out:
 
-- `task_id` — stable id the captain stores as `source_task_id`
+- `task_id` — the same stable kit id, mapped to the platform run
 - `worker_ref` — whatever the orchestrator uses to find this run (session id, url, or a local note)
 
 The prompt must not include the captain transcript, secrets, or an instruction

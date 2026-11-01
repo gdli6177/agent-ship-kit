@@ -1,0 +1,24 @@
+{
+  "name": "agent-ship-kit",
+  "version": "0.1.0",
+  "description": "Acceptance and attention layer for parallel AI coding-agent delivery. The agent-ship command is the local CLI.",
+  "license": "MIT",
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "bin": {
+    "agent-ship": "./cli/bin/agent-ship.js"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/gdli6177/agent-ship-kit.git"
+  },
+  "dependencies": {
+    "tsx": "^4.20.6"
+  },
+  "scripts": {
+    "test": "npm test --prefix cli",
+    "typecheck": "npm run typecheck --prefix cli"
+  }
+}

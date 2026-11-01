@@ -43,13 +43,17 @@ process.exit(2);
   await chmod(cmd, 0o755);
   const prevCmd = process.env.AGENT_SHIP_CRONTAB_CMD;
   const prevFile = process.env.AGENT_SHIP_CRONTAB_FILE;
+  const prevPlatform = process.env.AGENT_SHIP_TIMER_PLATFORM;
   process.env.AGENT_SHIP_CRONTAB_CMD = cmd;
   process.env.AGENT_SHIP_CRONTAB_FILE = file;
+  process.env.AGENT_SHIP_TIMER_PLATFORM = "cron";
   return () => {
     if (prevCmd === undefined) delete process.env.AGENT_SHIP_CRONTAB_CMD;
     else process.env.AGENT_SHIP_CRONTAB_CMD = prevCmd;
     if (prevFile === undefined) delete process.env.AGENT_SHIP_CRONTAB_FILE;
     else process.env.AGENT_SHIP_CRONTAB_FILE = prevFile;
+    if (prevPlatform === undefined) delete process.env.AGENT_SHIP_TIMER_PLATFORM;
+    else process.env.AGENT_SHIP_TIMER_PLATFORM = prevPlatform;
   };
 }
 
@@ -135,6 +139,8 @@ test("the first slice installs the local timer and a fresh commit is progress", 
     await writeFile(join(root, "README.md"), "base\n");
     await exec("git", ["add", "README.md"], { cwd: root });
     await exec("git", ["commit", "-m", "base"], { cwd: root });
+    await mkdir(join(root, ".agent-ship", "contracts"), { recursive: true });
+    await writeFile(join(root, ".agent-ship", "contracts", "contract_auth.md"), "Status: frozen\nFrozen by: Test human\nFrozen at: 2026-10-31T10:00:00Z\n## Allowed paths\n- src/**\n## Forbidden paths\n- secrets/**\n## Slices\nmax_parallel: 3\n| auth | slice | checks |\n| other | slice | checks |\n");
     const started = await startSlice(root, {
       title: "Auth slice",
       summary: "Opened.",
@@ -278,7 +284,8 @@ test("watchdog flags a slice with no heartbeat and ignores a fresh one", async (
     assert.ok((open[0]?.summary.length ?? 0) <= 280);
 
     const again = await runWatchdog(root, { now, staleMinutes: 30, checkDrift: false });
-    assert.equal(again.flagged[0]?.already_open, true);
+    assert.equal(again.checked, 1); // The blocked task is paused; only the fresh task remains running.
+    assert.equal(again.flagged.length, 0);
     assert.equal((await listInbox(root, { openOnly: true })).length, 1);
   } finally {
     await rm(root, { recursive: true, force: true });

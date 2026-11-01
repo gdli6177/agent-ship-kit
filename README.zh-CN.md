@@ -2,6 +2,8 @@
 
 # agent-ship-kit
 
+跨成员仓库或同仓库多 worktree 并行交付，见[工作空间接入说明](docs/workspace-parallel.md)。
+
 agent-ship-kit 是并行 AI 编程交付的验收与注意力层。人从需求进入到交付，只和一位船长（captain）对话。工人（worker）没有事先排好的花名册，而是在合同冻结之后，按切片按需生成。它可以接在 Herdr、Orca、Multica 或任何别的编排器上面，用一层薄适配器接进去；没有编排器时也可以用。它不负责任务调度，不会自动合并到 main，也不会部署到生产。船长起草方案，人冻结合同，工人交回证据，人接受证据之后，事情才算可以往下走。
 
 状态：v0。包含技能、模板、事件 schema、适配器说明，以及本地收件箱和通知 CLI。
@@ -34,23 +36,41 @@ agent-ship-kit 是并行 AI 编程交付的验收与注意力层。人从需求�
 
 ## 安装
 
-克隆仓库，把七份技能拷进船长代理的 skill 目录。Cursor 的目录是 `~/.cursor/skills`：
+一条命令。不克隆仓库，不用 sudo，也不改任何项目。它把工具下载到 `~/.agent-ship-kit/<ref>`（默认 `main`），并用符号链接 `~/.agent-ship-kit/current` 指向这一版。它在 `~/.local/bin` 放上 `agent-ship` 命令，并把七份技能拷进它找到的代理 skill 目录（`~/.cursor/skills`、`~/.claude/skills`、`~/.codex/skills`）。技能和命令垫片都走 `current`，之后换 `--ref` 也不用改这些路径。
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/gdli6177/agent-ship-kit/main/install.sh | bash
+```
+
+需要 Node.js 20 或更新。不需要 API 密钥。如果 `~/.local/bin` 不在 `PATH` 里，安装脚本会打印要加的那一行。再跑一次同一条命令就是升级。用 `--ref` 或 `AGENT_SHIP_REF` 固定某个标签：
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/gdli6177/agent-ship-kit/main/install.sh | bash -s -- --ref v0.1.0
+```
+
+`--agent cursor|claude|codex|all` 选择 skill 目录。`--target <目录>` 只拷到那个目录。分支名可以带斜杠（`feature/foo`），目录名会写成 `feature__foo`。换一个 ref 安装时，会删掉上一个 ref 的目录。卸载会删掉命令垫片、安装脚本自己拷进去的技能目录，以及整个 `~/.agent-ship-kit`（所有 ref 和 `current`）：
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/gdli6177/agent-ship-kit/main/install.sh | bash -s -- --uninstall
+```
+
+Windows 用 WSL（Ubuntu），在里面跑上面的命令。Git Bash 和 MSYS 会被拒绝。
+
+然后打开项目，对船长说 `/ship-setup`。
+
+### 手动克隆
+
+不能用安装脚本时，自己克隆并拷贝技能：
 
 ```bash
 git clone https://github.com/gdli6177/agent-ship-kit.git
 cd agent-ship-kit
+npm install
 mkdir -p ~/.cursor/skills
 cp -R skills/ship-setup skills/ship-watchdog skills/ship-contract skills/ship-dispatch skills/ship-inbox skills/ship-notify skills/ship-e2e ~/.cursor/skills/
 ```
 
-别的代理把同样的七个目录拷到它自己的 skill 路径。每个目录里有一份 `SKILL.md`。CLI 留在本仓库，不放进 skill 目录。
-
-```bash
-cd cli
-npm install
-```
-
-需要 Node 20 或更新。不需要 API 密钥。
+在这份检出里，`npx agent-ship` 可以跑 CLI。把 `agent-ship` 放进 `PATH` 的是安装脚本。
 
 ## 斜杠命令
 
@@ -83,18 +103,18 @@ npm install
 | `/ship-e2e` | `skills/ship-e2e/SKILL.md` |
 | `/ship-watchdog` | `skills/ship-watchdog/SKILL.md` |
 
-**纯终端。** 在 `cli/` 里 `npm install` 之后：
+**纯终端。** 安装之后，在项目目录里跑 `agent-ship`。命令不在 `PATH` 上时，用 `node $HOME/.agent-ship-kit/current/cli/bin/agent-ship.js`。
 
 | 命令 | CLI |
 | --- | --- |
-| `/ship-setup` | `npm run agent-ship -- setup --root ..` |
-| `/ship-dispatch` | `npm run agent-ship -- slice start --root .. --contract <id> --slice <id> --source-task-id <task> --title "..." --summary "..."` |
-| `/ship-inbox` | `npm run agent-ship -- inbox list --root .. --sort priority` |
-| `/ship-inbox <id>` | `npm run agent-ship -- inbox decide <id> accept\|changes_requested\|reject --root ..` |
-| `/ship-notify` | `npm run agent-ship -- notify dry-run --root .. --latest --policy ../templates/notify.policy.example.md --allowlist ../templates/notify.allowlist.example.json` |
-| `/ship-watchdog` | `npm run agent-ship -- watchdog --root ..` |
+| `/ship-setup` | `agent-ship setup` |
+| `/ship-dispatch` | `agent-ship slice start --contract <id> --slice <id> --source-task-id <task> --title "..." --summary "..."` |
+| `/ship-inbox` | `agent-ship inbox list --sort priority` |
+| `/ship-inbox <id>` | `agent-ship inbox decide <id> accept\|changes_requested\|reject` |
+| `/ship-notify` | `agent-ship notify dry-run --latest --policy .agent-ship/notify.policy.md --allowlist .agent-ship/notify.allowlist.json` |
+| `/ship-watchdog` | `agent-ship watchdog` |
 
-`/ship-contract` 和 `/ship-e2e` 是技能里的流程，没有单独的子命令。派工或审阅时的路径检查是 `npm run agent-ship -- check --root .. --contract <id>`。
+`/ship-contract` 和 `/ship-e2e` 是技能里的流程，没有单独的子命令。派工或审阅时的路径检查是 `agent-ship check --contract <id>`。`/ship-setup` 会把通知策略和允许列表写进 `.agent-ship/`。在那之前，把 `--policy` 和 `--allowlist` 指到 `$HOME/.agent-ship-kit/current/templates/`。
 
 `agent-ship check --contract <id>` 用普通 git 把工作分支和基线分支做 diff。改动的路径落在禁止列表里，或不在允许列表里，检查就失败。本地 pre-commit 对 `.agent-ship/active-contract` 里的合同做暂存区检查。pre-push 拒绝推到 `main` 和 `master`，除非人自己设置 `AGENT_SHIP_ALLOW_PROTECTED_PUSH=1`。CI 也可以跑同一条 `check`，那是附加的，钩子不依赖它。
 
@@ -104,7 +124,7 @@ npm install
 
 1. 讨论时只维持一张方案卡，每轮写明改了什么。
 2. 人冻结之后才有合同。合同写明允许路径和禁止路径。
-3. 在合同自己的并行上限和全局上限（默认同时 3 个工人）之内派工。`slice start` 把切片记下来，默认分支是 `ship/<合同>/<切片>`。第一条切片会登记看门狗定时器。
+3. 在合同自己的并行上限和全局上限（默认同时 3 个工人）之内派工。`slice start` 把切片记下来。分支必须已经存在，默认名是 `ship/<合同>/<切片>`。合同还必须有真实的 `Frozen by`、可解析的 `Frozen at`、非空 Forbidden paths，并且切片写在 Slices 表里。对应错误是 `contract must record Frozen by`、`contract must record a valid Frozen at`、`contract needs non-empty Forbidden paths`、`slice <id> is not in the Slices table`，以及 `branch <name> does not exist in <repo>; create it first (git branch <name> <base>)`。先 `git branch` 再登记。第一条切片会登记看门狗定时器。`.agent-ship/sequence` 是同一毫秒内事件的序号，命令持有状态锁时不要改它。锁目录 `.agent-ship-lock` 记下 `pid`、`hostname`、`started_at`、`cmd`。本机 pid 已退出就自动收回；否则错误里会写出拥有者。确认进程退出后，手工恢复是 `rm -rf` 那个锁目录。详见 [docs/workspace-parallel.md](docs/workspace-parallel.md)。
 4. 工人卡住或需要中途拍板时，只回给船长，收件箱用 `blocked` 或 `needs_approval`。人不要打开工人会话。
 5. 工人说做完之后，另开一个只读核验，只给冻结合同和分支，不给工人对话。核验重跑验收、`agent-ship check` 和相关冒烟。不一致就退回工人。
 6. 一致之后才写成待审包并 `inbox add`。`/ship-inbox` 先看短卡片，主人要求再展开。
@@ -157,9 +177,7 @@ npm install
 不需要编排器账号，不需要 `multica` 可执行文件，也不需要 webhook。收件箱是一个 JSONL 文件。演练只打印计划，不执行。普通优先级是拉取：留在 `inbox list` 里，没有对应的推送规则。下面这条高优先级示例带了证据 URL，所以计划允许执行，但 `executed` 仍是 false。
 
 ```bash
-cd cli
-npm install
-npm run agent-ship -- inbox add --root .. \
+agent-ship inbox add \
   --title "Auth middleware ready" \
   --summary "Contract checks passed on the slice branch." \
   --priority high \
@@ -168,12 +186,14 @@ npm run agent-ship -- inbox add --root .. \
   --pr https://example.com/pull/12 \
   --path .agent-ship/packets/task_auth_mw.md
 
-npm run agent-ship -- inbox list --root ..
+agent-ship inbox list
 
-npm run agent-ship -- notify dry-run --root .. --latest \
-  --policy ../templates/notify.policy.example.md \
-  --allowlist ../templates/notify.allowlist.example.json
+agent-ship notify dry-run --latest \
+  --policy "$HOME/.agent-ship-kit/current/templates/notify.policy.example.md" \
+  --allowlist "$HOME/.agent-ship-kit/current/templates/notify.allowlist.example.json"
 ```
+
+在项目目录里跑。`agent-ship` 不在 `PATH` 上时，改用 `node $HOME/.agent-ship-kit/current/cli/bin/agent-ship.js`。
 
 预期得到一条 `needs_review`，然后计划的 `matched_rule` 是 `high priority page`，`allow` 为 true，`executed` 为 false。去掉 `--evidence` 之后，同样的高优先级项不会被呼叫。`notify run` 是可选的，只启动允许列表里的 argv，不经过 shell。`inbox decide <id> accept` 写入 `review_decided`，之后 `inbox list` 不再显示这一条。
 
@@ -211,6 +231,8 @@ npm run typecheck
 README.md
 README.zh-CN.md
 LICENSE
+install.sh
+package.json
 docs/PRODUCT.md
 docs/ARCHITECTURE.md
 skills/ship-contract/SKILL.md
@@ -237,6 +259,7 @@ adapters/orca.md
 adapters/multica.md
 events/schema.json
 cli/package.json
+cli/bin/agent-ship.js
 cli/README.md
 cli/src/cli.ts
 cli/src/inbox.ts

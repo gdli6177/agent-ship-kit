@@ -1,6 +1,7 @@
 import { randomBytes } from "node:crypto";
 import { appendFile, mkdir, readFile } from "node:fs/promises";
 import { join } from "node:path";
+import { nextSequence, withLock } from "./storage.js";
 import {
   ATTENTION_TYPES,
   DECISIONS,
@@ -156,64 +157,67 @@ async function appendRecord(root: string, record: InboxRecord): Promise<void> {
 }
 
 export async function addInboxItem(root: string, input: InboxAddInput): Promise<AttentionEvent> {
-  const title = requiredText(input.title, "title");
-  const summary = assertSummary(input.summary);
-  const sourceTaskId = requiredText(input.sourceTaskId, "source_task_id");
-  const evidence = (input.evidenceUrls ?? []).map((url) => {
-    const trimmed = requiredText(url, "evidence url");
-    if (/\s/.test(trimmed)) throw new Error("evidence URLs must be single tokens");
-    return trimmed;
+  return withLock(join(root, ".agent-ship"), async () => {
+    const title = requiredText(input.title, "title");
+    const summary = assertSummary(input.summary);
+    const sourceTaskId = requiredText(input.sourceTaskId, "source_task_id");
+    const evidence = (input.evidenceUrls ?? []).map((url) => {
+      const trimmed = requiredText(url, "evidence url");
+      if (/\s/.test(trimmed)) throw new Error("evidence URLs must be single tokens");
+      return trimmed;
+    });
+
+    const links: EventLinks = {};
+    const pr = optionalLink(input.links?.pr, "links.pr");
+    const issue = optionalLink(input.links?.issue, "links.issue");
+    const path = optionalLink(input.links?.path, "links.path");
+    if (pr) links.pr = pr;
+    if (issue) links.issue = issue;
+    if (path) links.path = path;
+
+    const threadRefs: ThreadRefs = {};
+    const threadPr = optionalLink(input.threadRefs?.pr, "thread_refs.pr");
+    const threadIssue = optionalLink(input.threadRefs?.issue, "thread_refs.issue");
+    const threadChat = optionalLink(input.threadRefs?.chat, "thread_refs.chat");
+    if (threadPr) threadRefs.pr = threadPr;
+    if (threadIssue) threadRefs.issue = threadIssue;
+    if (threadChat) threadRefs.chat = threadChat;
+
+    const event: AttentionEvent = {
+      id: input.id === undefined ? newEventId() : requiredText(input.id, "id"),
+      type: input.type ?? "needs_review",
+      title,
+      summary,
+      evidence_urls: evidence,
+      priority: input.priority ?? "normal",
+      created_at: input.createdAt ?? new Date().toISOString(),
+      source_task_id: sourceTaskId,
+      links,
+    };
+    const contractId = optionalLink(input.contractId, "contract_id");
+    const sliceId = optionalLink(input.sliceId, "slice_id");
+    const workerRef = optionalLink(input.workerRef, "worker_ref");
+    const branch = optionalLink(input.branch, "branch");
+    if (contractId) event.contract_id = contractId;
+    if (sliceId) event.slice_id = sliceId;
+    if (workerRef) event.worker_ref = workerRef;
+    if (branch) event.branch = branch;
+    if (Object.keys(threadRefs).length > 0) event.thread_refs = threadRefs;
+    if (input.reason) event.reason = input.reason;
+
+    if (!ID_PATTERN.test(event.id)) {
+      throw new Error("id must match evt_[A-Za-z0-9_-]+");
+    }
+
+    const existing = await readInbox(root);
+    if (existing.some((item) => item.id === event.id)) {
+      throw new Error(`inbox already contains ${event.id}`);
+    }
+
+    event.sequence = await nextSequence(root);
+    await appendRecord(root, event);
+    return event;
   });
-
-  const links: EventLinks = {};
-  const pr = optionalLink(input.links?.pr, "links.pr");
-  const issue = optionalLink(input.links?.issue, "links.issue");
-  const path = optionalLink(input.links?.path, "links.path");
-  if (pr) links.pr = pr;
-  if (issue) links.issue = issue;
-  if (path) links.path = path;
-
-  const threadRefs: ThreadRefs = {};
-  const threadPr = optionalLink(input.threadRefs?.pr, "thread_refs.pr");
-  const threadIssue = optionalLink(input.threadRefs?.issue, "thread_refs.issue");
-  const threadChat = optionalLink(input.threadRefs?.chat, "thread_refs.chat");
-  if (threadPr) threadRefs.pr = threadPr;
-  if (threadIssue) threadRefs.issue = threadIssue;
-  if (threadChat) threadRefs.chat = threadChat;
-
-  const event: AttentionEvent = {
-    id: input.id === undefined ? newEventId() : requiredText(input.id, "id"),
-    type: input.type ?? "needs_review",
-    title,
-    summary,
-    evidence_urls: evidence,
-    priority: input.priority ?? "normal",
-    created_at: input.createdAt ?? new Date().toISOString(),
-    source_task_id: sourceTaskId,
-    links,
-  };
-  const contractId = optionalLink(input.contractId, "contract_id");
-  const sliceId = optionalLink(input.sliceId, "slice_id");
-  const workerRef = optionalLink(input.workerRef, "worker_ref");
-  const branch = optionalLink(input.branch, "branch");
-  if (contractId) event.contract_id = contractId;
-  if (sliceId) event.slice_id = sliceId;
-  if (workerRef) event.worker_ref = workerRef;
-  if (branch) event.branch = branch;
-  if (Object.keys(threadRefs).length > 0) event.thread_refs = threadRefs;
-  if (input.reason) event.reason = input.reason;
-
-  if (!ID_PATTERN.test(event.id)) {
-    throw new Error("id must match evt_[A-Za-z0-9_-]+");
-  }
-
-  const existing = await readInbox(root);
-  if (existing.some((item) => item.id === event.id)) {
-    throw new Error(`inbox already contains ${event.id}`);
-  }
-
-  await appendRecord(root, event);
-  return event;
 }
 
 export async function decideInboxItem(
@@ -222,29 +226,32 @@ export async function decideInboxItem(
   decision: Decision,
   note?: string,
 ): Promise<ReviewDecidedEvent> {
-  const id = requiredText(subjectId, "id");
-  const all = await readInbox(root);
-  const subject = all.find((item) => item.id === id);
-  if (!subject || subject.type === "review_decided") {
-    throw new Error(`inbox has no open item ${id}`);
-  }
-  if (all.some((item) => item.type === "review_decided" && item.subject_id === id)) {
-    throw new Error(`inbox item ${id} is already decided`);
-  }
+  return withLock(join(root, ".agent-ship"), async () => {
+    const id = requiredText(subjectId, "id");
+    const all = await readInbox(root);
+    const subject = all.find((item) => item.id === id);
+    if (!subject || subject.type === "review_decided") {
+      throw new Error(`inbox has no open item ${id}`);
+    }
+    if (all.some((item) => item.type === "review_decided" && item.subject_id === id)) {
+      throw new Error(`inbox item ${id} is already decided`);
+    }
 
-  const cleanedNote = note === undefined ? undefined : requiredText(note, "note");
-  const event: ReviewDecidedEvent = {
-    id: newEventId(),
-    type: "review_decided",
-    title: `Decision ${decision}: ${subject.title}`,
-    summary: assertSummary(cleanedNote ?? `Human ${decision} on ${subject.id}.`),
-    created_at: new Date().toISOString(),
-    source_task_id: subject.source_task_id,
-    decision,
-    subject_id: subject.id,
-  };
-  if (cleanedNote) event.note = cleanedNote;
+    const cleanedNote = note === undefined ? undefined : requiredText(note, "note");
+    const event: ReviewDecidedEvent = {
+      id: newEventId(),
+      type: "review_decided",
+      title: `Decision ${decision}: ${subject.title}`,
+      summary: assertSummary(cleanedNote ?? `Human ${decision} on ${subject.id}.`),
+      created_at: new Date().toISOString(),
+      source_task_id: subject.source_task_id,
+      decision,
+      subject_id: subject.id,
+    };
+    if (cleanedNote) event.note = cleanedNote;
 
-  await appendRecord(root, event);
-  return event;
+    event.sequence = await nextSequence(root);
+    await appendRecord(root, event);
+    return event;
+  });
 }

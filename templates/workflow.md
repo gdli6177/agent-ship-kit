@@ -32,7 +32,7 @@ gitignored. `.agent-ship/.gitkeep` is the only committed marker.
 | `proposal_<slug>` | captain, while drafting | the one current proposal |
 | `contract_<slug>` | captain, at freeze | contract card; slices cite it |
 | `<slice_id>` | contract table | one worker |
-| task id | adapter `spawn` | `source_task_id`, packet filename |
+| task id | chosen before CLI admission, mapped by adapter `spawn` | `source_task_id`, packet filename |
 | `evt_<...>` | inbox CLI | event `id` |
 
 Slugs are lowercase ascii, digits, and hyphens.
@@ -62,7 +62,7 @@ Two ceilings, both defaulting to 3. The captain does not raise either one.
 - **Per contract:** `max_parallel` on the contract card. Default 3. It must
   not be higher than the global cap. The human may set it lower.
 
-Count the latest dispatch-log row per task id. A new spawn has to fit under
+Use the shared CLI event/inbox running view per task id; the Markdown dispatch log is an audit view. Reserve with `slice start` before adapter spawn. A new spawn has to fit under
 both the contract's remaining slots and the global remaining slots.
 
 ## Discussion and freeze
@@ -129,3 +129,5 @@ at a report, never at a storageState file. `priority: high` with an empty
 Do not write tokens, `.env` values, passwords, or storageState contents into
 cards, events, policies, allowlists, or the captain thread. An evidence URL
 may point at a CI page the human can already open.
+
+多仓库与 worktree：共享状态根目录、执行 checkout、原子名额预留和显式恢复见 [工作空间接入说明](../docs/workspace-parallel.md)。

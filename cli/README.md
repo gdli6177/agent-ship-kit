@@ -1,7 +1,18 @@
 # agent-ship CLI
 
+多仓库和 Git worktree 使用共享 `--root` 保存合同、运行状态和 inbox，
+使用 `--repo` 指定执行 checkout。`setup --root <checkout> --state-root <shared-root>`
+为每个工作树安装门禁。完整示例和适配器派工顺序见[工作空间接入说明](../docs/workspace-parallel.md)。
+
+`slice start` 在启动工人前预留名额，检查冻结合同、切片和两层并行上限。
+适配器用 `slice update --source-task-id <id> --status <status> [--worker <ref>]` 回传状态。
+人要求修改后的恢复也走 update，重新检查预算。
+
 Local inbox and notify for the captain. Node 20 or newer. The only
-dependency is `tsx`, used to run TypeScript directly.
+dependency is `tsx`, used to run TypeScript directly. `package.json` exposes
+the `agent-ship` bin. After the root `install.sh` run, that command is on
+`PATH` and the project directory is the default root. If `agent-ship` is not
+on `PATH`, use `node $HOME/.agent-ship-kit/current/cli/bin/agent-ship.js`.
 
 This CLI appends JSONL under `.agent-ship/`. `notify dry-run` prints a plan.
 `notify run` starts an allowlisted argv with no shell. It does not merge or
@@ -19,9 +30,9 @@ npm install
 `setup` and `init` are the same command. Default mode touches only this clone: `.git/hooks` (chaining any hook that was already there) and `.git/info/exclude`. It does not edit `.gitignore` and it does not set `core.hooksPath`.
 
 ```bash
-npm run agent-ship -- setup --root ..
-npm run agent-ship -- setup --shared --root ..
-npm run agent-ship -- setup --uninstall --root ..
+agent-ship setup
+agent-ship setup --shared
+agent-ship setup --uninstall
 ```
 
 `--shared` writes a marked block in `.gitignore` and merges the rules into `AGENTS.md` even when that file is tracked. Hooks remain uncommitted. `--uninstall` restores a chained hook and removes the rules block. Data under `.agent-ship/` is kept, and `.git/info/exclude` keeps a single `.agent-ship/` line so the directory does not show up as untracked. `--uninstall --purge` deletes `.agent-ship/` and that exclude line.
@@ -29,17 +40,17 @@ npm run agent-ship -- setup --uninstall --root ..
 ## Watchdog
 
 ```bash
-npm run agent-ship -- watchdog --root ..
-npm run agent-ship -- status --stale --root ..
+agent-ship watchdog
+agent-ship status --stale
 ```
 
 Deterministic. No model. Reads heartbeats in `.agent-ship/events.jsonl`, the last commit time on the slice branch, and `check`. Files a `blocked` item only when a slice is stalled or drifting. If nothing is `queued` or `running`, it exits immediately and deletes the local timer.
 
 ```bash
-npm run agent-ship -- slice start --root .. --contract contract_auth --slice auth \
+agent-ship slice start --contract contract_auth --slice auth \
   --source-task-id task_1 --title "Auth slice" --summary "Opened."
-npm run agent-ship -- watchdog install --root ..
-npm run agent-ship -- watchdog uninstall --root ..
+agent-ship watchdog install
+agent-ship watchdog uninstall
 ```
 
 `slice start` records `worker_dispatched` on branch `ship/<contract>/<slice>` unless `--branch` is set, and registers the timer when a slice is open. On Linux and WSL, `watchdog install` adds a marked block to the user crontab. On macOS it writes `~/Library/LaunchAgents` and runs `launchctl bootstrap`. `--dry-run` does not register. Tests can point `AGENT_SHIP_CRONTAB_CMD` at a fake `crontab` and `AGENT_SHIP_TIMER_HOME` at a throwaway directory. If registration fails, the command prints a warning. `watchdog` and `inbox list` also warn when slices are running and the timer is not active. An orchestrator scheduler or an assistant routine can run `watchdog` instead of the timer. Staleness uses heartbeats and commits on the slice branch only.
@@ -47,18 +58,17 @@ npm run agent-ship -- watchdog uninstall --root ..
 ## Check
 
 ```bash
-npm run agent-ship -- check --root .. --contract contract_auth --base main
+agent-ship check --contract contract_auth --base main
 ```
 
 Prints JSON and exits 1 when a path is forbidden or outside Allowed paths. `--staged` checks the index. No forge and no CI are required. A project may also run this command in CI; that is an extra, not the enforcement.
 
 ## Commands
 
-Run from `cli/` so the example policy paths resolve. `--root ..` writes the
-inbox at the repo's `.agent-ship/inbox.jsonl`.
+Run these in the project directory. The inbox is `.agent-ship/inbox.jsonl` there.
 
 ```bash
-npm run agent-ship -- inbox add --root .. \
+agent-ship inbox add \
   --title "Auth middleware ready" \
   --summary "Contract checks passed on the slice branch." \
   --priority high \
@@ -67,14 +77,14 @@ npm run agent-ship -- inbox add --root .. \
   --pr https://example.com/pull/12 \
   --path .agent-ship/packets/task_auth_mw.md
 
-npm run agent-ship -- inbox list --root ..
-npm run agent-ship -- inbox list --root .. --all --json
+agent-ship inbox list
+agent-ship inbox list --all --json
 
-npm run agent-ship -- inbox decide evt_<id> accept --root .. --note "Evidence matches."
+agent-ship inbox decide evt_<id> accept --note "Evidence matches."
 
-npm run agent-ship -- notify dry-run --root .. --latest \
-  --policy ../templates/notify.policy.example.md \
-  --allowlist ../templates/notify.allowlist.example.json
+agent-ship notify dry-run --latest \
+  --policy "$HOME/.agent-ship-kit/current/templates/notify.policy.example.md" \
+  --allowlist "$HOME/.agent-ship-kit/current/templates/notify.allowlist.example.json"
 ```
 
 `inbox add` defaults to `needs_review`. `--type blocked` and

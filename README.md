@@ -2,6 +2,8 @@
 
 # agent-ship-kit
 
+Multiple repositories or Git worktrees: see the [workspace parallel-delivery guide](docs/workspace-parallel.md).
+
 agent-ship-kit is the acceptance-and-attention layer for parallel AI coding-agent delivery. A person talks to one captain from intake through ship. Workers are spawned on demand, one slice per frozen contract, and are not a standing roster. The kit sits on Herdr, Orca, Multica, or any other orchestrator through thin adapters, and it also works with no orchestrator at all. It does not schedule the fleet, does not merge to main, and does not deploy to production. The captain prepares a proposal, the human freezes the contract, workers return evidence, and the human accepts that evidence before anything ships.
 
 Status: v0. Skills, templates, an event schema, adapter notes, and a local inbox / notify CLI.
@@ -20,23 +22,41 @@ The product definition in Chinese is [docs/PRODUCT.md](docs/PRODUCT.md). Event, 
 
 ## Install
 
-Clone the repo and copy the seven skills into the captain agent's skill directory. On Cursor that directory is `~/.cursor/skills`:
+One command. It does not clone the repo, does not use sudo, and does not modify any project. It downloads the kit into `~/.agent-ship-kit/<ref>` (default `main`) and points the `~/.agent-ship-kit/current` symlink at that directory. It installs the `agent-ship` command in `~/.local/bin`, and copies the seven skills into each agent skill directory it finds (`~/.cursor/skills`, `~/.claude/skills`, `~/.codex/skills`). Skills and the shim use `current`, so a later `--ref` does not change those paths.
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/gdli6177/agent-ship-kit/main/install.sh | bash
+```
+
+Node.js 20 or newer. No API keys. If `~/.local/bin` is not on `PATH`, the installer prints the line to add. Re-run the same command to upgrade. Pin a tag with `--ref` or `AGENT_SHIP_REF`:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/gdli6177/agent-ship-kit/main/install.sh | bash -s -- --ref v0.1.0
+```
+
+`--agent cursor|claude|codex|all` chooses skill directories. `--target <dir>` copies skills only there. A branch name may contain slashes (`feature/foo`); the directory is `feature__foo`. Installing a different ref removes the previous ref directory. `--uninstall` removes the shim, the skill directories this installer copied, and the whole `~/.agent-ship-kit` directory:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/gdli6177/agent-ship-kit/main/install.sh | bash -s -- --uninstall
+```
+
+Windows: use WSL (Ubuntu), then run the command above inside it. Git Bash and MSYS are refused.
+
+Then open a project and tell the captain `/ship-setup`.
+
+### Manual clone
+
+If you cannot use the installer, clone and copy the skills yourself:
 
 ```bash
 git clone https://github.com/gdli6177/agent-ship-kit.git
 cd agent-ship-kit
+npm install
 mkdir -p ~/.cursor/skills
 cp -R skills/ship-setup skills/ship-watchdog skills/ship-contract skills/ship-dispatch skills/ship-inbox skills/ship-notify skills/ship-e2e ~/.cursor/skills/
 ```
 
-For another agent, copy those same seven directories into that agent's skill path. Each directory contains a `SKILL.md`. The CLI is optional and stays in this repo; it is not installed into the skill directory.
-
-```bash
-cd cli
-npm install
-```
-
-Node 20 or newer. No API keys.
+From that checkout, `npx agent-ship` runs the CLI. The installer is what puts `agent-ship` on `PATH`.
 
 ## Commands the owner uses
 
@@ -69,31 +89,31 @@ Each command is one skill. The name in the skill file matches the command withou
 | `/ship-e2e` | `skills/ship-e2e/SKILL.md` |
 | `/ship-watchdog` | `skills/ship-watchdog/SKILL.md` |
 
-**Plain terminal.** From `cli/` after `npm install`:
+**Plain terminal.** After the installer, run `agent-ship` in the project directory. If the command is not on `PATH`, use `node $HOME/.agent-ship-kit/current/cli/bin/agent-ship.js`.
 
 | Command | CLI |
 | --- | --- |
-| `/ship-setup` | `npm run agent-ship -- setup --root ..` |
-| `/ship-dispatch` | `npm run agent-ship -- slice start --root .. --contract <id> --slice <id> --source-task-id <task> --title "..." --summary "..."` |
-| `/ship-inbox` | `npm run agent-ship -- inbox list --root .. --sort priority` |
-| `/ship-inbox <id>` | `npm run agent-ship -- inbox decide <id> accept\|changes_requested\|reject --root ..` |
-| `/ship-notify` | `npm run agent-ship -- notify dry-run --root .. --latest --policy ../templates/notify.policy.example.md --allowlist ../templates/notify.allowlist.example.json` |
-| `/ship-watchdog` | `npm run agent-ship -- watchdog --root ..` |
+| `/ship-setup` | `agent-ship setup` |
+| `/ship-dispatch` | `agent-ship slice start --contract <id> --slice <id> --source-task-id <task> --title "..." --summary "..."` |
+| `/ship-inbox` | `agent-ship inbox list --sort priority` |
+| `/ship-inbox <id>` | `agent-ship inbox decide <id> accept\|changes_requested\|reject` |
+| `/ship-notify` | `agent-ship notify dry-run --latest --policy .agent-ship/notify.policy.md --allowlist .agent-ship/notify.allowlist.json` |
+| `/ship-watchdog` | `agent-ship watchdog` |
 
-`/ship-contract` and `/ship-e2e` are procedures in their skill files. They do not have a single CLI subcommand. Path checks used while dispatching or reviewing are `npm run agent-ship -- check --root .. --contract <id>`.
+`/ship-contract` and `/ship-e2e` are procedures in their skill files. They do not have a single CLI subcommand. Path checks used while dispatching or reviewing are `agent-ship check --contract <id>`. `/ship-setup` writes the notify policy and allowlist into `.agent-ship/`. Before that, point `--policy` and `--allowlist` at `$HOME/.agent-ship-kit/current/templates/`.
 
 The captain is a router. It does not edit code or run the long task, even when the change looks small, and it does not wait out a worker before taking the next request. Speculative drafts are off unless `.agent-ship/limits.json` sets `"speculative": true`, and even then nothing is dispatched without a frozen contract. A persistent runtime, compute/state split, and device daemons stay with the orchestrator.
 
 `agent-ship check --contract <id>` diffs the branch against its base with plain git and fails when a changed path is forbidden or outside the allow list. The local pre-commit hook runs the same check on staged files for `.agent-ship/active-contract`. pre-push refuses `main` and `master` unless a human sets `AGENT_SHIP_ALLOW_PROTECTED_PUSH=1`. CI can run `check` too; that is optional and not required for the hooks.
+
+`slice start` admits work only when the contract is frozen, `Frozen by` is a real name, `Frozen at` parses as a time, Forbidden paths is non-empty, the slice id is a row in the Slices table, and the branch already exists. The errors are `contract must record Frozen by`, `contract must record a valid Frozen at`, `contract needs non-empty Forbidden paths`, `slice <id> is not in the Slices table`, and `branch <name> does not exist in <repo>; create it first (git branch <name> <base>)`. Create the branch first. `.agent-ship/sequence` is the integer that orders events written in the same millisecond; do not edit it while a command holds the state lock. A lock directory `.agent-ship-lock` records `pid`, `hostname`, `started_at`, and `cmd`. A dead pid on this machine is reclaimed. Otherwise the error names the owner. Manual recovery is `rm -rf` on that lock directory after the owner has exited. See [docs/workspace-parallel.md](docs/workspace-parallel.md).
 
 ## Quickstart without Multica
 
 No orchestrator account, no `multica` binary, no webhook. The inbox is a JSONL file. The dry-run prints a plan and does not run it. A normal-priority item is pull: it stays on `inbox list` and matches no push rule. The high-priority example below has an evidence URL, so the plan is allowed and still not executed.
 
 ```bash
-cd cli
-npm install
-npm run agent-ship -- inbox add --root .. \
+agent-ship inbox add \
   --title "Auth middleware ready" \
   --summary "Contract checks passed on the slice branch." \
   --priority high \
@@ -102,12 +122,14 @@ npm run agent-ship -- inbox add --root .. \
   --pr https://example.com/pull/12 \
   --path .agent-ship/packets/task_auth_mw.md
 
-npm run agent-ship -- inbox list --root ..
+agent-ship inbox list
 
-npm run agent-ship -- notify dry-run --root .. --latest \
-  --policy ../templates/notify.policy.example.md \
-  --allowlist ../templates/notify.allowlist.example.json
+agent-ship notify dry-run --latest \
+  --policy "$HOME/.agent-ship-kit/current/templates/notify.policy.example.md" \
+  --allowlist "$HOME/.agent-ship-kit/current/templates/notify.allowlist.example.json"
 ```
+
+Run that in the project directory. If `agent-ship` is not on `PATH`, call `node $HOME/.agent-ship-kit/current/cli/bin/agent-ship.js` instead.
 
 Expect a `needs_review` event, then a plan whose `matched_rule` is `high priority page`, `allow` is true, and `executed` is false. Drop the `--evidence` flag and the same high item is not paged. `notify run` is opt-in and starts only an allowlisted argv, with no shell. `inbox decide <id> accept` writes `review_decided`; `inbox list` then hides that item.
 
@@ -129,6 +151,8 @@ npm run typecheck
 README.md
 README.zh-CN.md
 LICENSE
+install.sh
+package.json
 docs/PRODUCT.md
 docs/ARCHITECTURE.md
 skills/ship-contract/SKILL.md
@@ -155,6 +179,7 @@ adapters/orca.md
 adapters/multica.md
 events/schema.json
 cli/package.json
+cli/bin/agent-ship.js
 cli/README.md
 cli/src/cli.ts
 cli/src/inbox.ts

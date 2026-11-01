@@ -13,7 +13,7 @@ import { loadAllowlistFile, loadPolicyFile, planNotification, type NotifyEvent }
 import { executeArgv } from "./run.js";
 import { checkContract } from "./check.js";
 import { setupProject } from "./setup.js";
-import { activeSlices, installWatchdogTimer, runWatchdog, startSlice, timerIsActive, uninstallWatchdogTimer } from "./watchdog.js";
+import { activeSlices, installWatchdogTimer, runWatchdog, startSlice, updateSlice, timerIsActive, uninstallWatchdogTimer } from "./watchdog.js";
 import type { AttentionType, EventLinks, InboxRecord, Priority } from "./types.js";
 
 export interface Io {
@@ -33,12 +33,13 @@ const defaultIo: Io = {
 const USAGE = `agent-ship — local inbox, path check, and notify
 
 Usage:
-  agent-ship setup|init [--shared] [--uninstall] [--purge] [--root DIR]
-  agent-ship check --contract ID [--base REF] [--head REF] [--staged] [--root DIR]
+  agent-ship setup|init [--state-root DIR] [--shared] [--uninstall] [--purge] [--root DIR]
+  agent-ship check --contract ID [--repo DIR] [--slice ID] [--base REF] [--head REF] [--staged] [--root DIR]
   agent-ship watchdog [--stale-minutes N] [--root DIR]
   agent-ship watchdog install|uninstall [--dry-run] [--root DIR]
   agent-ship slice start --contract ID --slice ID --source-task-id ID
-                       --title TEXT --summary TEXT [--root DIR]
+                       --title TEXT --summary TEXT [--repo DIR] [--base REF] [--replace] [--root DIR]
+  agent-ship slice update --source-task-id ID --status STATUS [--summary TEXT] [--root DIR]
   agent-ship status --stale [--stale-minutes N] [--root DIR]
   agent-ship inbox add --title TEXT --summary TEXT --source-task-id ID
                        [--type needs_review|blocked|needs_approval]
@@ -92,9 +93,12 @@ const VALUE_OPTIONS = new Set([
   "thread-issue",
   "thread-chat",
   "reason",
+  "repo",
+  "state-root",
+  "status",
 ]);
 const REPEATABLE = new Set(["evidence"]);
-const BOOL_FLAGS = new Set(["json", "latest", "help", "all", "shared", "uninstall", "purge", "staged", "stale", "dry-run"]);
+const BOOL_FLAGS = new Set(["json", "latest", "help", "all", "shared", "uninstall", "purge", "staged", "stale", "dry-run", "replace"]);
 
 interface ParsedArgs {
   positionals: string[];
@@ -323,6 +327,7 @@ async function runSetup(parsed: ParsedArgs, io: Io): Promise<number> {
     shared: parsed.flags.has("shared"),
     uninstall: parsed.flags.has("uninstall"),
     purge: parsed.flags.has("purge"),
+    stateRoot: one(parsed.values, "state-root"),
   });
   io.stdout(`${JSON.stringify(report, null, 2)}\n`);
   return report.ok ? 0 : 1;
@@ -340,6 +345,9 @@ async function runSliceStart(parsed: ParsedArgs, io: Io): Promise<number> {
     sliceId,
     workerRef: one(parsed.values, "worker"),
     branch: one(parsed.values, "branch") ?? `ship/${contractId}/${sliceId}`,
+    repoRoot: one(parsed.values, "repo"),
+    base: one(parsed.values, "base"),
+    replace: parsed.flags.has("replace"),
     threadRefs: {
       pr: one(parsed.values, "thread-pr"),
       issue: one(parsed.values, "thread-issue"),
@@ -380,6 +388,8 @@ async function runCheck(parsed: ParsedArgs, io: Io): Promise<number> {
     staged: parsed.flags.has("staged"),
     base: one(parsed.values, "base"),
     head: one(parsed.values, "head"),
+    repoRoot: one(parsed.values, "repo"),
+    sliceId: one(parsed.values, "slice"),
   });
   io.stdout(`${JSON.stringify(result, null, 2)}\n`);
   return result.ok ? 0 : 1;
@@ -420,6 +430,11 @@ export async function main(argv: string[], io: Io = defaultIo): Promise<number> 
     }
     if (group === "watchdog" && sub === undefined) return await runWatchdogCommand(parsed, io);
     if (group === "slice" && sub === "start") return await runSliceStart(parsed, io);
+    if (group === "slice" && sub === "update") {
+      const result = await updateSlice(one(parsed.values, "root") ?? process.cwd(), requireOne(parsed.values, "source-task-id"), requireOne(parsed.values, "status"), one(parsed.values, "summary"), one(parsed.values, "worker"));
+      io.stdout(`${JSON.stringify(result, null, 2)}\n`);
+      return 0;
+    }
     if (group === "status" && sub === undefined && parsed.flags.has("stale")) {
       return await runWatchdogCommand(parsed, io);
     }

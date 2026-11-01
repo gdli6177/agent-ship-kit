@@ -18,7 +18,8 @@ open items sorted by priority (high first), then review them one at a time.
 link. The CLI subcommands stay `inbox list` and `inbox decide`.
 
 The captain files an item only after the verifier agrees. A worker's summary
-is not evidence until it points at something the human can open.
+is not evidence until it points at something the human can open. Templates
+live in the kit at `$HOME/.agent-ship-kit/current/templates/`.
 
 ## /ship-inbox
 
@@ -63,11 +64,10 @@ Fill every section of `templates/review-packet.md`.
 
 ## Inbox CLI
 
-From the agent-ship-kit repo. These are CLI subcommands, not the `/ship-inbox` name:
+These are CLI subcommands, not the `/ship-inbox` name. Run them in the project directory. Use `agent-ship` on `PATH`. If that command is not found, use `node $HOME/.agent-ship-kit/current/cli/bin/agent-ship.js` with the same arguments.
 
 ```bash
-cd cli
-npm run agent-ship -- inbox add --root .. \
+agent-ship inbox add \
   --type needs_review \
   --title "<slice> is ready for review" \
   --summary "<one paragraph, at most 280 characters>" \
@@ -95,7 +95,7 @@ Then use `ship-notify` for the dry-run. The push text includes `/ship-inbox <id>
 Record the answer on the packet and in the inbox:
 
 ```bash
-npm run agent-ship -- inbox decide <id> accept|changes_requested|reject --root ..
+agent-ship inbox decide <id> accept|changes_requested|reject
 ```
 
 That appends `review_decided` with `subject_id` set to the inbox item.

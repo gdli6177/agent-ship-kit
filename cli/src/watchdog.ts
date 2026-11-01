@@ -4,9 +4,12 @@ import { appendFile, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
-import { checkContract } from "./check.js";
-import { addInboxItem, assertSummary, listInbox, newEventId } from "./inbox.js";
+import { checkContract, contractFile } from "./check.js";
+import { addInboxItem, assertSummary, listInbox, newEventId, readInbox } from "./inbox.js";
 import { kitRoot } from "./setup.js";
+import { assertSingleRepository, baseCommit, repositoryRoot, gitOutput } from "./repository.js";
+import { nextSequence, readEvents, withLock } from "./storage.js";
+import { parseContractPaths } from "./paths.js";
 import type { BlockReason, ThreadRefs } from "./types.js";
 
 const execFileAsync = promisify(execFile);
@@ -62,6 +65,8 @@ interface SliceState {
   last_heartbeat_at: string | null;
   worker_ref?: string;
   branch?: string;
+  repo_root?: string;
+  base_ref?: string;
   thread_refs?: ThreadRefs;
   status: string;
 }
@@ -416,7 +421,8 @@ export async function readLimits(root: string): Promise<Limits> {
       limits.stale_minutes = parsed.stale_minutes;
     }
     if (parsed.speculative === true) limits.speculative = true;
-    if (typeof parsed.global_max_parallel === "number" && parsed.global_max_parallel > 0) {
+    if (parsed.global_max_parallel !== undefined) {
+      if (typeof parsed.global_max_parallel !== "number" || !Number.isSafeInteger(parsed.global_max_parallel) || parsed.global_max_parallel < 1) throw new Error("global_max_parallel must be a positive integer");
       limits.global_max_parallel = parsed.global_max_parallel;
     }
   } catch (error) {
@@ -432,24 +438,6 @@ function asRecord(value: unknown): Record<string, unknown> | null {
 
 function text(value: unknown): string | undefined {
   return typeof value === "string" && value.trim() !== "" ? value : undefined;
-}
-
-async function readEvents(root: string): Promise<Record<string, unknown>[]> {
-  let raw: string;
-  try {
-    raw = await readFile(eventsFile(root), "utf8");
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") return [];
-    throw error;
-  }
-  const events: Record<string, unknown>[] = [];
-  for (const line of raw.split("\n")) {
-    const trimmed = line.trim();
-    if (!trimmed) continue;
-    const parsed = asRecord(JSON.parse(trimmed) as unknown);
-    if (parsed) events.push(parsed);
-  }
-  return events;
 }
 
 function threadRefs(value: unknown): ThreadRefs | undefined {
@@ -485,6 +473,8 @@ export function foldSlices(events: readonly Record<string, unknown>[]): SliceSta
         last_heartbeat_at: current?.last_heartbeat_at ?? null,
         worker_ref: text(event.worker_ref) ?? current?.worker_ref,
         branch: text(event.branch) ?? current?.branch,
+        repo_root: text(event.repo_root) ?? current?.repo_root,
+        base_ref: text(event.base_ref) ?? current?.base_ref,
         thread_refs: threadRefs(event.thread_refs) ?? current?.thread_refs,
         status: status ?? "running",
       });
@@ -494,11 +484,14 @@ export function foldSlices(events: readonly Record<string, unknown>[]): SliceSta
     if (!current) continue;
     if (type === "worker_progress") {
       current.last_heartbeat_at = created;
+      if (text(event.worker_ref)) current.worker_ref = text(event.worker_ref);
       if (status) current.status = status;
       continue;
     }
     if (status && TERMINAL.has(status)) current.status = status;
-    if (type === "needs_review" || type === "blocked") current.status = type === "needs_review" ? "needs_review" : "blocked";
+    if (type === "needs_review" || type === "blocked" || type === "needs_approval") current.status = type;
+    // Human decisions close attention items, never silently restart a worker.
+    if (type === "review_decided") current.status = event.decision === "reject" ? "cancelled" : event.decision === "changes_requested" ? "blocked" : current.status;
   }
   return [...slices.values()];
 }
@@ -528,17 +521,51 @@ async function lastCommitIso(root: string, branch: string): Promise<string | nul
 }
 
 export async function activeSlices(root: string): Promise<SliceState[]> {
-  const events = await readEvents(root);
-  return foldSlices(events).filter((slice) => slice.status === "queued" || slice.status === "running");
+  return (await allSlices(root)).filter((slice) => slice.status === "queued" || slice.status === "running");
 }
 
-async function drifted(root: string, contractId: string | undefined, checkDrift: boolean): Promise<boolean> {
-  if (!checkDrift || !contractId) return false;
+function eventTime(value: unknown): number | null {
+  const parsed = Date.parse(String(value ?? ""));
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function eventSequence(value: unknown): number | null {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+/** Time order when both timestamps parse. Otherwise sequence, then original file order. */
+export function compareEvents(left: Record<string, unknown>, right: Record<string, unknown>, leftIndex: number, rightIndex: number): number {
+  const leftTime = eventTime(left.created_at);
+  const rightTime = eventTime(right.created_at);
+  if (leftTime !== null && rightTime !== null && leftTime !== rightTime) return leftTime - rightTime;
+  const leftSequence = eventSequence(left.sequence);
+  const rightSequence = eventSequence(right.sequence);
+  if (leftSequence !== null && rightSequence !== null && leftSequence !== rightSequence) return leftSequence - rightSequence;
+  return leftIndex - rightIndex;
+}
+
+export async function allSlices(root: string): Promise<SliceState[]> {
+  const events = await readEvents(root);
+  const inbox = await readInbox(root);
+  // Fold the attention log directly instead of double-writing a second state event.
+  const combined = [...events, ...inbox.map((event) => ({ ...event }))].map((event, index) => ({ event, index }));
+  combined.sort((left, right) => compareEvents(left.event, right.event, left.index, right.index));
+  return foldSlices(combined.map((item) => item.event));
+}
+
+async function drifted(root: string, slice: SliceState, checkDrift: boolean): Promise<boolean> {
+  if (!checkDrift) return false;
+  if (!slice.contract_id) throw new Error("slice has no contract_id");
+  const result = await checkContract(root, slice.contract_id, { repoRoot: slice.repo_root, base: slice.base_ref, head: slice.branch });
+  return !result.ok;
+}
+
+async function driftProblem(root: string, slice: SliceState, checkDrift: boolean): Promise<{ drift: boolean; error?: string }> {
   try {
-    const result = await checkContract(root, contractId);
-    return !result.ok;
-  } catch {
-    return false;
+    return { drift: await drifted(root, slice, checkDrift) };
+  } catch (error) {
+    return { drift: true, error: error instanceof Error ? error.message : String(error) };
   }
 }
 
@@ -565,10 +592,11 @@ export async function runWatchdog(
   const flagged: WatchdogFlag[] = [];
 
   for (const slice of slices) {
-    const commitAt = slice.branch ? await lastCommitIso(root, slice.branch) : null;
+    const commitAt = slice.branch ? await lastCommitIso(slice.repo_root ?? root, slice.branch) : null;
     const progressAt = laterIso(laterIso(slice.dispatched_at, slice.last_heartbeat_at), commitAt);
     const idle = idleMinutes(progressAt, now);
-    const drift = await drifted(root, slice.contract_id, options.checkDrift !== false);
+    const problem = await driftProblem(root, slice, options.checkDrift !== false);
+    const drift = problem.drift;
     const stalled = idle >= staleMinutes;
     if (!drift && !stalled) continue;
     const reason: BlockReason = drift ? "drift" : "stalled";
@@ -594,7 +622,7 @@ export async function runWatchdog(
       .join(" -> ");
     const summary =
       reason === "drift"
-        ? `Check failed for ${hop}. Paths drifted outside the frozen contract.`
+        ? `Check failed for ${hop}. ${problem.error ? "Unable to inspect the recorded repository/branch; run check for details." : "Paths drifted outside the frozen contract."}`
         : `No progress on ${hop} for ${idle}m.`;
     const filed = await addInboxItem(root, {
       type: "blocked",
@@ -633,31 +661,103 @@ export interface SliceStartInput {
   branch?: string;
   threadRefs?: ThreadRefs;
   createdAt?: string;
+  repoRoot?: string;
+  base?: string;
+  replace?: boolean;
+}
+
+async function dispatchTerms(root: string, contractId: string, sliceId: string) {
+  const markdown = await readFile(contractFile(root, contractId), "utf8");
+  const status = /^Status:[ \t]*(.+)$/im.exec(markdown)?.[1]?.trim();
+  if (status !== "frozen") throw new Error("contract must be frozen before dispatch or resume");
+  const human = /^Frozen by:[ \t]*(.+)$/im.exec(markdown)?.[1]?.trim().replace(/^`|`$/g, "");
+  const frozenAt = /^Frozen at:[ \t]*(.+)$/im.exec(markdown)?.[1]?.trim().replace(/^`|`$/g, "");
+  if (!human || human.startsWith("<")) throw new Error("contract must record Frozen by");
+  if (!frozenAt || !Number.isFinite(Date.parse(frozenAt))) throw new Error("contract must record a valid Frozen at");
+  const paths = parseContractPaths(markdown);
+  if (!paths.allowed.length) throw new Error("contract needs non-empty Allowed paths");
+  if (!paths.forbidden.length) throw new Error("contract needs non-empty Forbidden paths");
+  const section = markdown.split(/^##[ \t]+/m).find((part) => /^Slices\b/i.test(part)) ?? "";
+  const rows = section.split("\n").map((line) => /^\|[ \t]*`?([^|`]+)`?[ \t]*\|/.exec(line)?.[1]?.trim());
+  if (!/^[A-Za-z0-9._-]+$/.test(sliceId) || !rows.includes(sliceId)) throw new Error(`slice ${sliceId} is not in the Slices table`);
+  const cap = Number(/^max_parallel:[ \t]*(\S+)[ \t]*$/im.exec(section)?.[1] ?? 3);
+  if (!Number.isSafeInteger(cap) || cap < 1) throw new Error("max_parallel must be a positive integer");
+  return { cap, paths };
 }
 
 /** Record a dispatched slice and install the local timer when work is open. */
 export async function startSlice(root: string, input: SliceStartInput): Promise<{ timer: TimerInstall; active: number }> {
-  const threadRefs: ThreadRefs = {};
-  if (input.threadRefs?.pr) threadRefs.pr = input.threadRefs.pr;
-  if (input.threadRefs?.issue) threadRefs.issue = input.threadRefs.issue;
-  if (input.threadRefs?.chat) threadRefs.chat = input.threadRefs.chat;
-  const event = {
-    id: newEventId(),
-    type: "worker_dispatched",
-    title: input.title,
-    summary: assertSummary(input.summary),
-    created_at: input.createdAt ?? new Date().toISOString(),
-    source_task_id: input.sourceTaskId,
-    contract_id: input.contractId,
-    slice_id: input.sliceId,
-    status: "running",
-    ...(input.workerRef ? { worker_ref: input.workerRef } : {}),
-    branch: input.branch ?? `ship/${input.contractId}/${input.sliceId}`,
-    ...(Object.keys(threadRefs).length > 0 ? { thread_refs: threadRefs } : {}),
-  };
-  await mkdir(join(root, ".agent-ship"), { recursive: true });
-  await appendFile(eventsFile(root), `${JSON.stringify(event)}\n`, "utf8");
-  const active = (await activeSlices(root)).length;
-  const timer = active > 0 ? await installWatchdogTimer(root) : await uninstallWatchdogTimer(root);
-  return { timer, active };
+  return withLock(join(root, ".agent-ship"), async () => {
+    const summary = assertSummary(input.summary);
+    for (const [name, value] of Object.entries({ title: input.title, sourceTaskId: input.sourceTaskId, sliceId: input.sliceId })) {
+      if (!value.trim() || /[\r\n\0]/.test(value)) throw new Error(`${name} must be non-empty single-line text`);
+    }
+    const { cap, paths } = await dispatchTerms(root, input.contractId, input.sliceId);
+    const previous = await allSlices(root);
+    if (previous.some((slice) => slice.source_task_id === input.sourceTaskId)) throw new Error("source_task_id has already been dispatched");
+    const sameSlice = previous.filter((slice) => slice.contract_id === input.contractId && slice.slice_id === input.sliceId);
+    if (sameSlice.length && !(input.replace && sameSlice.every((slice) => slice.status === "failed" || slice.status === "cancelled"))) throw new Error("slice already dispatched; only failed/cancelled work may be replaced with --replace");
+    const active = previous.filter((slice) => slice.status === "running" || slice.status === "queued");
+    const limits = await readLimits(root);
+    if (active.length >= limits.global_max_parallel) throw new Error("global_max_parallel reached");
+    if (active.filter((slice) => slice.contract_id === input.contractId).length >= cap) throw new Error("contract max_parallel reached");
+    const repo = await repositoryRoot(input.repoRoot ?? root, true);
+    await assertSingleRepository(repo, paths.allowed);
+    const base = await baseCommit(repo, input.base);
+    const branch = input.branch ?? `ship/${input.contractId}/${input.sliceId}`;
+    if (branch.startsWith("-")) throw new Error("branch must be a Git ref, not an option");
+    const baseHint = input.base ?? "main";
+    try {
+      await gitOutput(repo, ["rev-parse", "--verify", `${branch}^{commit}`]);
+    } catch {
+      throw new Error(`branch ${branch} does not exist in ${repo}; create it first (git branch ${branch} ${baseHint})`);
+    }
+    const threadRefs: ThreadRefs = {};
+    if (input.threadRefs?.pr) threadRefs.pr = input.threadRefs.pr;
+    if (input.threadRefs?.issue) threadRefs.issue = input.threadRefs.issue;
+    if (input.threadRefs?.chat) threadRefs.chat = input.threadRefs.chat;
+    const event = {
+      id: newEventId(),
+      type: "worker_dispatched",
+      title: input.title,
+      summary,
+      created_at: input.createdAt ?? new Date().toISOString(),
+      source_task_id: input.sourceTaskId,
+      contract_id: input.contractId,
+      slice_id: input.sliceId,
+      status: "running",
+      ...(input.workerRef ? { worker_ref: input.workerRef } : {}),
+      branch,
+      repo_root: repo,
+      base_ref: base,
+      sequence: await nextSequence(root),
+      ...(Object.keys(threadRefs).length > 0 ? { thread_refs: threadRefs } : {}),
+    };
+    await mkdir(join(root, ".agent-ship"), { recursive: true });
+    await appendFile(eventsFile(root), `${JSON.stringify(event)}\n`, "utf8");
+    const count = (await activeSlices(root)).length;
+    const timer = count > 0 ? await installWatchdogTimer(root) : await uninstallWatchdogTimer(root);
+    return { timer, active: count };
+  });
+}
+
+export async function updateSlice(root: string, taskId: string, status: string, summary = "Worker status updated.", workerRef?: string): Promise<{ active: number; timer: TimerInstall }> {
+  if (!["running", "queued", "needs_review", "blocked", "needs_approval", "failed", "cancelled"].includes(status)) throw new Error("invalid slice status");
+  return withLock(join(root, ".agent-ship"), async () => {
+    const slices = await allSlices(root);
+    const current = slices.find((slice) => slice.source_task_id === taskId);
+    if (!current) throw new Error(`unknown task ${taskId}`);
+    if (status === "running" || status === "queued") {
+      const decisions = (await readInbox(root)).filter((event) => event.type === "review_decided" && event.source_task_id === taskId);
+      const latest = decisions[decisions.length - 1];
+      if ((current.status === "needs_review" && (latest?.type !== "review_decided" || latest.decision !== "changes_requested")) || current.status === "failed" || current.status === "cancelled") throw new Error("closed or unreviewed work cannot resume; use a new contract or explicitly replace failed/cancelled work");
+      if ((await listInbox(root, { openOnly: true })).some((event) => event.type !== "review_decided" && event.source_task_id === taskId)) throw new Error("task has an open attention item; record the human decision before resuming");
+      const { cap } = await dispatchTerms(root, current.contract_id ?? "", current.slice_id ?? "");
+      const active = slices.filter((slice) => slice.source_task_id !== taskId && (slice.status === "running" || slice.status === "queued"));
+      if (active.length >= (await readLimits(root)).global_max_parallel || active.filter((slice) => slice.contract_id === current.contract_id).length >= cap) throw new Error("parallel limit reached; cannot resume");
+    }
+    await appendFile(eventsFile(root), `${JSON.stringify({ id: newEventId(), type: "worker_progress", title: current.title, summary: assertSummary(summary), source_task_id: taskId, contract_id: current.contract_id, slice_id: current.slice_id, created_at: new Date().toISOString(), sequence: await nextSequence(root), ...(workerRef ? { worker_ref: workerRef } : {}), status })}\n`);
+    const active = (await activeSlices(root)).length;
+    return { active, timer: active ? await installWatchdogTimer(root) : await uninstallWatchdogTimer(root) };
+  });
 }

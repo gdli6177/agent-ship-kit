@@ -42,6 +42,7 @@ export interface ThreadRefs {
 
 /** Open inbox line. Field names match events/schema.json. */
 export interface AttentionEvent {
+  sequence?: number;
   id: string;
   type: AttentionType;
   title: string;
@@ -60,6 +61,7 @@ export interface AttentionEvent {
 }
 
 export interface ReviewDecidedEvent {
+  sequence?: number;
   id: string;
   type: "review_decided";
   title: string;

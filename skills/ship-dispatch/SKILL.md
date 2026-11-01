@@ -14,7 +14,8 @@ description: >-
 
 The captain is a router, not an executor. Dispatch is a gate in front of
 whatever orchestrator the human already uses. This skill does not schedule a
-fleet, does not keep a worker roster, and does not merge or deploy.
+fleet, does not keep a worker roster, and does not merge or deploy. Templates
+and adapters live in the kit at `$HOME/.agent-ship-kit/current/`.
 
 ## Router
 
@@ -58,7 +59,7 @@ If any line fails, do not spawn. Tell the human which line failed.
 
 ## Parallel caps
 
-- Global cap: count the latest dispatch-log row of every contract under
+- Global cap: use the shared CLI event/inbox running view for every contract under
   `.agent-ship/contracts/` whose status is `queued` or `running`. The ceiling
   is `global_max_parallel` in `.agent-ship/limits.json` when the human put a
   positive integer there, otherwise 3. Do not raise it yourself.
@@ -72,34 +73,51 @@ If any line fails, do not spawn. Tell the human which line failed.
 
 ## Spawn
 
-1. Build the worker prompt from the contract slice only: goal of that slice,
-   the acceptance lines it owns, Allowed paths, Forbidden paths, the repo,
-   and the branch name `ship/<contract_id>/<slice_id>`. Copy both path lists
-   verbatim. Do not attach the captain chat, tokens, or "merge when green" /
-   "deploy when green". If either path list is missing, stop and send the
-   contract back through `ship-contract`.
-2. Call adapter `spawn` with the contract path, slice id, and that prompt.
-   Fail closed if the adapter cannot show that the contract is frozen.
-3. Record `task_id` and `worker_ref` on the contract's dispatch log. Appending
-   a log row is not editing the frozen terms. Write the contract id to
-   `.agent-ship/active-contract` so the local pre-commit hook checks this
-   contract. That file is local to the clone.
-4. Record the slice and arm the watchdog timer. This installs a user-level
-   cron snippet and launchd plist outside the repo the first time a slice is
-   open. Later slices leave the timer in place.
+For multiple repositories/worktrees, read `docs/workspace-parallel.md`.
+Use one shared state `--root` for contracts, budgets and inbox, and a distinct
+`--repo` for each execution checkout. Allowed/Forbidden paths are relative to
+the execution repository. Never let parallel workers share a checkout or index.
+
+1. Build the worker prompt from its frozen slice, acceptance lines, Allowed
+   paths, Forbidden paths, repository and branch. Do not attach captain chat,
+   secrets, merge instructions or production deployment permission.
+2. Prepare the isolated checkout and branch using the orchestrator's supported
+   facilities. Choose a stable kit task id before starting a model process.
+3. Reserve the task with `slice start`. This atomically checks the frozen
+   contract, slice membership, duplicate work and both parallel caps. The
+   branch must exist. If admission fails, do not spawn anything.
+
+Run this in the project directory. Use `agent-ship` on `PATH`. If that command is not found, use `node $HOME/.agent-ship-kit/current/cli/bin/agent-ship.js` with the same arguments.
 
 ```bash
-cd cli
-npm run agent-ship -- slice start --root .. \
-  --contract <contract_id> --slice <slice_id> \
-  --source-task-id <task_id> --title "<slice>" --summary "<one line>" \
-  --worker <worker_ref> --branch ship/<contract_id>/<slice_id>
+agent-ship slice start --root <shared_state_root> \
+  --repo <execution_checkout> --contract <contract_id> --slice <slice_id> \
+  --source-task-id <stable_kit_task_id> --title "<slice>" --summary "<one line>" \
+  --branch ship/<contract_id>/<slice_id> --base <base_ref>
 ```
-5. The worker returns evidence or an escalation to the captain. It does not
-   notify the human. Notification is `ship-notify`, after the captain has
-   filed an inbox item.
+
+4. Write the contract id to the execution checkout's
+   `.agent-ship/active-contract`. Install that checkout with `setup --root
+   <checkout> --state-root <shared_state_root>` so its hook reads the shared
+   contract and checks its own index.
+5. Call adapter spawn with the contract path, slice id, stable kit task id and
+   prompt. Map the kit id to the platform run id. Record its reference with
+   `slice update --root <shared_state_root> --source-task-id <id> --status
+   running --worker <platform_ref>`. Do not admit the slice a second time.
+6. If spawn fails, update the reservation to `failed`. Replace failed/cancelled
+   work only with human authorization, a new task id and `slice start --replace`.
+7. Append the human-readable dispatch log. The CLI event/inbox view is the
+   authoritative count for admission; the Markdown log is an audit view.
+
+The worker returns evidence or escalations to the captain. It does not notify
+the human. Notification is `ship-notify`, after the captain files an inbox item.
 
 ## While work is in flight
+
+Use `slice update --root <shared-root> --source-task-id <id> --status <status>`
+for real progress, failed/cancelled states and explicit resumption. Inbox
+needs_review/blocked/needs_approval items pause the running state automatically.
+Record the human decision before resuming; resumption rechecks both caps.
 
 - Poll adapter `status` when the human asks, or when you are about to file a
   review. Do not busy-loop.
@@ -123,8 +141,7 @@ mid-task decision, it returns a short note to the captain through `collect`
 2. Files the inbox item:
 
 ```bash
-cd cli
-npm run agent-ship -- inbox add --root .. \
+agent-ship inbox add \
   --type blocked \
   --title "<one line>" \
   --summary "<what the owner must decide>" \
