@@ -80,8 +80,13 @@ freeze, and do not spawn a worker.
    the captain deciding for itself, a worker or another agent cannot freeze.
 4. On freeze, copy the accepted text into
    `.agent-ship/contracts/<contract_id>.md` using `$HOME/.agent-ship-kit/current/templates/contract-card.md`.
-   Set status to `frozen`, record who froze it and when, and copy Allowed
-   paths and Forbidden paths. Set `max_parallel` (the template default is 3;
+   Set status to `frozen`. Record the exact plan in `Accepted text`, the human
+   in `Accepted by`, the time in `Accepted at`, and `Proposal id`. Also record
+   who froze it and when, and copy Allowed paths and Forbidden paths.
+   When `learning_required` is true, `slice start` refuses empty Accepted text,
+   Accepted by, Accepted at, or Proposal id, and refuses a proposal id that
+   does not match the contract or `--proposal`. The CLI enforces that record.
+   Set `max_parallel` (the template default is 3;
    use a lower number if the human asked; never pick a higher one, and never
    higher than the global cap in `templates/workflow.md`).
 5. Split the work into slices. One slice is one worker. Each slice lists the

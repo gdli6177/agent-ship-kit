@@ -10,9 +10,10 @@ agent-ship setup
 agent-ship setup --shared
 ```
 
-普通 setup 只在 `.agent-ship/team.json` 建立本地引用，不创建共享手册或修改已有资料。
-`--shared` 会创建可版本管理的 `agent-ship.team.json`，并在没有手册时创建
+普通 setup 只在 `.agent-ship/team.json` 建立本地引用，`learning_required` 默认为 false，不创建共享手册，也不给每次交付加经验检查。
+`--shared` 会创建可版本管理的 `agent-ship.team.json`（`learning_required` 默认为 true），并在没有手册时创建
 `docs/agent-team/handbook.md`。默认经验目录只放说明索引，不预填“经验”。
+`--shared` 成功后删除 `.agent-ship/team.json`，避免本地旧副本和共享配置各说一套。
 
 已有配置优先；没有配置时依次发现默认手册、`TEAM.md`、`docs/TEAM.md`、`docs/team/handbook.md`。
 也可明确引用已有来源：
@@ -40,7 +41,10 @@ agent-ship setup --shared --handbook docs/engineering/team.md --lessons docs/eng
 ```
 
 `rules` 可引用项目已有的 Markdown 规范。当前执行仓库的 `AGENTS.md` 也会进入必读引用。
-受管团队的 learning_required 固定为 true，不能通过配置悄悄跳过交付检查；没有新发现时使用 none。
+`learning_required` 可以是 true 或 false。普通 setup 默认 false，人不用为每条任务做经验检查。
+`--shared` 默认 true，表示受管团队要留审计。把它改成 false 并保存后，后续派工不再要求 lesson check。
+没有新发现时，独立核验者自己记录 `lesson check --outcome none`，不把这一步交给人。
+none 只是运行审计，不创建经验，也不通知人。船长仍然只有一位。
 `handbook` 可为 null，供只做本地接入、尚未采用共享手册的团队使用。
 共享状态根目录和执行仓库都可以提供规范；全局经验来源由共享状态根目录的配置指定。
 
@@ -66,6 +70,11 @@ agent-ship team context --tag git --tag parallel --project api-service
 ```sh
 agent-ship lesson show --id isolated-repositories
 ```
+
+`learning_required` 为 true 时，`slice start` 还要求 `--worker`，以及合同里的
+`Accepted text`（人接受的方案原文）、`Accepted by`、`Accepted at` 和 `Proposal id`。
+缺任何一项，或 `--proposal` / 方案卡里的编号和合同不一致，CLI 拒绝派工。
+这些字段由 CLI 强制检查，不是只写在技能说明里。
 
 `slice start` 支持相同的 `--tag`、`--project`，返回工人应加载的 context。
 派工事件记录 required source 引用、标签、项目标识和采用的经验编号，便于检查“经验是否曾被检索到”。
@@ -119,7 +128,8 @@ pending 默认最多返回 20 个任务编号与状态，并报告总量；不�
 
 ## 候选到活动经验
 
-只有完成来源、适用性、复用价值和语义查重核验后，才能激活：
+只有维护者完成来源、适用性、复用价值和语义查重核验后，才能激活。
+激活不是工人自审：`--reviewed-by` 不能等于卡片上的 `authored_by`，也不能等于该任务已记录的 `worker_ref`。
 
 ```sh
 agent-ship lesson review --id isolated-repositories --status active \

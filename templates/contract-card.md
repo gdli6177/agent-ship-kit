@@ -4,6 +4,9 @@ Status: frozen
 Contract id: `<contract_id>`
 Supersedes: `<previous contract id, or none>`
 Proposal id: `<proposal_id>`
+Accepted text: `<exact plan text the human accepted>`
+Accepted by: `<human>`
+Accepted at: `<ISO-8601>`
 Frozen by: `<human>`
 Frozen at: `<ISO-8601>`
 

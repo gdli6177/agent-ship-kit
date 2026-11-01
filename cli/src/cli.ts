@@ -46,7 +46,7 @@ Usage:
   agent-ship watchdog [--stale-minutes N] [--root DIR]
   agent-ship watchdog install|uninstall [--dry-run] [--root DIR]
   agent-ship slice start --contract ID --slice ID --source-task-id ID
-                       --title TEXT --summary TEXT [--repo DIR] [--base REF] [--replace] [--tag TAG ...] [--project ID] [--root DIR]
+                       --title TEXT --summary TEXT [--repo DIR] [--base REF] [--replace] [--worker REF] [--proposal ID] [--tag TAG ...] [--project ID] [--root DIR]
   agent-ship slice update --source-task-id ID --status STATUS [--summary TEXT] [--root DIR]
   agent-ship status --stale [--stale-minutes N] [--root DIR]
   agent-ship inbox add --title TEXT --summary TEXT --source-task-id ID
@@ -104,7 +104,7 @@ const VALUE_OPTIONS = new Set([
   "repo",
   "state-root",
   "status",
-  "handbook", "lessons", "tag", "project", "input", "reviewed-by", "review-after", "outcome", "candidate-id", "trigger",
+  "handbook", "lessons", "tag", "project", "proposal", "input", "reviewed-by", "review-after", "outcome", "candidate-id", "trigger",
 ]);
 const REPEATABLE = new Set(["evidence", "tag", "candidate-id", "trigger"]);
 const BOOL_FLAGS = new Set(["json", "latest", "help", "all", "shared", "uninstall", "purge", "staged", "stale", "dry-run", "replace"]);
@@ -361,6 +361,7 @@ async function runSliceStart(parsed: ParsedArgs, io: Io): Promise<number> {
     replace: parsed.flags.has("replace"),
     tags: parsed.values.get("tag"),
     project: one(parsed.values, "project"),
+    proposalId: one(parsed.values, "proposal"),
     threadRefs: {
       pr: one(parsed.values, "thread-pr"),
       issue: one(parsed.values, "thread-issue"),

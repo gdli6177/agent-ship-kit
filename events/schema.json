@@ -80,6 +80,9 @@
       }
     },
     "proposal_id": { "type": "string", "minLength": 1 },
+    "accepted_text": { "type": "string", "minLength": 1, "description": "Exact plan text the human accepted before dispatch." },
+    "accepted_by": { "type": "string", "minLength": 1 },
+    "accepted_at": { "type": "string", "minLength": 1 },
     "contract_id": { "type": "string", "minLength": 1 },
     "slice_id": { "type": "string", "minLength": 1 },
     "worker_ref": { "type": "string", "minLength": 1 },

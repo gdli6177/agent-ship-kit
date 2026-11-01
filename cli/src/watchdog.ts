@@ -667,6 +667,37 @@ export interface SliceStartInput {
   replace?: boolean;
   tags?: string[];
   project?: string;
+  proposalId?: string;
+}
+
+function contractField(markdown: string, label: string): string {
+  const match = new RegExp(`^${label}:[ \\t]*(.+)$`, "im").exec(markdown);
+  const value = match?.[1]?.trim().replace(/^`|`$/g, "") ?? "";
+  if (!value || (value.startsWith("<") && value.endsWith(">"))) return "";
+  return value;
+}
+
+/** Exact plan the human accepted. Required when the team turns learning / natural-language consent on. */
+export async function assertDispatchConsent(root: string, contractId: string, proposalId?: string): Promise<{ proposalId: string; acceptedText: string; acceptedBy: string; acceptedAt: string }> {
+  const markdown = await readFile(contractFile(root, contractId), "utf8");
+  const acceptedText = contractField(markdown, "Accepted text");
+  const acceptedBy = contractField(markdown, "Accepted by");
+  const acceptedAt = contractField(markdown, "Accepted at");
+  const recordedProposal = contractField(markdown, "Proposal id");
+  if (!acceptedText) throw new Error("contract must record Accepted text");
+  if (!acceptedBy) throw new Error("contract must record Accepted by");
+  if (!acceptedAt || !Number.isFinite(Date.parse(acceptedAt))) throw new Error("contract must record a valid Accepted at");
+  if (!recordedProposal) throw new Error("contract must record Proposal id");
+  if (proposalId && proposalId !== recordedProposal) throw new Error(`proposal id mismatches ${recordedProposal}`);
+  const proposalPath = join(root, ".agent-ship", "proposals", `${recordedProposal}.md`);
+  try {
+    const proposal = await readFile(proposalPath, "utf8");
+    const proposalRecorded = contractField(proposal, "Proposal id");
+    if (proposalRecorded && proposalRecorded !== recordedProposal) throw new Error(`proposal id mismatches ${proposalPath}`);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+  }
+  return { proposalId: recordedProposal, acceptedText, acceptedBy, acceptedAt };
 }
 
 async function dispatchTerms(root: string, contractId: string, sliceId: string) {
@@ -706,6 +737,8 @@ export async function startSlice(root: string, input: SliceStartInput) {
     if (active.filter((slice) => slice.contract_id === input.contractId).length >= cap) throw new Error("contract max_parallel reached");
     const repo = await repositoryRoot(input.repoRoot ?? root, true);
     const context = await teamContext(root, { tags: input.tags, project: input.project, repo });
+    const consent = context.learning_required ? await assertDispatchConsent(root, input.contractId, input.proposalId) : undefined;
+    if (context.learning_required && !input.workerRef?.trim()) throw new Error("managed tasks require --worker");
     await assertSingleRepository(repo, paths.allowed);
     const base = await baseCommit(repo, input.base);
     const branch = input.branch ?? `ship/${input.contractId}/${input.sliceId}`;
@@ -735,6 +768,7 @@ export async function startSlice(root: string, input: SliceStartInput) {
       repo_root: repo,
       base_ref: base,
       learning_required: context.learning_required,
+      ...(consent ? { proposal_id: consent.proposalId, accepted_text: consent.acceptedText, accepted_by: consent.acceptedBy, accepted_at: consent.acceptedAt } : {}),
       context_refs: context.required_sources,
       lesson_ids: context.lessons.map((lesson) => lesson.id),
       context_tags: context.query.tags,

@@ -67,7 +67,7 @@ Or:
 Changes: when the filter is on, a task should disappear immediately after I complete it.
 ```
 
-The captain records your decision, returns corrections to the original task and verifies again. An expanded scope gets a revised proposal first. Internal checks, verifier repair loops and routine learning checks stay within the team; you do not need to maintain a lesson for every task. Merge and release through your normal project process.
+The captain records your decision, returns corrections to the original task and verifies again. An expanded scope gets a revised proposal first. Internal checks, verifier repair loops and routine learning checks stay within the team; you do not need to maintain a lesson for every task. Plain `setup` sets `learning_required` to false. `--shared` sets it to true and removes a stale `.agent-ship/team.json`. Either value is valid in the team config. When the check is on, the independent verifier records `lesson check --outcome none` itself if there is nothing new to keep; that audit line is not a step for you. A managed dispatch also requires the contract's Accepted text, Accepted by, Accepted at, and Proposal id — the exact plan, who accepted it, and when — and the CLI refuses `slice start` when they are empty or the proposal id does not match. Merge and release through your normal project process.
 
 Ordinary reviews are pull by default: ask for progress or results when you return. Continuous background execution and push notifications depend on the connected host and configuration; installation alone does not provide them.
 

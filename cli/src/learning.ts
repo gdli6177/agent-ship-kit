@@ -23,9 +23,12 @@ export interface Lesson {
   reviewed_by?: string;
   review_note?: string;
   review_after?: string;
+  authored_by?: string;
 }
 function text(value: unknown, name: string, max = 400): string {
-  if (typeof value !== "string" || !value.trim() || value.length > max || /[\r\n\0]/.test(value)) throw new Error(`invalid ${name}`);
+  if (typeof value !== "string" || !value.trim() || value.length > max || /[\r\n\0]/.test(value)) {
+    throw new Error(`invalid ${name}; must be a single line of at most ${max} characters`);
+  }
   return value.trim();
 }
 function strings(value: unknown, name: string, max: number): string[] {
@@ -35,7 +38,7 @@ function strings(value: unknown, name: string, max: number): string[] {
 function parseLesson(value: unknown): Lesson {
   if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("lesson must be an object");
   const c = value as Record<string, unknown>;
-  const keys = ["id", "title", "summary", "when", "action", "tags", "project", "evidence", "source_task_id", "reuse_reason", "status", "updated_at", "reviewed_by", "review_note", "review_after"];
+  const keys = ["id", "title", "summary", "when", "action", "tags", "project", "evidence", "source_task_id", "reuse_reason", "status", "updated_at", "reviewed_by", "review_note", "review_after", "authored_by"];
   if (Object.keys(c).some((key) => !keys.includes(key))) throw new Error("unknown lesson field");
   const id = text(c.id, "id", 80);
   if (!ID.test(id) || !STATUSES.includes(c.status as LessonStatus)) throw new Error("invalid lesson id/status");
@@ -43,6 +46,7 @@ function parseLesson(value: unknown): Lesson {
   if (lesson.evidence.some((pointer) => pointer.includes("<") || pointer.includes(">")) || lesson.source_task_id.includes("<")) throw new Error("lesson evidence/task placeholders must be replaced");
   if (!Number.isFinite(Date.parse(lesson.updated_at))) throw new Error("invalid lesson updated_at");
   if (c.project !== undefined) lesson.project = text(c.project, "project", 120);
+  if (c.authored_by !== undefined) lesson.authored_by = text(c.authored_by, "authored_by", 120);
   if (c.reviewed_by !== undefined) lesson.reviewed_by = text(c.reviewed_by, "reviewed_by", 120);
   if (c.review_note !== undefined) lesson.review_note = text(c.review_note, "review_note");
   if (c.review_after !== undefined) {
@@ -106,7 +110,13 @@ export async function reviewLesson(root: string, id: string, status: string, rev
     const card = (await readLessons(root)).find((entry) => entry.lesson.id === id);
     if (!card) throw new Error("lesson not found");
     const lesson = parseLesson({ ...card.lesson, status, reviewed_by: text(reviewer, "reviewed_by", 120), review_note: text(note, "review_note"), updated_at: new Date().toISOString(), ...(reviewAfter ? { review_after: reviewAfter } : {}) });
-    if (status === "active" && lesson.review_after && Date.parse(lesson.review_after) <= Date.now()) throw new Error("active lesson needs a future review_after date");
+    if (status === "active") {
+      const events = await readEvents(root);
+      const worker = events.filter((event) => event.source_task_id === lesson.source_task_id && typeof event.worker_ref === "string").at(-1)?.worker_ref;
+      const author = lesson.authored_by ?? (typeof worker === "string" ? worker : undefined);
+      if (author && author === lesson.reviewed_by) throw new Error("lesson author and reviewer must differ");
+      if (lesson.review_after && Date.parse(lesson.review_after) <= Date.now()) throw new Error("active lesson needs a future review_after date");
+    }
     const temporary = `${card.source}.tmp`;
     await writeFile(temporary, `${JSON.stringify(lesson, null, 2)}\n`, { flag: "wx" });
     await rename(temporary, card.source);
@@ -168,7 +178,7 @@ export async function checkLearning(root: string, task: string, outcome: string,
     const dispatch = events.find((event) => event.type === "worker_dispatched" && event.source_task_id === task);
     if (!dispatch) throw new Error("learning check requires a dispatched task");
     const worker = events.filter((event) => event.source_task_id === task && typeof event.worker_ref === "string").at(-1)?.worker_ref;
-    if (worker && worker === reviewer) throw new Error("the worker cannot independently review its own learning check");
+    if (typeof worker === "string" && worker === reviewer) throw new Error("reviewed-by must differ from the recorded worker");
     if (outcome === "none" && ids.length) throw new Error("none outcome cannot create candidate links");
     if (outcome === "candidate" && !ids.length) throw new Error("candidate outcome needs at least one candidate id");
     const cards = ids.length ? await readLessons(root) : [];

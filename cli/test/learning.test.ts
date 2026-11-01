@@ -196,19 +196,21 @@ test("setup, bounded dispatch context, verifier check and revised delivery form 
   await exec("git", ["commit", "-m", "baseline"], { cwd: root });
   await call(root, "setup", "--shared");
   await add(root, lesson("known")); await activate(root, "known");
-  await writeFile(join(root, ".agent-ship/contracts/c.md"), "Status: frozen\nFrozen by: Test human\nFrozen at: 2026-11-01T00:00:00Z\n## Allowed paths\n- README.md\n## Forbidden paths\n- forbidden.txt\n## Slices\nmax_parallel: 1\n| a | contract | pass |\n");
+  await writeFile(join(root, ".agent-ship/contracts/c.md"), "Status: frozen\nFrozen by: Test human\nFrozen at: 2026-11-01T00:00:00Z\nProposal id: proposal_c\nAccepted text: Isolated delivery of README.md\nAccepted by: Test human\nAccepted at: 2026-11-01T00:00:00Z\n## Allowed paths\n- README.md\n## Forbidden paths\n- forbidden.txt\n## Slices\nmax_parallel: 1\n| a | contract | pass |\n");
   const previous = process.env.AGENT_SHIP_TIMER_PLATFORM, previousHome = process.env.AGENT_SHIP_TIMER_HOME;
   process.env.AGENT_SHIP_TIMER_PLATFORM = "unsupported";
   process.env.AGENT_SHIP_TIMER_HOME = join(root, "timers");
   try {
-    const started = await call(root, "slice", "start", "--contract", "c", "--slice", "a", "--branch", "main", "--source-task-id", "task", "--title", "Task", "--summary", "Isolated delivery.", "--tag", "git", "--project", "api");
+    const started = await call(root, "slice", "start", "--contract", "c", "--slice", "a", "--branch", "main", "--source-task-id", "task", "--title", "Task", "--summary", "Isolated delivery.", "--tag", "git", "--project", "api", "--worker", "worker-ref", "--proposal", "proposal_c");
     assert.equal(started.code, 0, started.stderr);
     assert.equal(JSON.parse(started.stdout).context.lessons[0].id, "known");
     const events = (await readFile(join(root, ".agent-ship/events.jsonl"), "utf8")).trim().split("\n").map((line) => JSON.parse(line));
     assert.deepEqual(events[0].lesson_ids, ["known"]);
     assert.ok(events[0].context_refs.some((p: string) => p.endsWith("handbook.md")));
     await call(root, "slice", "update", "--source-task-id", "task", "--status", "running", "--worker", "worker-ref");
-    assert.equal((await call(root, "lesson", "check", "--source-task-id", "task", "--outcome", "none", "--reason", "Existing rules cover it.", "--reviewed-by", "worker-ref")).code, 1);
+    const selfReview = await call(root, "lesson", "check", "--source-task-id", "task", "--outcome", "none", "--reason", "Existing rules cover it.", "--reviewed-by", "worker-ref");
+    assert.equal(selfReview.code, 1);
+    assert.match(selfReview.stderr, /reviewed-by must differ from the recorded worker/);
     const review = () => call(root, "inbox", "add", "--title", "Ready", "--summary", "All evidence passed.", "--source-task-id", "task");
     assert.equal((await review()).code, 1);
     const checked = () => call(root, "lesson", "check", "--source-task-id", "task", "--outcome", "none", "--reason", "Existing rules cover it.", "--reviewed-by", "verifier-ref");
@@ -229,7 +231,7 @@ test("setup, bounded dispatch context, verifier check and revised delivery form 
   }
 }));
 
-test("managed checks cannot be disabled and pending history is bounded", async () => fixture(async (root) => {
+test("learning_required can be turned off and pending history is bounded", async () => fixture(async (root) => {
   await call(root, "setup", "--shared");
   const records = Array.from({ length: 25 }, (_, index) => JSON.stringify({ id: `evt_${index}`, type: "worker_dispatched", source_task_id: `task-${index}`, status: "cancelled", learning_required: true, created_at: new Date().toISOString(), sequence: index }));
   await writeFile(join(root, ".agent-ship/events.jsonl"), records.join("\n") + "\n");
@@ -240,7 +242,67 @@ test("managed checks cannot be disabled and pending history is bounded", async (
   const config = JSON.parse(await readFile(join(root, "agent-ship.team.json"), "utf8"));
   config.learning_required = false;
   await writeFile(join(root, "agent-ship.team.json"), JSON.stringify(config));
-  assert.equal((await call(root, "team", "context")).code, 1);
+  const context = await call(root, "team", "context");
+  assert.equal(context.code, 0, context.stderr);
+  assert.equal(JSON.parse(context.stdout).learning_required, false);
+}));
+
+test("plain setup turns learning off and shared setup deletes the local team file", async () => fixture(async (root) => {
+  assert.equal((await call(root, "setup")).code, 0);
+  const localPath = join(root, ".agent-ship/team.json");
+  assert.equal(JSON.parse(await readFile(localPath, "utf8")).learning_required, false);
+  assert.equal((await call(root, "setup", "--shared")).code, 0);
+  await assert.rejects(readFile(localPath));
+  assert.equal(JSON.parse(await readFile(join(root, "agent-ship.team.json"), "utf8")).learning_required, true);
+}));
+
+test("managed slice start requires consent text, a distinct worker, and the proposal id", async () => fixture(async (root) => {
+  await exec("git", ["config", "user.name", "Test"], { cwd: root });
+  await exec("git", ["config", "user.email", "test@example.com"], { cwd: root });
+  await writeFile(join(root, "README.md"), "baseline\n");
+  await exec("git", ["add", "README.md"], { cwd: root });
+  await exec("git", ["commit", "-m", "baseline"], { cwd: root });
+  await call(root, "setup", "--shared");
+  const previous = process.env.AGENT_SHIP_TIMER_PLATFORM;
+  const previousHome = process.env.AGENT_SHIP_TIMER_HOME;
+  process.env.AGENT_SHIP_TIMER_PLATFORM = "unsupported";
+  process.env.AGENT_SHIP_TIMER_HOME = join(root, "timers");
+  const body = "Status: frozen\nFrozen by: Test human\nFrozen at: 2026-11-01T00:00:00Z\nProposal id: proposal_c\nAccepted text: Ship the README change only.\nAccepted by: Test human\nAccepted at: 2026-11-01T00:00:00Z\n## Allowed paths\n- README.md\n## Forbidden paths\n- forbidden.txt\n## Slices\n| a | contract | pass |\n";
+  const path = join(root, ".agent-ship/contracts/c.md");
+  await writeFile(path, body.replace("Accepted text: Ship the README change only.\n", ""));
+  const start = (...extra: string[]) => call(root, "slice", "start", "--contract", "c", "--slice", "a", "--branch", "main", "--source-task-id", "consent-task", "--title", "Task", "--summary", "Go.", ...extra);
+  assert.match((await start("--worker", "worker-ref", "--proposal", "proposal_c")).stderr, /contract must record Accepted text/);
+  await writeFile(path, body);
+  assert.match((await start("--worker", "worker-ref", "--proposal", "other")).stderr, /proposal id mismatches proposal_c/);
+  await mkdir(join(root, ".agent-ship/proposals"), { recursive: true });
+  await writeFile(join(root, ".agent-ship/proposals/proposal_c.md"), "Proposal id: other_plan\n");
+  assert.match((await start("--worker", "worker-ref", "--proposal", "proposal_c")).stderr, /proposal id mismatches/);
+  await writeFile(join(root, ".agent-ship/proposals/proposal_c.md"), "Proposal id: proposal_c\n");
+  assert.match((await start("--proposal", "proposal_c")).stderr, /managed tasks require --worker/);
+  const started = await start("--worker", "worker-ref", "--proposal", "proposal_c");
+  assert.equal(started.code, 0, started.stderr);
+  const event = JSON.parse((await readFile(join(root, ".agent-ship/events.jsonl"), "utf8")).trim().split("\n")[0] ?? "{}");
+  assert.equal(event.accepted_text, "Ship the README change only.");
+  assert.equal(event.accepted_by, "Test human");
+  assert.equal(event.accepted_at, "2026-11-01T00:00:00Z");
+  assert.equal(event.proposal_id, "proposal_c");
+  assert.equal(event.worker_ref, "worker-ref");
+  if (previous === undefined) delete process.env.AGENT_SHIP_TIMER_PLATFORM; else process.env.AGENT_SHIP_TIMER_PLATFORM = previous;
+  if (previousHome === undefined) delete process.env.AGENT_SHIP_TIMER_HOME; else process.env.AGENT_SHIP_TIMER_HOME = previousHome;
+}));
+
+test("lesson activation rejects the author and field errors name the limit", async () => fixture(async (root) => {
+  await call(root, "setup", "--shared");
+  const tooLong = await add(root, lesson("too-long", { title: "t".repeat(121) }));
+  assert.equal(tooLong.code, 1);
+  assert.match(tooLong.stderr, /invalid title; must be a single line of at most 120 characters/);
+  const badWhen = await add(root, lesson("bad-when", { when: "w".repeat(201) }));
+  assert.match(badWhen.stderr, /invalid when; must be a single line of at most 200 characters/);
+  assert.equal((await add(root, lesson("authored", { authored_by: "same-person" }))).code, 0);
+  const denied = await call(root, "lesson", "review", "--id", "authored", "--status", "active", "--reviewed-by", "same-person", "--note", "Cannot review one's own card.");
+  assert.equal(denied.code, 1);
+  assert.match(denied.stderr, /lesson author and reviewer must differ/);
+  assert.equal((await call(root, "lesson", "review", "--id", "authored", "--status", "active", "--reviewed-by", "maintainer", "--note", "Independent review.")).code, 0);
 }));
 
 test("bad JSON is reported without copying its contents into output", async () => fixture(async (root) => {
