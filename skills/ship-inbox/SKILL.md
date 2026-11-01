@@ -1,13 +1,12 @@
 ---
 name: ship-inbox
 description: >-
-  Slash command /ship-inbox. The skill name is ship-inbox, matching that
-  command, so Cursor, Claude Code, and similar hosts load this file when the
-  human types /ship-inbox or /ship-inbox <id>. With no id, list open items
-  by priority and review them one at a time. With an id, jump to that item.
-  The owner replies pass, changes plus a reason, or reject. Record the
-  decision with the agent-ship inbox decide CLI. Also use when a notification
-  deep-links /ship-inbox <id>.
+  Review results in an agent-ship-kit captain conversation when the user
+  says 看看结果、有什么要我确认、通过、要改 or 不要了. Resolve the current
+  review item from context; ask only when the target is ambiguous. Also
+  supports /ship-inbox with an optional event id and notification deep links.
+  Present evidence one item at a time and record accept, changes_requested
+  or reject through the CLI; acceptance does not merge or deploy.
 ---
 
 # ship-inbox
@@ -23,7 +22,17 @@ live in the kit at `$HOME/.agent-ship-kit/current/templates/`.
 
 ## /ship-inbox
 
-1. If the owner passed an id, load that open item. If it is missing or already decided, say so and stop.
+Natural-language requests use the same procedure; slash commands and event ids
+are optional. Resolve the item from the displayed card and record its id
+yourself. With multiple possible targets, ask a short question using task
+titles. A progress-only question belongs to `ship-dispatch` and does not accept
+evidence. Keep at most one requested human decision in focus; routine none
+learning checks and verifier repair loops do not need human confirmation.
+For requested changes, compare them with the frozen scope. Route scope
+expansion through a revised proposal and explicit approval, rather than
+treating review feedback as permission to edit the frozen contract.
+
+1. If the request identifies an item by id or unambiguously refers to the displayed card, load that open item. If it is missing or already decided, say so and stop; do not apply the decision to another item.
 2. Otherwise list open items (`agent-ship inbox list --sort priority`) and sort `priority: high` first. Show that list, then start at the top.
 3. Present ONE compact card. Do not paste the worker chat or the whole packet. The card is the inline summary (at most 280 characters) plus the recall chain: contract → slice → worker/branch → PR → evidence, then the risks. Expand a section only when the owner asks.
 4. Wait. Map the reply:
@@ -47,6 +56,17 @@ a report, never at a storageState file.
 - Adapter `collect` returned for a task, or a worker session handed back a write-up.
 - The human asks what is waiting on them, or says `/ship-inbox`.
 - Someone asks to merge or ship. File or show the packet first. Do not merge.
+
+## 经验检查
+
+进入待审前，先完成独立代码核验，再由核验者判断本轮有无值得复用的经验。
+普通任务可以为 none，记录原因，不创建经验卡。候选须有适用条件、具体做法、证据、
+复用价值，并查重；用 lesson add 只创建 candidate，不能自行跳到 active。
+船长依据核验结果调用 `lesson check --source-task-id <id> --outcome none|candidate
+--reason <text> --reviewed-by <verifier-ref>`，有候选时附 candidate-id。
+受管任务缺少新鲜回执不能进入 needs_review；退回后恢复工作需要重新检查。
+状态、数量预算和 CLI 示例见安装包的 `docs/team-and-learning.md`。
+不要因为每次都检查，就要求每次生成经验文档或打断用户。
 
 ## Packet
 

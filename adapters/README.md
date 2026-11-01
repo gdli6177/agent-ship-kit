@@ -46,3 +46,10 @@ Herdr or Orca account.
 
 v0 ships notes, not SDK bindings. A binding belongs in a later change only if
 it still refuses to merge and deploy.
+
+## 团队上下文与收尾
+
+spawn 前将 slice start 返回的 context 引用与有限经验摘要交给对应工人。
+真实进展和状态用 slice update 回传，保留共享状态中的顺序。
+独立核验者先核验代码，再返回经验影响；船长记录 lesson check 后才添加待审项。
+取消/失败可以立即停止，船长随后检查 lesson pending。适配器不接管规范或知识源所有权。

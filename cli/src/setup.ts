@@ -5,6 +5,7 @@ import { promisify } from "node:util";
 import { fileURLToPath } from "node:url";
 import { gitPath, repositoryRoot } from "./repository.js";
 import { withLock } from "./storage.js";
+import { initializeTeam, requiredSources } from "./team.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -35,9 +36,14 @@ These rules stay in force for every agent in this checkout. \`/ship-setup\` rewr
 - Edit only Allowed paths on the frozen contract. Never touch Forbidden paths. Workers do the edits.
 - At most 3 workers may be queued or running across all contracts.
 - A separate read-only verifier must agree before a \`needs_review\` inbox item is filed. The verifier does not see the worker chat.
+- Read the configured team handbook and project rules via \`agent-ship team context\`. Search only relevant lesson summaries with explicit tags; do not load the entire history. Existing owner rules remain authoritative.
+- After independent verification, the captain records \`agent-ship lesson check\` with none/candidate, a reason and the verifier reference. Routine work may produce none. Candidates require evidence, scope, reuse value and deduplication before activation.
 - Only the human merges or ships. Do not merge to main or master and do not deploy to production.
 - Never read, write, or repeat passwords, cookies, or storageState contents.
-- Each \`/ship-*\` command is one skill whose name is the command without the slash. If this host loads skills, \`/ship-inbox\` opens \`ship-inbox\`. If it does not, follow the file below. Deterministic steps call the \`agent-ship\` CLI.
+- Manage the workflow for the human: new requests → ship-contract; explicit acceptance of the just-presented plan plus “start” → freeze, then ship-dispatch; progress questions → real adapter status and inbox; result review/decisions → ship-inbox. Resolve ids and next steps yourself. Ask only about material ambiguity, scope, permissions or human decisions, not routine mechanics. Never treat silence or casual acknowledgement as approval.
+- A clear “按这个方案开始 / Start with this plan” may freeze and authorize dispatch only when the exact presented proposal is unambiguous. Record its id, accepted text, human and time first. No repeated dispatch command is needed; freeze-only approval does not authorize starting.
+- Restore existing contracts, inbox and actual worker status on a new conversation; do not duplicate dispatch. A setup report or task record does not prove worker execution is available.
+- Each \`/ship-*\` command is an optional shortcut to the skill without the slash. Prefer natural language; do not make the human remember the sequence. Resolve skill files below under the installed kit at \`$HOME/.agent-ship-kit/current/\` (or the actual manual clone), not relative to this project. Deterministic steps call the \`agent-ship\` CLI.
   - \`/ship-setup\` → \`skills/ship-setup/SKILL.md\` → \`agent-ship setup\`
   - \`/ship-contract\` → \`skills/ship-contract/SKILL.md\`
   - \`/ship-dispatch\` → \`skills/ship-dispatch/SKILL.md\` → \`agent-ship slice start\`
@@ -48,7 +54,7 @@ These rules stay in force for every agent in this checkout. \`/ship-setup\` rewr
   - \`/ship-watchdog\` → \`skills/ship-watchdog/SKILL.md\` → \`agent-ship watchdog\` (independent of the captain; a timer runs it)
 - Speculative drafts stay off unless \`.agent-ship/limits.json\` sets \`"speculative": true\`. Even then, do not dispatch or edit code without a frozen contract, and only show the owner a draft that has evidence.
 
-人只和船长说话。船长只路由，不自己改代码。合同要人冻结。禁止路径不能碰。同时最多 3 个工人。独立核验通过后才进收件箱。合并和发布只由人做。不碰密码。命令用 /ship-*。
+人直接提需求、问进度和审结果，船长自行衔接技能并保管编号。明确“按这个方案开始”可确认刚展示的唯一方案并开工，不要求背命令。合同要人确认，禁止路径不能碰，同时最多 3 个工人；独立核验后才待审。船长不改产品代码，合并和发布只由人做，不碰密码。
 ${RULES_END}
 `;
 
@@ -77,6 +83,8 @@ export interface SetupOptions {
   uninstall?: boolean;
   purge?: boolean;
   stateRoot?: string;
+  handbook?: string;
+  lessons?: string;
 }
 
 function escapeRegExp(value: string): string {
@@ -457,6 +465,9 @@ export async function setupProject(root: string, options: SetupOptions = {}): Pr
   }
   if (options.uninstall || options.purge) return uninstallProject(root, options.purge === true);
   const stateRoot = options.stateRoot ? await repositoryRoot(resolve(options.stateRoot), true) : root;
+
+  actions.push(...await initializeTeam(root, { shared, kit, handbook: options.handbook, lessons: options.lessons }));
+  await requiredSources(root);
 
   await mkdir(join(root, ".agent-ship", "proposals"), { recursive: true });
   await mkdir(join(root, ".agent-ship", "contracts"), { recursive: true });

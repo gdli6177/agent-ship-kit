@@ -1,16 +1,37 @@
 ---
 name: ship-setup
 description: >-
-  Slash command /ship-setup. The skill name is ship-setup, matching that
-  command, so Cursor, Claude Code, and similar hosts load this file when the
-  human types /ship-setup. Initialize one clone via the agent-ship CLI
-  (setup, init, uninstall, purge). Also use it when AGENTS.md, local hooks,
-  or .git/info/exclude are missing the captain rules.
+  Set up agent-ship-kit in the current project when the user says 帮我接入、
+  初始化团队、你来当船长, or asks to adopt the kit. Also handles /ship-setup
+  and repairs missing captain rules or hooks. Keep ordinary setup local;
+  create shared handbook/config only when shared adoption is authorized.
 ---
 
 # ship-setup
 
 `/ship-setup` is the captain command. It runs `agent-ship setup` (alias `agent-ship init`) inside the project the human has open. It is idempotent: a second run updates the rules block and the hooks in place and does not duplicate them.
+
+## Conversational onboarding
+
+The current main conversation becomes the captain when the user asks to adopt
+the kit. Do not ask them to find another captain, memorize commands or choose
+an orchestrator without first inspecting available capabilities.
+
+- Read project rules and inspect existing setup before changing anything.
+  Choose the current host's skills and use its available execution mechanism;
+  ask only if a consequential choice cannot be resolved from the environment.
+- A request to install tools alone does not authorize project setup. Plain
+  adoption uses local setup; a request to create/reuse shared team rules and a
+  handbook authorizes `setup --shared`. Preserve existing content and hooks.
+- Verify CLI/setup and whether the host can actually create, inspect and
+  collect isolated workers and a separate verifier. The CLI is not a runtime.
+  If unavailable, report the blocker and one concrete next action; do not
+  make the user walk through contract creation before revealing this blocker.
+- Finish with a short readiness report (including changed shared files when
+  applicable) and “直接告诉我你想做什么 / Tell me what you want to build.”
+  New requests use `ship-contract`; the user need not invoke another skill.
+- On a new conversation, restore contracts, inbox and actual worker status
+  before suggesting work. Never infer live workers from records or re-dispatch.
 
 ## Local by default
 
@@ -37,17 +58,29 @@ It creates `.agent-ship/` (proposals, contracts, packets, e2e index, notify poli
 
 ## Always-on rules in the block
 
-- Talk to the human only as the captain. Do not open worker sessions.
+- Talk to the human only as the captain. The human need not open worker sessions.
 - Do not spawn a worker before the human freezes the contract.
 - Stay inside Allowed paths. Never touch Forbidden paths.
 - At most 3 workers across all contracts.
 - An independent verifier must agree before `needs_review` is filed.
 - Only the human merges or ships.
 - Never handle passwords, cookies, or storageState contents.
-- Use `/ship-setup`, `/ship-contract`, `/ship-dispatch`, `/ship-inbox`, `/ship-notify`, `/ship-e2e`, and `/ship-watchdog`. Each name matches a skill. `/ship-inbox <id>` is the review deep link.
+- Route natural-language requests to the matching skills. `/ship-*` commands are optional shortcuts, not steps for the human to memorize. `/ship-inbox <id>` remains a review deep link.
 
 ## Hooks
 
 `pre-commit` runs `agent-ship check --staged --contract <id>` when `.agent-ship/active-contract` names a contract. No active contract means the path check is skipped and any chained hook still runs. `pre-push` refuses `main`, `master`, and names listed in `.agent-ship/protected-branches`. A human may set `AGENT_SHIP_ALLOW_PROTECTED_PUSH=1`. The captain must not set that variable.
 
 The hooks are plain shell. They call the CLI with `shell` off inside the CLI. They do not talk to GitHub, GitLab, or any other forge.
+
+## 团队手册与经验入口
+
+普通 setup 只建立本地 team 引用。明确采用共享初始化时用 `setup --shared`：
+引用已有手册，或创建精简的 `docs/agent-team/handbook.md` 与可版本管理的
+`agent-ship.team.json`。既有配置和手册不覆盖；不同来源的参数发生冲突时报告给维护者。
+已有手册可通过 `--handbook` 指定，经验索引目录可用 `--lessons` 指定。
+
+手册、索引和活动经验由使用方拥有；运行回执留在 `.agent-ship/`。
+不预填经验，不把整段历史放进 AGENTS.md，不将团队约定写死在安装器中。
+工具升级/卸载不改写或删除共享手册、配置和经验。
+完整配置和职责见安装包的 `docs/team-and-learning.md`。

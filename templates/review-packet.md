@@ -61,6 +61,16 @@ Not run, and why:
 - E2E smoke rerun:
 - Agrees with the worker 与工人一致: yes / no
 
+## Learning check 经验检查
+
+- Outcome: none / candidate
+- Reason:
+- Verifier ref:
+- 本轮适用的团队/项目规则与经验编号:
+- 候选编号、来源与查重结论（none 时留空，不创建文件）:
+
+这里只放本轮短结论，完整证据保留指针。CLI 回执记录在运行事件中，不复制整个经验库。
+
 ## Risks left open 仍开放的风险
 
 接受之前人应该看到的风险。

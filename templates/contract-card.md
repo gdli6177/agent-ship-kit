@@ -4,6 +4,9 @@ Status: frozen
 Contract id: `<contract_id>`
 Supersedes: `<previous contract id, or none>`
 Proposal id: `<proposal_id>`
+Accepted text: `<exact plan text the human accepted>`
+Accepted by: `<human>`
+Accepted at: `<ISO-8601>`
 Frozen by: `<human>`
 Frozen at: `<ISO-8601>`
 
@@ -49,6 +52,14 @@ max_parallel: 3
 | Slice id | Inputs the worker may see 工人能看到的输入 | Done when 完成标准 |
 | --- | --- | --- |
 | `<slice_id>` | 本合同路径、本切片、允许/禁止路径。不要附上船长对话。 | `<acceptance lines this slice covers>` |
+
+## Standing context 长期上下文
+
+- 团队手册与项目规则引用（使用方已有来源优先）:
+- 本切片适用的经验标签与可选项目标识:
+- 采用的 active 经验编号（可为零；以派工记录为准）:
+
+工人读取适用规范，只加载相关经验摘要，按需展开原文。这里不复制全部历史或船长对话。
 
 ## Worker boundaries 工人边界
 

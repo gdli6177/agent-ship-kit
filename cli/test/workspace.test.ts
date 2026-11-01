@@ -300,7 +300,10 @@ test("parallel member and worktree deliveries use central contracts through real
     const checked = await call(root, "check", "--contract", id, "--slice", slice);
     assert.equal(checked.code, 0, checked.stderr);
     assert.deepEqual(JSON.parse(checked.stdout).changed, ["allowed.txt"]);
+    const learning = await call(root, "lesson", "check", "--source-task-id", `${id === "c" ? "member" : "tree"}-${slice}`, "--outcome", "none", "--reason", "Routine independent delivery; no new reusable finding.", "--reviewed-by", `verifier-${id}-${slice}`);
+    assert.equal(learning.code, 0, learning.stderr);
     const item = await call(root, "inbox", "add", "--title", "Ready", "--summary", "Commit hook and branch check passed.", "--source-task-id", `${id === "c" ? "member" : "tree"}-${slice}`, "--evidence", "https://example.com/test-report");
+    assert.equal(item.code, 0, item.stderr);
     assert.equal((await call(root, "inbox", "decide", JSON.parse(item.stdout).id, "accept")).code, 0);
   };
   await Promise.all(members.map((member, index) => deliver(member, "c", index === 0 ? "a" : "b")));

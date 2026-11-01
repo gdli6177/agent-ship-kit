@@ -172,6 +172,15 @@ test("install.sh installs from AGENT_SHIP_TARBALL and uninstalls only its skills
     const help = await exec(shim, ["--help"], { env: helpEnv, encoding: "utf8", timeout: 60_000 });
     assert.match(help.stdout, /agent-ship/);
 
+    const project = join(sandbox, "project");
+    await mkdir(project);
+    await exec("git", ["init", "-b", "main"], { cwd: project, env });
+    await exec(shim, ["setup", "--shared", "--root", project], { env: helpEnv, encoding: "utf8", timeout: 60_000 });
+    assert.match(await readFile(join(project, "docs", "agent-team", "handbook.md"), "utf8"), /团队工作手册/);
+    const team = await exec(shim, ["team", "context", "--root", project], { env: helpEnv, encoding: "utf8", timeout: 60_000 });
+    assert.equal(JSON.parse(team.stdout).learning_required, true);
+    assert.deepEqual(JSON.parse(team.stdout).lessons, []);
+
     const hookStyle = await exec(process.execPath, ["--import", "tsx", "src/cli.ts", "--help"], {
       cwd: join(kit, "cli"),
       env,

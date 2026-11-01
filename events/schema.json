@@ -7,6 +7,16 @@
   "additionalProperties": false,
   "required": ["id", "type", "title", "summary", "created_at", "source_task_id"],
   "properties": {
+    "learning_required": { "type": "boolean" },
+    "context_refs": { "type": "array", "items": { "type": "string" } },
+    "context_tags": { "type": "array", "maxItems": 12, "items": { "type": "string" } },
+    "project_id": { "type": "string" },
+    "lesson_ids": { "type": "array", "maxItems": 10, "items": { "type": "string" } },
+    "outcome": { "type": "string", "enum": ["none", "candidate"] },
+    "learning_reason": { "type": "string", "minLength": 1, "maxLength": 280 },
+    "reviewed_by": { "type": "string", "minLength": 1 },
+    "triggers": { "type": "array", "items": { "type": "string", "enum": ["user_correction", "verifier_return", "recurrence", "scope_discovery"] } },
+    "work_sequence": { "type": "integer", "minimum": 0 },
     "sequence": { "type": "integer", "minimum": 1, "description": "Local state-lock sequence, used to order equal-timestamp events across the lifecycle and inbox logs." },
     "id": {
       "type": "string",
@@ -24,7 +34,8 @@
         "blocked",
         "needs_approval",
         "review_decided",
-        "notify_planned"
+        "notify_planned",
+        "learning_checked"
       ]
     },
     "title": {
@@ -69,6 +80,9 @@
       }
     },
     "proposal_id": { "type": "string", "minLength": 1 },
+    "accepted_text": { "type": "string", "minLength": 1, "description": "Exact plan text the human accepted before dispatch." },
+    "accepted_by": { "type": "string", "minLength": 1 },
+    "accepted_at": { "type": "string", "minLength": 1 },
     "contract_id": { "type": "string", "minLength": 1 },
     "slice_id": { "type": "string", "minLength": 1 },
     "worker_ref": { "type": "string", "minLength": 1 },
@@ -107,6 +121,10 @@
     "note": { "type": "string" }
   },
   "allOf": [
+    {
+      "if": { "properties": { "type": { "const": "learning_checked" } }, "required": ["type"] },
+      "then": { "required": ["outcome", "learning_reason", "reviewed_by", "lesson_ids", "triggers", "work_sequence"] }
+    },
     {
       "if": {
         "properties": { "type": { "const": "needs_review" } },

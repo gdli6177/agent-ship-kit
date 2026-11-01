@@ -2,11 +2,78 @@
 
 # agent-ship-kit
 
-Multiple repositories or Git worktrees: see the [workspace parallel-delivery guide](docs/workspace-parallel.md).
+Start with [Quick Start](#quick-start). Configuration details: [team handbooks and bounded learning](docs/team-and-learning.md); execution isolation: [multiple repositories and worktrees](docs/workspace-parallel.md).
 
 agent-ship-kit is the acceptance-and-attention layer for parallel AI coding-agent delivery. A person talks to one captain from intake through ship. Workers are spawned on demand, one slice per frozen contract, and are not a standing roster. The kit sits on Herdr, Orca, Multica, or any other orchestrator through thin adapters, and it also works with no orchestrator at all. It does not schedule the fleet, does not merge to main, and does not deploy to production. The captain prepares a proposal, the human freezes the contract, workers return evidence, and the human accepts that evidence before anything ships.
 
 Status: v0. Skills, templates, an event schema, adapter notes, and a local inbox / notify CLI.
+
+## Quick Start
+
+**Describe the goal, approve the plan, judge the result. The captain manages the steps and ids; slash commands are optional.**
+
+### Once: ask your current agent to connect the project
+
+Open your usual agent in the target Git project and send:
+
+```text
+Install and set up https://github.com/gdli6177/agent-ship-kit for this project.
+Act as the captain and manage the workflow; I will describe what I need.
+Create or reuse a shared team handbook and preserve existing project rules.
+Inspect this host and its execution capabilities, then tell me whether we are ready.
+```
+
+The agent should read the installer and instructions, check Node.js 20+ and npm, select the current host's skills, run shared setup, and check whether it can create, inspect and collect independent workers and a verifier. Installation supports macOS, Linux and Windows WSL. Onboarding does not edit product code or start requirement work; changed shared files are listed for review.
+
+**You do not need to find another team lead.** This main conversation is the captain. Expect a short “Ready; tell me what you want to build”, or a real blocker and the next action. Reload skills or start a new session if the host requires it; a fresh captain restores records and checks actual status without duplicate dispatch.
+
+An installed CLI does not supply a worker runtime. The captain should discover execution gaps during onboarding rather than after asking you to approve work. See [Install](#install) and [Adapters](adapters/README.md) when details are needed.
+
+### Daily: say what you want
+
+```text
+Add an “unfinished only” filter to the task list. Keep other behavior unchanged.
+```
+
+The captain inspects the implementation, reads applicable rules and bounded lessons, and proposes acceptance checks. It shows one short plan: what changes, what is affected and how completion will be judged. It resolves technical details itself and asks only questions that need your decision.
+
+Revise the request if necessary. To approve the exact plan just shown and authorize work, reply:
+
+```text
+Start with this plan.
+```
+
+The captain records the explicit approval as a frozen contract, arranges isolated branches and real workers, and independently verifies results before review. You do not need to repeat proposal/contract ids or issue a dispatch command. If several plans could be meant, it asks which one. Silence, a casual “looks good” or the original request does not authorize starting.
+
+Stay in the same conversation while tasks run:
+
+| Say | The captain handles |
+| --- | --- |
+| `How is it going?` | Check real status; summarize progress, blockers and reviews. |
+| `Open another request for CSV export.` | Propose separately, check overlap and determine parallel eligibility. |
+| `Stop the previous task for now.` | Identify the target, stop it through the execution mechanism and record status. |
+
+### At delivery: inspect the result and decide
+
+Say “Show me the result.” The captain presents one short card: change, openable evidence, verification result and remaining risks. Reply:
+
+```text
+Pass.
+```
+
+Or:
+
+```text
+Changes: when the filter is on, a task should disappear immediately after I complete it.
+```
+
+The captain records your decision, returns corrections to the original task and verifies again. An expanded scope gets a revised proposal first. Internal checks, verifier repair loops and routine learning checks stay within the team; you do not need to maintain a lesson for every task. Plain `setup` sets `learning_required` to false. `--shared` sets it to true and removes a stale `.agent-ship/team.json`. Either value is valid in the team config. When the check is on, the independent verifier records `lesson check --outcome none` itself if there is nothing new to keep; that audit line is not a step for you. A managed dispatch also requires the contract's Accepted text, Accepted by, Accepted at, and Proposal id — the exact plan, who accepted it, and when — and the CLI refuses `slice start` when they are empty or the proposal id does not match. Merge and release through your normal project process.
+
+Ordinary reviews are pull by default: ask for progress or results when you return. Continuous background execution and push notifications depend on the connected host and configuration; installation alone does not provide them.
+
+### Details when you need them
+
+`/ship-*` commands are optional shortcuts. The tables below are for troubleshooting and advanced use. See [team configuration and learning budgets](docs/team-and-learning.md) and [multi-repository/worktree isolation](docs/workspace-parallel.md). Installation defaults to main; ask the agent to use the matching `--ref` when reviewing an unmerged feature.
 
 ## What you get
 
@@ -42,7 +109,7 @@ curl -fsSL https://raw.githubusercontent.com/gdli6177/agent-ship-kit/main/instal
 
 Windows: use WSL (Ubuntu), then run the command above inside it. Git Bash and MSYS are refused.
 
-Then open a project and tell the captain `/ship-setup`.
+After installation, follow [Quick Start](#quick-start) to designate the project's captain conversation, then use `/ship-setup`.
 
 ### Manual clone
 
@@ -64,7 +131,7 @@ These names are for the captain thread. They do not depend on a forge.
 
 | Command | What the captain does |
 | --- | --- |
-| `/ship-setup` | `agent-ship setup` in this clone only. Hooks go in `.git/hooks` and chain to any hook already there. Ignore rules go in `.git/info/exclude`, not the shared `.gitignore`. `--shared` opts into a committed ignore block and a shared `AGENTS.md` rules section. `--uninstall` removes the hooks and the rules block but keeps `.agent-ship/` excluded. `--uninstall --purge` deletes that directory too. Setup never sets `core.hooksPath`. |
+| `/ship-setup` | `agent-ship setup` in this clone only. Hooks go in `.git/hooks` and chain to any hook already there. Ignore rules go in `.git/info/exclude`, not the shared `.gitignore`. `--shared` opts into a committed ignore block and a shared `AGENTS.md` rules section, team profile and handbook. `--uninstall` removes the hooks and the rules block but keeps `.agent-ship/` excluded. `--uninstall --purge` deletes that directory too. Setup never sets `core.hooksPath`. |
 | `/ship-contract` | Draft one proposal, then a frozen contract after the human says so. |
 | `/ship-dispatch` | Spawn workers for a frozen contract. Does not edit code itself. |
 | `/ship-inbox` | List open items by priority, then review one at a time (contract, evidence, risks). The owner replies `pass`, `changes` plus a reason, or `reject`. |
@@ -108,7 +175,7 @@ The captain is a router. It does not edit code or run the long task, even when t
 
 `slice start` admits work only when the contract is frozen, `Frozen by` is a real name, `Frozen at` parses as a time, Forbidden paths is non-empty, the slice id is a row in the Slices table, and the branch already exists. The errors are `contract must record Frozen by`, `contract must record a valid Frozen at`, `contract needs non-empty Forbidden paths`, `slice <id> is not in the Slices table`, and `branch <name> does not exist in <repo>; create it first (git branch <name> <base>)`. Create the branch first. `.agent-ship/sequence` is the integer that orders events written in the same millisecond; do not edit it while a command holds the state lock. A lock directory `.agent-ship-lock` records `pid`, `hostname`, `started_at`, and `cmd`. A dead pid on this machine is reclaimed. Otherwise the error names the owner. Manual recovery is `rm -rf` on that lock directory after the owner has exited. See [docs/workspace-parallel.md](docs/workspace-parallel.md).
 
-## Quickstart without Multica
+## Inbox and notification smoke test (no workers)
 
 No orchestrator account, no `multica` binary, no webhook. The inbox is a JSONL file. The dry-run prints a plan and does not run it. A normal-priority item is pull: it stays on `inbox list` and matches no push rule. The high-priority example below has an evidence URL, so the plan is allowed and still not executed.
 

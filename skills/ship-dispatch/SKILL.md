@@ -5,7 +5,8 @@ description: >-
   that command, so hosts that support skills load this file when the human
   types /ship-dispatch. Spawn on-demand workers for a frozen contract under
   the global cap and max_parallel, and record the slice with agent-ship
-  slice start. Also use when a contract is frozen, when a worker is blocked
+  slice start. Also use for 开始、继续、做到哪了 in a captain conversation
+  with an identified frozen contract, when a worker is blocked
   or needs approval, or when mapping spawn onto Herdr, Orca, Multica, or a
   plain extra agent session.
 ---
@@ -28,6 +29,25 @@ implementing. The frozen contract is the handoff.
 Do not block waiting on a worker. Accept the owner's next request while
 slices run. Ask the adapter for status when you need it; do not sit in the
 worker session.
+
+Carry the contract/task references across skills yourself. A clear “按这个
+方案开始” after proposal review authorizes freezing plus dispatch; do not
+require `/ship-dispatch` or an id repeated by the human. For “做到哪了 / how is
+it going”, inspect real adapter status and inbox and return a short summary
+of running work, pending decisions and results. Status questions do not
+authorize new workers, replacement tasks or resumption of paused work.
+
+For “先停下 / stop for now”, resolve the task from context (ask only if
+ambiguous), use the execution mechanism to stop it, and record the actual
+result with `slice update`. Recording `cancelled` alone does not terminate a
+process. If the adapter cannot stop it, say so immediately; do not claim it
+stopped. Stop does not authorize a replacement worker.
+
+Handle in-scope technical questions and verifier corrections within the
+existing task. Interrupt the human only for missing user intent, scope changes,
+unavailable permissions/capabilities or a decision they must own. Do not pass
+internal logs or routine learning checks to them. Respect existing approvals;
+“continue” cannot silently expand scope or replace a failed worker.
 
 ## Thread subscription
 
@@ -71,6 +91,14 @@ If any line fails, do not spawn. Tell the human which line failed.
   orchestrator the human did not ask you to use.
 - There is no pre-built roster. Not spawning idle workers is the normal case.
 
+## 规范与经验上下文
+
+使用 `team context --repo <checkout> --tag <topic> [--project <id>]` 读取必读引用和
+匹配的 active 摘要。同样的标签和项目标识传给 `slice start`，将返回的 context
+交给工人：读取 required_sources，使用匹配经验，必要时只展开一条 `lesson show`。
+派工事件记录所用来源和经验编号。不要把候选、失效经验或整段历史当作执行规范。
+匹配的旧经验需要复核时先检查其适用条件；团队规则和项目原有权限继续有效。
+
 ## Spawn
 
 For multiple repositories/worktrees, read `docs/workspace-parallel.md`.
@@ -79,7 +107,7 @@ Use one shared state `--root` for contracts, budgets and inbox, and a distinct
 the execution repository. Never let parallel workers share a checkout or index.
 
 1. Build the worker prompt from its frozen slice, acceptance lines, Allowed
-   paths, Forbidden paths, repository and branch. Do not attach captain chat,
+   paths, Forbidden paths, repository and branch, plus applicable team/project rules and selected verified lessons. Do not attach captain chat,
    secrets, merge instructions or production deployment permission.
 2. Prepare the isolated checkout and branch using the orchestrator's supported
    facilities. Choose a stable kit task id before starting a model process.
@@ -165,6 +193,14 @@ When the human is not using Herdr, Orca, or Multica, `spawn` means one fresh
 agent session whose only task context is the slice. You are still the only
 agent in the human's thread. Do not pretend that session is a standing worker.
 
+## 失败、退回与收尾检查
+
+用户纠正、核验退回、同类问题复发或发现重要约束时，在当前任务记录短线索和证据。
+根因尚未证实时不要新增活动经验。只读核验者在完成独立代码核验之后，返回
+none/candidate、原因、证据和适用性；船长负责记录候选与 lesson check。
+failed/cancelled 必须能立即停工，随后用 `lesson pending` 查收尾遗漏，补经验检查。
+同一个坑再次发生时，结合已加载的经验编号检查检索、表达、执行和门禁，不直接再新增一条。
+
 ## Handoff
 
 When the worker reports done, do not file the inbox and do not call `/ship-inbox` yet.
@@ -172,4 +208,6 @@ When the worker reports done, do not file the inbox and do not call `/ship-inbox
 1. Spawn a separate read-only verifier. Its only prompt is `templates/verifier-prompt.md` plus the frozen contract path and the branch name. Do not attach the worker chat.
 2. The verifier re-runs the acceptance commands, `agent-ship check --contract <id>`, and any E2E smoke the contract requires.
 3. If the verifier disagrees, send that result back to the same worker. Do not tell the owner.
-4. If the verifier agrees, fill the packet's Verifier section and hand off to `ship-inbox`, which files `needs_review`. The notify text includes `/ship-inbox <id>`.
+4. After the verifier agrees on code and returns the learning assessment, the verifier records `lesson check` (none/candidate, reason, reviewed-by a verifier reference that is not the worker; candidate ids when needed). `none` is the normal audit line when there is nothing new to keep. Do not ask the human to perform or confirm that check. The CLI validates this round before needs_review when `learning_required` is true. Then fill the packet's Verifier section and hand off to `ship-inbox`, which files `needs_review`. The notify text includes `/ship-inbox <id>`.
+
+When `learning_required` is true, `slice start` requires `--worker`. The CLI also refuses the start unless the contract records Accepted text (the exact plan), Accepted by, Accepted at, and Proposal id, and refuses a proposal id that does not match `--proposal` or the proposal card.

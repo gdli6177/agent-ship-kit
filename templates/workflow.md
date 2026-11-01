@@ -65,6 +65,15 @@ Two ceilings, both defaulting to 3. The captain does not raise either one.
 Use the shared CLI event/inbox running view per task id; the Markdown dispatch log is an audit view. Reserve with `slice start` before adapter spawn. A new spawn has to fit under
 both the contract's remaining slots and the global remaining slots.
 
+## Conversation entry
+
+The human can say “加一个功能 / add a feature”, “按这个方案开始 / start with
+this plan”, “做到哪了 / how is it going” or “看看结果 / show me the result”.
+The captain routes to contract, dispatch/status or inbox skills and carries
+ids across them. Slash commands are optional. Keep technical preparation,
+independent verification, repair loops and learning checks inside the team;
+ask the human only for material intent, scope, permissions and decisions.
+
 ## Discussion and freeze
 
 While the proposal is `draft`, the captain talks freely and keeps that one
@@ -75,9 +84,14 @@ The contract file is written only after an explicit freeze:
 
 - "freeze"
 - "冻结合同"
-- a sentence that names the proposal id and accepts that exact text
+- a sentence accepting the exact text of the unambiguously identified proposal;
+  the captain resolves the id rather than requiring the human to type it
 
-"Looks good" without a proposal id is not a freeze. Silence is not a freeze.
+“按这个方案开始 / Start with this plan” directly after presenting one current
+proposal can freeze and authorize dispatch together. Record the resolved id,
+accepted text, human and time before dispatch. If the target/version is unclear,
+ask one focused question. Casual “looks good”, silence and the original request
+are not freezes. Freeze-only approval does not authorize starting.
 
 Changing a frozen contract does not edit that file. The captain stops the slices the change affects, drafts a new id with `Supersedes` pointing at the old one, and waits for another freeze. Finished work the new text does not touch is kept.
 
@@ -131,3 +145,11 @@ cards, events, policies, allowlists, or the captain thread. An evidence URL
 may point at a CI page the human can already open.
 
 多仓库与 worktree：共享状态根目录、执行 checkout、原子名额预留和显式恢复见 [工作空间接入说明](../docs/workspace-parallel.md)。
+
+## Team handbook and learning
+
+共享初始化建立或引用团队手册；普通 setup 只保留本地引用。形成方案和派工时读取
+适用规则及有限 active 经验，合同负责当前任务范围。验收后由独立核验者判断 none/candidate，
+船长记录 lesson check，再进收件箱。安全停工不会等待经验文档，结束后检查 lesson pending。
+候选经来源、适用性和查重核验后才 active；过期/失效条目退出默认摘要。
+详见[团队手册与经验回流](../docs/team-and-learning.md)。
