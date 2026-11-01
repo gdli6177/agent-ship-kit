@@ -2,6 +2,8 @@
 
 # agent-ship-kit
 
+Team handbooks and bounded learning: [setup, lesson admission, review gates and scoped retrieval](docs/team-and-learning.md).
+
 Multiple repositories or Git worktrees: see the [workspace parallel-delivery guide](docs/workspace-parallel.md).
 
 agent-ship-kit is the acceptance-and-attention layer for parallel AI coding-agent delivery. A person talks to one captain from intake through ship. Workers are spawned on demand, one slice per frozen contract, and are not a standing roster. The kit sits on Herdr, Orca, Multica, or any other orchestrator through thin adapters, and it also works with no orchestrator at all. It does not schedule the fleet, does not merge to main, and does not deploy to production. The captain prepares a proposal, the human freezes the contract, workers return evidence, and the human accepts that evidence before anything ships.
@@ -64,7 +66,7 @@ These names are for the captain thread. They do not depend on a forge.
 
 | Command | What the captain does |
 | --- | --- |
-| `/ship-setup` | `agent-ship setup` in this clone only. Hooks go in `.git/hooks` and chain to any hook already there. Ignore rules go in `.git/info/exclude`, not the shared `.gitignore`. `--shared` opts into a committed ignore block and a shared `AGENTS.md` rules section. `--uninstall` removes the hooks and the rules block but keeps `.agent-ship/` excluded. `--uninstall --purge` deletes that directory too. Setup never sets `core.hooksPath`. |
+| `/ship-setup` | `agent-ship setup` in this clone only. Hooks go in `.git/hooks` and chain to any hook already there. Ignore rules go in `.git/info/exclude`, not the shared `.gitignore`. `--shared` opts into a committed ignore block and a shared `AGENTS.md` rules section, team profile and handbook. `--uninstall` removes the hooks and the rules block but keeps `.agent-ship/` excluded. `--uninstall --purge` deletes that directory too. Setup never sets `core.hooksPath`. |
 | `/ship-contract` | Draft one proposal, then a frozen contract after the human says so. |
 | `/ship-dispatch` | Spawn workers for a frozen contract. Does not edit code itself. |
 | `/ship-inbox` | List open items by priority, then review one at a time (contract, evidence, risks). The owner replies `pass`, `changes` plus a reason, or `reject`. |

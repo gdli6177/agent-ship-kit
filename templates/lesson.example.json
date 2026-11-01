@@ -1,0 +1,11 @@
+{
+  "id": "isolated-repositories",
+  "title": "检查实际执行仓库",
+  "summary": "父仓库的 Git diff 不进入独立成员仓库。",
+  "when": "需求涉及多个独立 Git 仓库时。",
+  "action": "为切片登记执行仓库，并分别检查工人分支与基线。",
+  "tags": ["git", "multi-repository"],
+  "evidence": ["<test report or source pointer>"],
+  "source_task_id": "<task id>",
+  "reuse_reason": "避免后续跨仓库验收漏掉实际修改。"
+}

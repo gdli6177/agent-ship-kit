@@ -2,6 +2,8 @@
 
 # agent-ship-kit
 
+团队手册与经验回流：见[初始化、经验准入、交付检查与按需检索](docs/team-and-learning.md)。
+
 跨成员仓库或同仓库多 worktree 并行交付，见[工作空间接入说明](docs/workspace-parallel.md)。
 
 agent-ship-kit 是并行 AI 编程交付的验收与注意力层。人从需求进入到交付，只和一位船长（captain）对话。工人（worker）没有事先排好的花名册，而是在合同冻结之后，按切片按需生成。它可以接在 Herdr、Orca、Multica 或任何别的编排器上面，用一层薄适配器接进去；没有编排器时也可以用。它不负责任务调度，不会自动合并到 main，也不会部署到生产。船长起草方案，人冻结合同，工人交回证据，人接受证据之后，事情才算可以往下走。
@@ -78,7 +80,7 @@ cp -R skills/ship-setup skills/ship-watchdog skills/ship-contract skills/ship-di
 
 | 命令 | 船长做什么 |
 | --- | --- |
-| `/ship-setup` | 只初始化当前这份克隆。钩子写在 `.git/hooks`，已有钩子会串起来，不覆盖。忽略规则写在 `.git/info/exclude`，不改共享的 `.gitignore`。`--shared` 才把忽略块和 `AGENTS.md` 规则写给整个仓库。`--uninstall` 卸掉钩子和规则块，但继续排除 `.agent-ship/`。`--uninstall --purge` 连这个目录一起删。从不设置 `core.hooksPath`。 |
+| `/ship-setup` | 只初始化当前这份克隆。钩子写在 `.git/hooks`，已有钩子会串起来，不覆盖。忽略规则写在 `.git/info/exclude`，不改共享的 `.gitignore`。`--shared` 才写入共享忽略块、规则入口，并创建或引用团队手册与经验配置。`--uninstall` 卸掉钩子和规则块，但继续排除 `.agent-ship/`。`--uninstall --purge` 连这个目录一起删。从不设置 `core.hooksPath`。 |
 | `/ship-contract` | 起草一张方案。人明确冻结之后，才写成合同。 |
 | `/ship-dispatch` | 按冻结合同派工。船长自己不改代码。 |
 | `/ship-inbox` | 按优先级列出未决项，然后一次审一条（合同、证据、风险）。人回复 `pass`、`changes` 加原因，或 `reject`。 |

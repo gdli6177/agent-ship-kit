@@ -13,6 +13,7 @@ import { loadAllowlistFile, loadPolicyFile, planNotification, type NotifyEvent }
 import { executeArgv } from "./run.js";
 import { checkContract } from "./check.js";
 import { setupProject } from "./setup.js";
+import { addLesson, checkLearning, reviewLesson, showLesson, teamContext, pendingLearning } from "./learning.js";
 import { activeSlices, installWatchdogTimer, runWatchdog, startSlice, updateSlice, timerIsActive, uninstallWatchdogTimer } from "./watchdog.js";
 import type { AttentionType, EventLinks, InboxRecord, Priority } from "./types.js";
 
@@ -33,12 +34,19 @@ const defaultIo: Io = {
 const USAGE = `agent-ship — local inbox, path check, and notify
 
 Usage:
-  agent-ship setup|init [--state-root DIR] [--shared] [--uninstall] [--purge] [--root DIR]
+  agent-ship setup|init [--state-root DIR] [--shared] [--handbook FILE] [--lessons DIR] [--uninstall] [--purge] [--root DIR]
+  agent-ship team context [--tag TAG ...] [--project ID] [--repo DIR] [--root DIR]
+  agent-ship lesson search [--tag TAG ...] [--project ID] [--root DIR]
+  agent-ship lesson show --id ID [--root DIR]
+  agent-ship lesson add --input FILE [--root DIR]
+  agent-ship lesson review --id ID --status active|needs_review|retired --reviewed-by REF --note TEXT [--review-after DATE] [--root DIR]
+  agent-ship lesson check --source-task-id ID --outcome none|candidate --reason TEXT --reviewed-by REF [--candidate-id ID ...] [--trigger TYPE ...] [--root DIR]
+  agent-ship lesson pending [--source-task-id ID] [--root DIR]
   agent-ship check --contract ID [--repo DIR] [--slice ID] [--base REF] [--head REF] [--staged] [--root DIR]
   agent-ship watchdog [--stale-minutes N] [--root DIR]
   agent-ship watchdog install|uninstall [--dry-run] [--root DIR]
   agent-ship slice start --contract ID --slice ID --source-task-id ID
-                       --title TEXT --summary TEXT [--repo DIR] [--base REF] [--replace] [--root DIR]
+                       --title TEXT --summary TEXT [--repo DIR] [--base REF] [--replace] [--tag TAG ...] [--project ID] [--root DIR]
   agent-ship slice update --source-task-id ID --status STATUS [--summary TEXT] [--root DIR]
   agent-ship status --stale [--stale-minutes N] [--root DIR]
   agent-ship inbox add --title TEXT --summary TEXT --source-task-id ID
@@ -58,7 +66,7 @@ Usage:
 Captain-facing skills: /ship-setup, /ship-contract, /ship-dispatch, /ship-inbox [id], /ship-notify, /ship-e2e, /ship-watchdog.
 setup is local to this clone: hooks go in .git/hooks only, and ignore rules
 go in .git/info/exclude. Pass --shared to write a .gitignore block and a
-shared AGENTS.md rules section. setup never sets core.hooksPath.
+shared AGENTS.md rules section, team profile and handbook. setup never sets core.hooksPath.
 notify dry-run prints a plan and does not start a command.
 notify run starts the allowlisted argv with no shell, and only when the plan allows it.
 A high-priority needs_review with no evidence URLs is not paged.
@@ -96,8 +104,9 @@ const VALUE_OPTIONS = new Set([
   "repo",
   "state-root",
   "status",
+  "handbook", "lessons", "tag", "project", "input", "reviewed-by", "review-after", "outcome", "candidate-id", "trigger",
 ]);
-const REPEATABLE = new Set(["evidence"]);
+const REPEATABLE = new Set(["evidence", "tag", "candidate-id", "trigger"]);
 const BOOL_FLAGS = new Set(["json", "latest", "help", "all", "shared", "uninstall", "purge", "staged", "stale", "dry-run", "replace"]);
 
 interface ParsedArgs {
@@ -328,6 +337,8 @@ async function runSetup(parsed: ParsedArgs, io: Io): Promise<number> {
     uninstall: parsed.flags.has("uninstall"),
     purge: parsed.flags.has("purge"),
     stateRoot: one(parsed.values, "state-root"),
+    handbook: one(parsed.values, "handbook"),
+    lessons: one(parsed.values, "lessons"),
   });
   io.stdout(`${JSON.stringify(report, null, 2)}\n`);
   return report.ok ? 0 : 1;
@@ -348,6 +359,8 @@ async function runSliceStart(parsed: ParsedArgs, io: Io): Promise<number> {
     repoRoot: one(parsed.values, "repo"),
     base: one(parsed.values, "base"),
     replace: parsed.flags.has("replace"),
+    tags: parsed.values.get("tag"),
+    project: one(parsed.values, "project"),
     threadRefs: {
       pr: one(parsed.values, "thread-pr"),
       issue: one(parsed.values, "thread-issue"),
@@ -412,6 +425,21 @@ export async function main(argv: string[], io: Io = defaultIo): Promise<number> 
 
   const [group, sub] = parsed.positionals;
   try {
+    const root = one(parsed.values, "root") ?? process.cwd();
+    if ((group === "team" && sub === "context") || (group === "lesson" && sub === "search")) {
+      const context = await teamContext(root, { tags: parsed.values.get("tag"), project: one(parsed.values, "project"), repo: one(parsed.values, "repo") });
+      io.stdout(`${JSON.stringify(context, null, 2)}\n`); return 0;
+    }
+    if (group === "lesson") {
+      let result: unknown;
+      if (sub === "add") result = await addLesson(root, requireOne(parsed.values, "input"));
+      else if (sub === "show") result = await showLesson(root, requireOne(parsed.values, "id"));
+      else if (sub === "review") result = await reviewLesson(root, requireOne(parsed.values, "id"), requireOne(parsed.values, "status"), requireOne(parsed.values, "reviewed-by"), requireOne(parsed.values, "note"), one(parsed.values, "review-after"));
+      else if (sub === "check") result = await checkLearning(root, requireOne(parsed.values, "source-task-id"), requireOne(parsed.values, "outcome"), requireOne(parsed.values, "reason"), requireOne(parsed.values, "reviewed-by"), parsed.values.get("candidate-id"), parsed.values.get("trigger"));
+      else if (sub === "pending") result = await pendingLearning(root, one(parsed.values, "source-task-id"));
+      else throw new Error("unknown lesson command");
+      io.stdout(`${JSON.stringify(result, null, 2)}\n`); return 0;
+    }
     if ((group === "setup" || group === "init") && sub === undefined) return await runSetup(parsed, io);
     if (group === "check" && sub === undefined) return await runCheck(parsed, io);
     if (group === "watchdog" && sub === "install") {

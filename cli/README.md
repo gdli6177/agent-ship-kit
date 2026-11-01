@@ -1,5 +1,10 @@
 # agent-ship CLI
 
+`setup --shared` 初始化或引用团队手册；普通 setup 只建立本地引用。
+`team context --tag <tag>` 返回必读资料引用和有限经验摘要。
+`lesson add/review/search/show/check/pending` 提供候选准入、评审、检索和交付检查。
+完整命令与边界见[团队手册和经验回流](../docs/team-and-learning.md)。
+
 多仓库和 Git worktree 使用共享 `--root` 保存合同、运行状态和 inbox，
 使用 `--repo` 指定执行 checkout。`setup --root <checkout> --state-root <shared-root>`
 为每个工作树安装门禁。完整示例和适配器派工顺序见[工作空间接入说明](../docs/workspace-parallel.md)。

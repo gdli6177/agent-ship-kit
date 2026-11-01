@@ -2,6 +2,7 @@ import { randomBytes } from "node:crypto";
 import { appendFile, mkdir, readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { nextSequence, withLock } from "./storage.js";
+import { assertLearningChecked } from "./learning.js";
 import {
   ATTENTION_TYPES,
   DECISIONS,
@@ -161,6 +162,7 @@ export async function addInboxItem(root: string, input: InboxAddInput): Promise<
     const title = requiredText(input.title, "title");
     const summary = assertSummary(input.summary);
     const sourceTaskId = requiredText(input.sourceTaskId, "source_task_id");
+    if ((input.type ?? "needs_review") === "needs_review") await assertLearningChecked(root, sourceTaskId);
     const evidence = (input.evidenceUrls ?? []).map((url) => {
       const trimmed = requiredText(url, "evidence url");
       if (/\s/.test(trimmed)) throw new Error("evidence URLs must be single tokens");

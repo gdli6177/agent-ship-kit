@@ -51,3 +51,15 @@ It creates `.agent-ship/` (proposals, contracts, packets, e2e index, notify poli
 `pre-commit` runs `agent-ship check --staged --contract <id>` when `.agent-ship/active-contract` names a contract. No active contract means the path check is skipped and any chained hook still runs. `pre-push` refuses `main`, `master`, and names listed in `.agent-ship/protected-branches`. A human may set `AGENT_SHIP_ALLOW_PROTECTED_PUSH=1`. The captain must not set that variable.
 
 The hooks are plain shell. They call the CLI with `shell` off inside the CLI. They do not talk to GitHub, GitLab, or any other forge.
+
+## 团队手册与经验入口
+
+普通 setup 只建立本地 team 引用。明确采用共享初始化时用 `setup --shared`：
+引用已有手册，或创建精简的 `docs/agent-team/handbook.md` 与可版本管理的
+`agent-ship.team.json`。既有配置和手册不覆盖；不同来源的参数发生冲突时报告给维护者。
+已有手册可通过 `--handbook` 指定，经验索引目录可用 `--lessons` 指定。
+
+手册、索引和活动经验由使用方拥有；运行回执留在 `.agent-ship/`。
+不预填经验，不把整段历史放进 AGENTS.md，不将团队约定写死在安装器中。
+工具升级/卸载不改写或删除共享手册、配置和经验。
+完整配置和职责见安装包的 `docs/team-and-learning.md`。

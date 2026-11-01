@@ -48,6 +48,17 @@ a report, never at a storageState file.
 - The human asks what is waiting on them, or says `/ship-inbox`.
 - Someone asks to merge or ship. File or show the packet first. Do not merge.
 
+## 经验检查
+
+进入待审前，先完成独立代码核验，再由核验者判断本轮有无值得复用的经验。
+普通任务可以为 none，记录原因，不创建经验卡。候选须有适用条件、具体做法、证据、
+复用价值，并查重；用 lesson add 只创建 candidate，不能自行跳到 active。
+船长依据核验结果调用 `lesson check --source-task-id <id> --outcome none|candidate
+--reason <text> --reviewed-by <verifier-ref>`，有候选时附 candidate-id。
+受管任务缺少新鲜回执不能进入 needs_review；退回后恢复工作需要重新检查。
+状态、数量预算和 CLI 示例见安装包的 `docs/team-and-learning.md`。
+不要因为每次都检查，就要求每次生成经验文档或打断用户。
+
 ## Packet
 
 Fill every section of `templates/review-packet.md`.

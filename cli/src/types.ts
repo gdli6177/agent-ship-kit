@@ -24,6 +24,7 @@ export const EVENT_TYPES = [
   "needs_approval",
   "review_decided",
   "notify_planned",
+  "learning_checked",
 ] as const;
 export type EventType = (typeof EVENT_TYPES)[number];
 

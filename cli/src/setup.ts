@@ -5,6 +5,7 @@ import { promisify } from "node:util";
 import { fileURLToPath } from "node:url";
 import { gitPath, repositoryRoot } from "./repository.js";
 import { withLock } from "./storage.js";
+import { initializeTeam, requiredSources } from "./team.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -35,6 +36,8 @@ These rules stay in force for every agent in this checkout. \`/ship-setup\` rewr
 - Edit only Allowed paths on the frozen contract. Never touch Forbidden paths. Workers do the edits.
 - At most 3 workers may be queued or running across all contracts.
 - A separate read-only verifier must agree before a \`needs_review\` inbox item is filed. The verifier does not see the worker chat.
+- Read the configured team handbook and project rules via \`agent-ship team context\`. Search only relevant lesson summaries with explicit tags; do not load the entire history. Existing owner rules remain authoritative.
+- After independent verification, the captain records \`agent-ship lesson check\` with none/candidate, a reason and the verifier reference. Routine work may produce none. Candidates require evidence, scope, reuse value and deduplication before activation.
 - Only the human merges or ships. Do not merge to main or master and do not deploy to production.
 - Never read, write, or repeat passwords, cookies, or storageState contents.
 - Each \`/ship-*\` command is one skill whose name is the command without the slash. If this host loads skills, \`/ship-inbox\` opens \`ship-inbox\`. If it does not, follow the file below. Deterministic steps call the \`agent-ship\` CLI.
@@ -77,6 +80,8 @@ export interface SetupOptions {
   uninstall?: boolean;
   purge?: boolean;
   stateRoot?: string;
+  handbook?: string;
+  lessons?: string;
 }
 
 function escapeRegExp(value: string): string {
@@ -457,6 +462,9 @@ export async function setupProject(root: string, options: SetupOptions = {}): Pr
   }
   if (options.uninstall || options.purge) return uninstallProject(root, options.purge === true);
   const stateRoot = options.stateRoot ? await repositoryRoot(resolve(options.stateRoot), true) : root;
+
+  actions.push(...await initializeTeam(root, { shared, kit, handbook: options.handbook, lessons: options.lessons }));
+  await requiredSources(root);
 
   await mkdir(join(root, ".agent-ship", "proposals"), { recursive: true });
   await mkdir(join(root, ".agent-ship", "contracts"), { recursive: true });

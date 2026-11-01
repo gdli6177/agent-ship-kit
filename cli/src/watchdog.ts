@@ -10,6 +10,7 @@ import { kitRoot } from "./setup.js";
 import { assertSingleRepository, baseCommit, repositoryRoot, gitOutput } from "./repository.js";
 import { nextSequence, readEvents, withLock } from "./storage.js";
 import { parseContractPaths } from "./paths.js";
+import { assertLearningChecked, teamContext } from "./learning.js";
 import type { BlockReason, ThreadRefs } from "./types.js";
 
 const execFileAsync = promisify(execFile);
@@ -664,6 +665,8 @@ export interface SliceStartInput {
   repoRoot?: string;
   base?: string;
   replace?: boolean;
+  tags?: string[];
+  project?: string;
 }
 
 async function dispatchTerms(root: string, contractId: string, sliceId: string) {
@@ -686,7 +689,7 @@ async function dispatchTerms(root: string, contractId: string, sliceId: string) 
 }
 
 /** Record a dispatched slice and install the local timer when work is open. */
-export async function startSlice(root: string, input: SliceStartInput): Promise<{ timer: TimerInstall; active: number }> {
+export async function startSlice(root: string, input: SliceStartInput) {
   return withLock(join(root, ".agent-ship"), async () => {
     const summary = assertSummary(input.summary);
     for (const [name, value] of Object.entries({ title: input.title, sourceTaskId: input.sourceTaskId, sliceId: input.sliceId })) {
@@ -702,6 +705,7 @@ export async function startSlice(root: string, input: SliceStartInput): Promise<
     if (active.length >= limits.global_max_parallel) throw new Error("global_max_parallel reached");
     if (active.filter((slice) => slice.contract_id === input.contractId).length >= cap) throw new Error("contract max_parallel reached");
     const repo = await repositoryRoot(input.repoRoot ?? root, true);
+    const context = await teamContext(root, { tags: input.tags, project: input.project, repo });
     await assertSingleRepository(repo, paths.allowed);
     const base = await baseCommit(repo, input.base);
     const branch = input.branch ?? `ship/${input.contractId}/${input.sliceId}`;
@@ -730,6 +734,11 @@ export async function startSlice(root: string, input: SliceStartInput): Promise<
       branch,
       repo_root: repo,
       base_ref: base,
+      learning_required: context.learning_required,
+      context_refs: context.required_sources,
+      lesson_ids: context.lessons.map((lesson) => lesson.id),
+      context_tags: context.query.tags,
+      ...(context.query.project ? { project_id: context.query.project } : {}),
       sequence: await nextSequence(root),
       ...(Object.keys(threadRefs).length > 0 ? { thread_refs: threadRefs } : {}),
     };
@@ -737,7 +746,7 @@ export async function startSlice(root: string, input: SliceStartInput): Promise<
     await appendFile(eventsFile(root), `${JSON.stringify(event)}\n`, "utf8");
     const count = (await activeSlices(root)).length;
     const timer = count > 0 ? await installWatchdogTimer(root) : await uninstallWatchdogTimer(root);
-    return { timer, active: count };
+    return { timer, active: count, context };
   });
 }
 
@@ -747,6 +756,7 @@ export async function updateSlice(root: string, taskId: string, status: string, 
     const slices = await allSlices(root);
     const current = slices.find((slice) => slice.source_task_id === taskId);
     if (!current) throw new Error(`unknown task ${taskId}`);
+    if (status === "needs_review") await assertLearningChecked(root, taskId);
     if (status === "running" || status === "queued") {
       const decisions = (await readInbox(root)).filter((event) => event.type === "review_decided" && event.source_task_id === taskId);
       const latest = decisions[decisions.length - 1];

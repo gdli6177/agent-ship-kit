@@ -47,6 +47,14 @@ freeze, and do not spawn a worker.
 - If acceptance or either path list is still vague, ask one question and
   wait. Do not paper over it.
 
+## 规范与经验准备
+
+形成方案前，用 `agent-ship team context --tag <task-topic> [--project <project-id>]`
+获取引用，读取适用的团队手册和项目规则。只加载与需求匹配的已验证经验摘要；
+没有匹配时可以为零，必读规则不能因为经验预算而省略。
+将适用规则和经验编号作为切片输入；不复制全部历史，不附上船长对话。
+项目规则发生冲突时先明确归属，不用本次合同悄悄覆盖长期规范。
+
 ## Procedure
 
 1. Copy `$HOME/.agent-ship-kit/current/templates/proposal-card.md` to `.agent-ship/proposals/<proposal_id>.md`
@@ -81,7 +89,7 @@ Do not edit a file whose status is `frozen`.
 ## Worker boundary, written into the contract
 
 The worker prompt is the slice, the acceptance lines it owns, and the Allowed
-paths and Forbidden paths copied verbatim. It does not include the captain
+paths and Forbidden paths copied verbatim, plus applicable standing rules and bounded verified lesson summaries. It does not include the captain
 transcript, secrets, or any instruction to merge or deploy. Empty path lists
 are not ready to freeze.
 

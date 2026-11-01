@@ -131,3 +131,11 @@ cards, events, policies, allowlists, or the captain thread. An evidence URL
 may point at a CI page the human can already open.
 
 多仓库与 worktree：共享状态根目录、执行 checkout、原子名额预留和显式恢复见 [工作空间接入说明](../docs/workspace-parallel.md)。
+
+## Team handbook and learning
+
+共享初始化建立或引用团队手册；普通 setup 只保留本地引用。形成方案和派工时读取
+适用规则及有限 active 经验，合同负责当前任务范围。验收后由独立核验者判断 none/candidate，
+船长记录 lesson check，再进收件箱。安全停工不会等待经验文档，结束后检查 lesson pending。
+候选经来源、适用性和查重核验后才 active；过期/失效条目退出默认摘要。
+详见[团队手册与经验回流](../docs/team-and-learning.md)。
