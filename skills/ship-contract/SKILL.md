@@ -1,12 +1,10 @@
 ---
 name: ship-contract
 description: >-
-  Slash command /ship-contract. The skill name is ship-contract, matching
-  that command, so hosts that support skills load this file when the human
-  types /ship-contract. Turn intake into a proposal card and, only after an
-  explicit human freeze, into an immutable contract card. Also use when
-  drafting a 方案卡, when the human says freeze or 冻结合同, or before any
-  worker would be spawned.
+  Handle new feature, fix or change requests in an agent-ship-kit captain
+  conversation, including 加一个功能、修一下这个问题、另开一个需求 and
+  按这个方案开始. Draft a proposal, then freeze only after explicit human
+  acceptance of its exact scope. Also supports /ship-contract and freeze.
 ---
 
 # ship-contract
@@ -32,6 +30,20 @@ card format.
 - The ask is to merge, release, or deploy. Refuse. This kit does not do those.
 
 ## Discussion mode
+
+The human describes an outcome; you manage the procedure. Inspect the project
+to resolve technical details yourself, suggest acceptance checks and ask only
+questions that materially affect the result. Show a concise goal, scope and
+acceptance summary, with details available on request. Generate and retain ids
+yourself; never require the human to copy them between skills.
+
+After presenting the current proposal, ask “按这个方案开始吗？ / Start with this
+plan?” An explicit “按这个方案开始 / Start with this plan” can both freeze and
+authorize dispatch when it unambiguously refers to the exact proposal just
+shown. Record the resolved proposal id, accepted text, human and time before
+handing off. If several proposals could be meant, scope has changed, or the
+accepted version cannot be recovered, ask one focused clarification. A bare
+“好的 / looks good”, silence or the original request is not a freeze.
 
 While the card is `draft`, talk freely. Do not treat the conversation as a
 freeze, and do not spawn a worker.
@@ -62,10 +74,10 @@ freeze, and do not spawn a worker.
    Forbidden paths. Put merge and production deploy in the out-of-scope list
    even if the human did not mention them.
 2. Stay in discussion mode until the human freezes.
-3. Freeze only on an explicit human decision that names this proposal:
-   "freeze", "冻结合同", or a sentence that accepts this exact text.
-   These do not freeze a contract: silence, "looks good" with no proposal id,
-   the captain deciding for itself, a worker, or another agent.
+3. Freeze only on an explicit human decision accepting this exact proposal:
+   an id or an unambiguous reference to the just-presented text is sufficient.
+   Resolve and record the id yourself. Silence, casual acknowledgement,
+   the captain deciding for itself, a worker or another agent cannot freeze.
 4. On freeze, copy the accepted text into
    `.agent-ship/contracts/<contract_id>.md` using `$HOME/.agent-ship-kit/current/templates/contract-card.md`.
    Set status to `frozen`, record who froze it and when, and copy Allowed
@@ -75,7 +87,8 @@ freeze, and do not spawn a worker.
 5. Split the work into slices. One slice is one worker. Each slice lists the
    inputs that worker may see and the acceptance lines it owns.
 6. Leave the dispatch log empty. `ship-dispatch` appends to it.
-7. Tell the human the contract id and that workers have not been started.
+7. If the human also authorized starting, hand off directly to `ship-dispatch`.
+   If they only froze, report that it is ready without claiming work started.
 
 ## Changing a frozen contract
 
@@ -96,4 +109,5 @@ are not ready to freeze.
 ## Handoff
 
 When the human asks to start work, hand off to `ship-dispatch` with the
-contract path. Do not dispatch inside this skill.
+contract path. Do not ask for a second command or repeat an already granted
+start approval. A freeze-only decision does not imply dispatch authorization.

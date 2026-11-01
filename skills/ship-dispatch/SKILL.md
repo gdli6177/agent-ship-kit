@@ -5,7 +5,8 @@ description: >-
   that command, so hosts that support skills load this file when the human
   types /ship-dispatch. Spawn on-demand workers for a frozen contract under
   the global cap and max_parallel, and record the slice with agent-ship
-  slice start. Also use when a contract is frozen, when a worker is blocked
+  slice start. Also use for 开始、继续、做到哪了 in a captain conversation
+  with an identified frozen contract, when a worker is blocked
   or needs approval, or when mapping spawn onto Herdr, Orca, Multica, or a
   plain extra agent session.
 ---
@@ -28,6 +29,25 @@ implementing. The frozen contract is the handoff.
 Do not block waiting on a worker. Accept the owner's next request while
 slices run. Ask the adapter for status when you need it; do not sit in the
 worker session.
+
+Carry the contract/task references across skills yourself. A clear “按这个
+方案开始” after proposal review authorizes freezing plus dispatch; do not
+require `/ship-dispatch` or an id repeated by the human. For “做到哪了 / how is
+it going”, inspect real adapter status and inbox and return a short summary
+of running work, pending decisions and results. Status questions do not
+authorize new workers, replacement tasks or resumption of paused work.
+
+For “先停下 / stop for now”, resolve the task from context (ask only if
+ambiguous), use the execution mechanism to stop it, and record the actual
+result with `slice update`. Recording `cancelled` alone does not terminate a
+process. If the adapter cannot stop it, say so immediately; do not claim it
+stopped. Stop does not authorize a replacement worker.
+
+Handle in-scope technical questions and verifier corrections within the
+existing task. Interrupt the human only for missing user intent, scope changes,
+unavailable permissions/capabilities or a decision they must own. Do not pass
+internal logs or routine learning checks to them. Respect existing approvals;
+“continue” cannot silently expand scope or replace a failed worker.
 
 ## Thread subscription
 

@@ -10,132 +10,70 @@ Status: v0. Skills, templates, an event schema, adapter notes, and a local inbox
 
 ## Quick Start
 
-Walk through one request: add an “unfinished only” filter to a task list. Each text block below is an example message to send to your agent. Use the proposal, contract and task ids your captain actually returns.
+**Describe the goal, approve the plan, judge the result. The captain manages the steps and ids; slash commands are optional.**
 
-Install → choose a captain → set up the project → propose → freeze → dispatch → review evidence.
+### Once: ask your current agent to connect the project
 
-### 1. Ask your current agent to install the kit
-
-Have a working agent host, Node.js 20+, npm and an existing Git project. Use macOS, Linux or WSL on Windows. Send:
+Open your usual agent in the target Git project and send:
 
 ```text
-Read the installation instructions at https://github.com/gdli6177/agent-ship-kit and install the kit.
-Check Node.js 20+ and npm, and read the installer before running it.
-Explicitly select the correct --agent codex, --agent claude or --agent cursor for my current host.
-If you cannot identify the host, ask me first; do not install into another host's directory.
-Only install the CLI and skills at this step. Do not initialize a project or edit product code.
-Run agent-ship --help, report the skill path, and tell me whether the session needs reloading.
+Install and set up https://github.com/gdli6177/agent-ship-kit for this project.
+Act as the captain and manage the workflow; I will describe what I need.
+Create or reuse a shared team handbook and preserve existing project rules.
+Inspect this host and its execution capabilities, then tell me whether we are ready.
 ```
 
-Expect a successful CLI check and the skill directory for your host. Reload skills or start a fresh session as your host requires if the current conversation does not see them yet. For manual installation, see [Install](#install).
+The agent should read the installer and instructions, check Node.js 20+ and npm, select the current host's skills, run shared setup, and check whether it can create, inspect and collect independent workers and a verifier. Installation supports macOS, Linux and Windows WSL. Onboarding does not edit product code or start requirement work; changed shared files are listed for review.
 
-### 2. Designate one project conversation as the captain
+**You do not need to find another team lead.** This main conversation is the captain. Expect a short “Ready; tell me what you want to build”, or a real blocker and the next action. Reload skills or start a new session if the host requires it; a fresh captain restores records and checks actual status without duplicate dispatch.
 
-The team lead is called the captain here. It is a role you assign to an agent, not a separate program that appears after installation. Open your target project and one main conversation. You might name it “Task list · captain”. Send:
+An installed CLI does not supply a worker runtime. The captain should discover execution gaps during onboarding rather than after asking you to approve work. See [Install](#install) and [Adapters](adapters/README.md) when details are needed.
+
+### Daily: say what you want
 
 ```text
-Act as this project's agent-ship-kit captain. I will submit requests and review deliveries here.
-Read the existing project rules and the installed ship-setup, ship-contract, ship-dispatch and ship-inbox skills.
-Explain whether you can create independent worker sessions, inspect their status and collect results,
-and which execution mechanism you intend to use. Do not edit product code or dispatch yet.
+Add an “unfinished only” filter to the task list. Keep other behavior unchanged.
 ```
 
-This conversation handles proposals, dispatch and the review inbox. Workers are created for tasks. Installing the CLI does not supply a worker runtime: execution needs your host's subagent/session capabilities or a connected orchestrator. See [Adapters](adapters/README.md).
+The captain inspects the implementation, reads applicable rules and bounded lessons, and proposes acceptance checks. It shows one short plan: what changes, what is affected and how completion will be judged. It resolves technical details itself and asks only questions that need your decision.
 
-### 3. Initialize this project with the captain
-
-To adopt a shared team handbook, send in the same conversation:
+Revise the request if necessary. To approve the exact plan just shown and authorize work, reply:
 
 ```text
-/ship-setup
-Run shared setup for this project: agent-ship setup --shared.
-Reference an existing handbook, or create the starter handbook if none exists.
-Preserve existing rules and hooks, and list the files actually changed.
+Start with this plan.
 ```
 
-Expect a successful setup report, `agent-ship.team.json` and a created or referenced handbook. Shared files can be versioned; runtime records stay in local `.agent-ship/`. Review new shared files before committing them through your project's usual process.
+The captain records the explicit approval as a frozen contract, arranges isolated branches and real workers, and independently verifies results before review. You do not need to repeat proposal/contract ids or issue a dispatch command. If several plans could be meant, it asks which one. Silence, a casual “looks good” or the original request does not authorize starting.
 
-For a personal trial, request plain `agent-ship setup` instead. It installs local integration without creating a shared handbook. Resolve any existing hook configuration conflict before proceeding.
+Stay in the same conversation while tasks run:
 
-### 4. Submit your first request and review the proposal
-
-```text
-/ship-contract
-Add an “unfinished only” filter to this project's task list.
-Turning it off must preserve the existing list behavior. Leave login, billing and deployment outside the scope.
-Inspect the current implementation and propose the scope, acceptance checks and slices. Do not start work yet.
-```
-
-Expect one proposal card: goal, non-goals, allowed/forbidden paths, acceptance checks and slices. The captain loads applicable project rules and relevant lessons. You can still revise it, for example: “The filter does not need to persist after a page refresh.”
-
-### 5. Explicitly freeze the agreed proposal
-
-If the returned proposal id is `proposal_todo_filter`, send:
-
-```text
-Freeze proposal_todo_filter. Create the contract from its current text without expanding the scope.
-```
-
-Expect a contract id, frozen-by identity, timestamp and acceptance conditions. No dispatch happens before freeze. A later scope expansion needs a revised proposal and another freeze. “Looks roughly right” is insufficient. Replace the example id with your actual id.
-
-### 6. Ask the captain to start execution
-
-If the contract id is `contract_todo_filter`:
-
-```text
-/ship-dispatch
-Start contract_todo_filter. Confirm that the execution mechanism works, prepare isolated branches or worktrees,
-and pass the admission checks before spawning workers. Report the real task ids, worker references and branches.
-Run independent verification before filing completed work in the inbox.
-```
-
-Expect real worker references and execution locations. You can then ask for progress in the main conversation. `slice start` only records and reserves work; success does not prove a worker process has started.
-
-If the host cannot create and collect independent sessions, stop at “execution integration needed” and connect a mechanism using the [generic adapter](adapters/generic.md). A host with native session capabilities can work without an orchestrator account. If task packets need manual transfer, explicitly describe that manual workflow rather than claiming automatic parallel execution.
-
-### 7. Resolve mid-task decisions in the same conversation
-
-The captain presents blocked or needs_approval items. If a worker needs to change a shared component outside the agreed scope, reply:
-
-```text
-Explain the impact and alternatives first. If the scope must expand, draft a revised proposal
-and wait for me to freeze it before continuing.
-```
-
-After an in-scope decision the captain resumes the same task; changed scope returns to proposal review. Ordinary reviews are pull by default. Do not assume push notifications are configured when you leave; ask for progress or open the inbox when you return.
-
-### 8. Inspect evidence, then accept or request changes
-
-```text
-/ship-inbox
-```
-
-The captain shows one compact card at a time: change, contract and branch, evidence, unverified checks and remaining risks. Ask to expand a report or show a screenshot when that evidence exists. Then reply:
-
-| Your reply | Next action |
+| Say | The captain handles |
 | --- | --- |
-| `pass` | Record accept and close that review item. |
-| `changes: when the filter is on, a task should disappear immediately after I complete it.` | Return to the original task, then verify and review again. |
-| `reject: cancel this request.` | End the task. |
+| `How is it going?` | Check real status; summarize progress, blockers and reviews. |
+| `Open another request for CSV export.` | Propose separately, check overlap and determine parallel eligibility. |
+| `Stop the previous task for now.` | Identify the target, stop it through the execution mechanism and record status. |
 
-The captain and verifier handle the pre-review learning check. Routine work may produce none; you do not need a new lesson for every delivery. Candidates do not automatically become team rules. After accepting evidence, merge and release through your normal project process.
+### At delivery: inspect the result and decide
 
-### Continue your daily work
-
-**Another request:** start again with `/ship-contract` in the same main conversation. You may discuss another proposal while work is running. Dispatch only independent, eligible tasks; exceeding the parallel cap does not start another worker.
+Say “Show me the result.” The captain presents one short card: change, openable evidence, verification result and remaining risks. Reply:
 
 ```text
-Open a separate request: add CSV export to the task list. Propose it first.
-Check whether it overlaps the filter work, and explain the isolation or execution order.
+Pass.
 ```
 
-**Another project:** designate a captain and run setup for that project. For one captain across repositories, explicitly separate the shared state root from execution repositories using the [multi-repository/worktree guide](docs/workspace-parallel.md).
+Or:
 
-**A new conversation:** open the original project, assign the captain role, and ask it to read existing contracts, runtime records and inbox, verify actual worker status, and restore the progress view without duplicate dispatch. Records alone do not prove old workers are still running.
+```text
+Changes: when the filter is on, a task should disappear immediately after I complete it.
+```
 
-**Unrecognized commands:** check the installed skill directory. If slash commands are not routed, ask the agent to read `~/.agent-ship-kit/current/skills/<skill-name>/SKILL.md` and follow it. If the CLI is not on PATH, check it with `node "$HOME/.agent-ship-kit/current/cli/bin/agent-ship.js" --help`.
+The captain records your decision, returns corrections to the original task and verifies again. An expanded scope gets a revised proposal first. Internal checks, verifier repair loops and routine learning checks stay within the team; you do not need to maintain a lesson for every task. Merge and release through your normal project process.
 
-**Version mismatch:** the installer defaults to main, which contains merged features only. When reviewing this guide on a feature branch, install that `--ref` to use its new commands.
+Ordinary reviews are pull by default: ask for progress or results when you return. Continuous background execution and push notifications depend on the connected host and configuration; installation alone does not provide them.
+
+### Details when you need them
+
+`/ship-*` commands are optional shortcuts. The tables below are for troubleshooting and advanced use. See [team configuration and learning budgets](docs/team-and-learning.md) and [multi-repository/worktree isolation](docs/workspace-parallel.md). Installation defaults to main; ask the agent to use the matching `--ref` when reviewing an unmerged feature.
 
 ## What you get
 

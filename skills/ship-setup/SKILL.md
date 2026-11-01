@@ -1,16 +1,37 @@
 ---
 name: ship-setup
 description: >-
-  Slash command /ship-setup. The skill name is ship-setup, matching that
-  command, so Cursor, Claude Code, and similar hosts load this file when the
-  human types /ship-setup. Initialize one clone via the agent-ship CLI
-  (setup, init, uninstall, purge). Also use it when AGENTS.md, local hooks,
-  or .git/info/exclude are missing the captain rules.
+  Set up agent-ship-kit in the current project when the user says 帮我接入、
+  初始化团队、你来当船长, or asks to adopt the kit. Also handles /ship-setup
+  and repairs missing captain rules or hooks. Keep ordinary setup local;
+  create shared handbook/config only when shared adoption is authorized.
 ---
 
 # ship-setup
 
 `/ship-setup` is the captain command. It runs `agent-ship setup` (alias `agent-ship init`) inside the project the human has open. It is idempotent: a second run updates the rules block and the hooks in place and does not duplicate them.
+
+## Conversational onboarding
+
+The current main conversation becomes the captain when the user asks to adopt
+the kit. Do not ask them to find another captain, memorize commands or choose
+an orchestrator without first inspecting available capabilities.
+
+- Read project rules and inspect existing setup before changing anything.
+  Choose the current host's skills and use its available execution mechanism;
+  ask only if a consequential choice cannot be resolved from the environment.
+- A request to install tools alone does not authorize project setup. Plain
+  adoption uses local setup; a request to create/reuse shared team rules and a
+  handbook authorizes `setup --shared`. Preserve existing content and hooks.
+- Verify CLI/setup and whether the host can actually create, inspect and
+  collect isolated workers and a separate verifier. The CLI is not a runtime.
+  If unavailable, report the blocker and one concrete next action; do not
+  make the user walk through contract creation before revealing this blocker.
+- Finish with a short readiness report (including changed shared files when
+  applicable) and “直接告诉我你想做什么 / Tell me what you want to build.”
+  New requests use `ship-contract`; the user need not invoke another skill.
+- On a new conversation, restore contracts, inbox and actual worker status
+  before suggesting work. Never infer live workers from records or re-dispatch.
 
 ## Local by default
 
@@ -37,14 +58,14 @@ It creates `.agent-ship/` (proposals, contracts, packets, e2e index, notify poli
 
 ## Always-on rules in the block
 
-- Talk to the human only as the captain. Do not open worker sessions.
+- Talk to the human only as the captain. The human need not open worker sessions.
 - Do not spawn a worker before the human freezes the contract.
 - Stay inside Allowed paths. Never touch Forbidden paths.
 - At most 3 workers across all contracts.
 - An independent verifier must agree before `needs_review` is filed.
 - Only the human merges or ships.
 - Never handle passwords, cookies, or storageState contents.
-- Use `/ship-setup`, `/ship-contract`, `/ship-dispatch`, `/ship-inbox`, `/ship-notify`, `/ship-e2e`, and `/ship-watchdog`. Each name matches a skill. `/ship-inbox <id>` is the review deep link.
+- Route natural-language requests to the matching skills. `/ship-*` commands are optional shortcuts, not steps for the human to memorize. `/ship-inbox <id>` remains a review deep link.
 
 ## Hooks
 

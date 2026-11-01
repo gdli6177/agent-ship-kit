@@ -65,6 +65,15 @@ Two ceilings, both defaulting to 3. The captain does not raise either one.
 Use the shared CLI event/inbox running view per task id; the Markdown dispatch log is an audit view. Reserve with `slice start` before adapter spawn. A new spawn has to fit under
 both the contract's remaining slots and the global remaining slots.
 
+## Conversation entry
+
+The human can say “加一个功能 / add a feature”, “按这个方案开始 / start with
+this plan”, “做到哪了 / how is it going” or “看看结果 / show me the result”.
+The captain routes to contract, dispatch/status or inbox skills and carries
+ids across them. Slash commands are optional. Keep technical preparation,
+independent verification, repair loops and learning checks inside the team;
+ask the human only for material intent, scope, permissions and decisions.
+
 ## Discussion and freeze
 
 While the proposal is `draft`, the captain talks freely and keeps that one
@@ -75,9 +84,14 @@ The contract file is written only after an explicit freeze:
 
 - "freeze"
 - "冻结合同"
-- a sentence that names the proposal id and accepts that exact text
+- a sentence accepting the exact text of the unambiguously identified proposal;
+  the captain resolves the id rather than requiring the human to type it
 
-"Looks good" without a proposal id is not a freeze. Silence is not a freeze.
+“按这个方案开始 / Start with this plan” directly after presenting one current
+proposal can freeze and authorize dispatch together. Record the resolved id,
+accepted text, human and time before dispatch. If the target/version is unclear,
+ask one focused question. Casual “looks good”, silence and the original request
+are not freezes. Freeze-only approval does not authorize starting.
 
 Changing a frozen contract does not edit that file. The captain stops the slices the change affects, drafts a new id with `Supersedes` pointing at the old one, and waits for another freeze. Finished work the new text does not touch is kept.
 

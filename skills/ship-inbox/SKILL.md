@@ -1,13 +1,12 @@
 ---
 name: ship-inbox
 description: >-
-  Slash command /ship-inbox. The skill name is ship-inbox, matching that
-  command, so Cursor, Claude Code, and similar hosts load this file when the
-  human types /ship-inbox or /ship-inbox <id>. With no id, list open items
-  by priority and review them one at a time. With an id, jump to that item.
-  The owner replies pass, changes plus a reason, or reject. Record the
-  decision with the agent-ship inbox decide CLI. Also use when a notification
-  deep-links /ship-inbox <id>.
+  Review results in an agent-ship-kit captain conversation when the user
+  says 看看结果、有什么要我确认、通过、要改 or 不要了. Resolve the current
+  review item from context; ask only when the target is ambiguous. Also
+  supports /ship-inbox with an optional event id and notification deep links.
+  Present evidence one item at a time and record accept, changes_requested
+  or reject through the CLI; acceptance does not merge or deploy.
 ---
 
 # ship-inbox
@@ -23,7 +22,17 @@ live in the kit at `$HOME/.agent-ship-kit/current/templates/`.
 
 ## /ship-inbox
 
-1. If the owner passed an id, load that open item. If it is missing or already decided, say so and stop.
+Natural-language requests use the same procedure; slash commands and event ids
+are optional. Resolve the item from the displayed card and record its id
+yourself. With multiple possible targets, ask a short question using task
+titles. A progress-only question belongs to `ship-dispatch` and does not accept
+evidence. Keep at most one requested human decision in focus; routine none
+learning checks and verifier repair loops do not need human confirmation.
+For requested changes, compare them with the frozen scope. Route scope
+expansion through a revised proposal and explicit approval, rather than
+treating review feedback as permission to edit the frozen contract.
+
+1. If the request identifies an item by id or unambiguously refers to the displayed card, load that open item. If it is missing or already decided, say so and stop; do not apply the decision to another item.
 2. Otherwise list open items (`agent-ship inbox list --sort priority`) and sort `priority: high` first. Show that list, then start at the top.
 3. Present ONE compact card. Do not paste the worker chat or the whole packet. The card is the inline summary (at most 280 characters) plus the recall chain: contract → slice → worker/branch → PR → evidence, then the risks. Expand a section only when the owner asks.
 4. Wait. Map the reply:
