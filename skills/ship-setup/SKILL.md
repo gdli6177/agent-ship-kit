@@ -27,11 +27,10 @@ Do not tell the human to commit `.git/hooks`, `.git/info/exclude`, or a local `A
 
 ## What the command does
 
-From the agent-ship-kit checkout:
+Run this in the project directory. Use `agent-ship` on `PATH` (the installer links it from `~/.local/bin`). If that command is not found, use `"$HOME/.agent-ship-kit/main/cli/bin/agent-ship.js"` with the same arguments. `main` is the default install ref.
 
 ```bash
-cd cli
-npm run agent-ship -- setup --root <project>
+agent-ship setup
 ```
 
 It creates `.agent-ship/` (proposals, contracts, packets, e2e index, notify policy, allowlist), records `kit-root` and `node-bin` for the hooks, installs the hooks, then prints a JSON report of what changed and a self-check. Re-running prints `unchanged` where the files already match.
