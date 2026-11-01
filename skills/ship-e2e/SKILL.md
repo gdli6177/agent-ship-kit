@@ -12,9 +12,10 @@ description: >-
 # ship-e2e
 
 Browser acceptance for a slice the captain is already shipping. Delivery
-order is `templates/workflow.md`. The login index template is
-`templates/e2e.md`. The pattern to copy into the project under test is
-`templates/e2e-testing.md`.
+order is `templates/workflow.md` in the kit (`$HOME/.agent-ship-kit/main/templates/`).
+The login index template is `e2e.md`. The pattern to copy into the project
+under test is `e2e-testing.md`. Those files live in that same templates
+directory. A manual clone keeps them under `templates/`.
 
 This skill does not merge, deploy, or collect passwords.
 
@@ -33,11 +34,11 @@ This skill does not merge, deploy, or collect passwords.
 
 ## Shared login
 
-1. Copy `templates/e2e.md` to `.agent-ship/e2e/index.md` if that index does
-   not exist yet. Add a row for this project and environment. Do not reuse
-   another project's row.
+1. Copy `$HOME/.agent-ship-kit/main/templates/e2e.md` to
+   `.agent-ship/e2e/index.md` if that index does not exist yet. Add a row for
+   this project and environment. Do not reuse another project's row.
 2. Add one `auth.setup.ts` for this project, following
-   `templates/e2e-testing.md`. It writes `storageState` to the path on that
+   `$HOME/.agent-ship-kit/main/templates/e2e-testing.md`. It writes `storageState` to the path on that
    row. Smoke specs depend on the setup project and reuse the file. They do
    not log in again.
 3. Credentials are environment variables (`E2E_USERNAME`, `E2E_PASSWORD`,
