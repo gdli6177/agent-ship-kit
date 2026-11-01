@@ -1,5 +1,13 @@
 # agent-ship CLI
 
+多仓库和 Git worktree 使用共享 `--root` 保存合同、运行状态和 inbox，
+使用 `--repo` 指定执行 checkout。`setup --root <checkout> --state-root <shared-root>`
+为每个工作树安装门禁。完整示例和适配器派工顺序见[工作空间接入说明](../docs/workspace-parallel.md)。
+
+`slice start` 在启动工人前预留名额，检查冻结合同、切片和两层并行上限。
+适配器用 `slice update --source-task-id <id> --status <status> [--worker <ref>]` 回传状态。
+人要求修改后的恢复也走 update，重新检查预算。
+
 Local inbox and notify for the captain. Node 20 or newer. The only
 dependency is `tsx`, used to run TypeScript directly.
 

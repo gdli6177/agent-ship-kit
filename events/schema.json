@@ -7,6 +7,7 @@
   "additionalProperties": false,
   "required": ["id", "type", "title", "summary", "created_at", "source_task_id"],
   "properties": {
+    "sequence": { "type": "integer", "minimum": 1, "description": "Local state-lock sequence, used to order equal-timestamp events across the lifecycle and inbox logs." },
     "id": {
       "type": "string",
       "pattern": "^evt_[A-Za-z0-9_-]+$",
@@ -72,6 +73,8 @@
     "slice_id": { "type": "string", "minLength": 1 },
     "worker_ref": { "type": "string", "minLength": 1 },
     "branch": { "type": "string", "minLength": 1 },
+    "repo_root": { "type": "string", "minLength": 1, "description": "Canonical execution checkout, separate from the shared state root." },
+    "base_ref": { "type": "string", "minLength": 1, "description": "Base commit pinned at dispatch; later default-branch commits do not change the acceptance baseline." },
     "thread_refs": {
       "type": "object",
       "additionalProperties": false,
@@ -89,7 +92,7 @@
     },
     "status": {
       "type": "string",
-      "enum": ["queued", "running", "needs_review", "blocked", "failed", "cancelled"]
+      "enum": ["queued", "running", "needs_review", "blocked", "needs_approval", "failed", "cancelled"]
     },
     "decision": {
       "type": "string",

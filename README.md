@@ -2,6 +2,8 @@
 
 # agent-ship-kit
 
+Multiple repositories or Git worktrees: see the [workspace parallel-delivery guide](docs/workspace-parallel.md).
+
 agent-ship-kit is the acceptance-and-attention layer for parallel AI coding-agent delivery. A person talks to one captain from intake through ship. Workers are spawned on demand, one slice per frozen contract, and are not a standing roster. The kit sits on Herdr, Orca, Multica, or any other orchestrator through thin adapters, and it also works with no orchestrator at all. It does not schedule the fleet, does not merge to main, and does not deploy to production. The captain prepares a proposal, the human freezes the contract, workers return evidence, and the human accepts that evidence before anything ships.
 
 Status: v0. Skills, templates, an event schema, adapter notes, and a local inbox / notify CLI.

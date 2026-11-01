@@ -1,8 +1,10 @@
 import { execFile } from "node:child_process";
 import { chmod, mkdir, readFile, rm, stat, writeFile } from "node:fs/promises";
-import { dirname, isAbsolute, join } from "node:path";
+import { dirname, isAbsolute, join, resolve } from "node:path";
 import { promisify } from "node:util";
 import { fileURLToPath } from "node:url";
+import { gitPath, repositoryRoot } from "./repository.js";
+import { withLock } from "./storage.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -74,6 +76,7 @@ export interface SetupOptions {
   shared?: boolean;
   uninstall?: boolean;
   purge?: boolean;
+  stateRoot?: string;
 }
 
 function escapeRegExp(value: string): string {
@@ -169,7 +172,7 @@ async function excludeFile(root: string): Promise<string> {
 }
 
 async function hooksPathConfigured(root: string): Promise<boolean> {
-  const value = await tryGit(root, ["config", "--local", "--get", "core.hooksPath"]);
+  const value = await tryGit(root, ["config", "--get", "core.hooksPath"]);
   return value !== null && value.trim() !== "";
 }
 
@@ -184,7 +187,11 @@ if [ -f "$id_file" ]; then
   if [ -n "$contract" ]; then
     kit=$(tr -d '\\r\\n' < "$root/.agent-ship/kit-root") || exit 1
     nodebin=$(tr -d '\\r\\n' < "$root/.agent-ship/node-bin") || exit 1
-    (cd "$kit/cli" && "$nodebin" --import tsx src/cli.ts check --staged --root "$root" --contract "$contract") || exit $?
+    state="$root"
+    if [ -f "$root/.agent-ship/state-root" ]; then
+      state=$(tr -d '\\r\\n' < "$root/.agent-ship/state-root") || exit 1
+    fi
+    (cd "$kit/cli" && "$nodebin" --import tsx src/cli.ts check --staged --root "$state" --repo "$root" --contract "$contract") || exit $?
   fi
 fi
 ${HOOK_END}
@@ -210,7 +217,7 @@ case "\${AGENT_SHIP_ALLOW_PROTECTED_PUSH:-}" in
       extra=$(sed 's/#.*//' "$root/.agent-ship/protected-branches" | tr '\\n' ' ')
     fi
     status=0
-    tmp="$root/.git/agent-ship-pre-push.$$"
+    tmp=$(git rev-parse --git-path "agent-ship-pre-push.$$") || exit 1
     printf '%s\\n' "$input" > "$tmp"
     while read -r _local_ref _local_sha remote_ref _remote_sha; do
       [ -n "$remote_ref" ] || continue
@@ -256,7 +263,7 @@ exit 0
 }
 
 async function installHook(root: string, kind: "pre-commit" | "pre-push"): Promise<SetupAction> {
-  const hookPath = join(root, ".git", "hooks", kind);
+  const hookPath = await gitPath(root, `hooks/${kind}`);
   const chainPath = `${hookPath}.agent-ship-chain`;
   const desired = hookScript(kind);
   const existing = await readOptional(hookPath);
@@ -278,7 +285,7 @@ async function installHook(root: string, kind: "pre-commit" | "pre-push"): Promi
 }
 
 async function uninstallHook(root: string, kind: "pre-commit" | "pre-push"): Promise<SetupAction> {
-  const hookPath = join(root, ".git", "hooks", kind);
+  const hookPath = await gitPath(root, `hooks/${kind}`);
   const chainPath = `${hookPath}.agent-ship-chain`;
   const existing = await readOptional(hookPath);
   if (!existing || !existing.includes(HOOK_START)) {
@@ -293,6 +300,28 @@ async function uninstallHook(root: string, kind: "pre-commit" | "pre-push"): Pro
   }
   await rm(hookPath, { force: true });
   return { path: `.git/hooks/${kind}`, action: "removed" };
+}
+
+/** Worktrees share hooks, but activation and state pointers belong to each checkout. */
+async function manageHooks(root: string, uninstall: boolean): Promise<{ actions: SetupAction[]; retained: boolean }> {
+  const hooks = dirname(await gitPath(root, "hooks/pre-commit"));
+  return withLock(hooks, async () => {
+    const registry = join(hooks, "agent-ship-roots.json");
+    const raw = await readOptional(registry);
+    const value: unknown = raw === null ? [] : JSON.parse(raw);
+    if (!Array.isArray(value) || !value.every((item) => typeof item === "string")) throw new Error("invalid agent-ship hook registry");
+    const roots = new Set<string>(value);
+    if (uninstall) roots.delete(root); else roots.add(root);
+    if (uninstall && roots.size > 0) {
+      await writeFile(registry, JSON.stringify([...roots]));
+      return { actions: [], retained: true };
+    }
+    const actions: SetupAction[] = [];
+    for (const kind of ["pre-commit", "pre-push"] as const) actions.push(await (uninstall ? uninstallHook(root, kind) : installHook(root, kind)));
+    if (uninstall) await rm(registry, { force: true });
+    else await writeFile(registry, JSON.stringify([...roots]));
+    return { actions, retained: false };
+  });
 }
 
 async function copyTemplate(kit: string, root: string, fromRel: string, toRel: string): Promise<SetupAction> {
@@ -390,11 +419,11 @@ async function selfCheck(root: string, shared: boolean, rulesInAgents: boolean):
   const allowOk = (await readOptional(join(root, ".agent-ship", "notify.allowlist.json"))) !== null;
   checks.push({ name: "notify-templates", ok: policyOk && allowOk, detail: "local copies" });
   for (const kind of ["pre-commit", "pre-push"]) {
-    const text = await readOptional(join(root, ".git", "hooks", kind));
+    const text = await readOptional(await gitPath(root, `hooks/${kind}`));
     checks.push({
       name: `hook-${kind}`,
       ok: text !== null && text.includes(HOOK_START) && !text.includes("core.hooksPath"),
-      detail: ".git/hooks only",
+      detail: "Git-resolved hooks directory",
     });
   }
   const hooksPath = await hooksPathConfigured(root);
@@ -407,7 +436,6 @@ async function selfCheck(root: string, shared: boolean, rulesInAgents: boolean):
 }
 
 export async function setupProject(root: string, options: SetupOptions = {}): Promise<SetupReport> {
-  if (options.uninstall || options.purge) return uninstallProject(root, options.purge === true);
   const shared = options.shared === true;
   const kit = kitRoot();
   const actions: SetupAction[] = [];
@@ -421,6 +449,13 @@ export async function setupProject(root: string, options: SetupOptions = {}): Pr
       checks: [{ name: "git", ok: false, detail: "not a git repository; setup does not set core.hooksPath" }],
     };
   }
+
+  root = await repositoryRoot(root, true);
+  if (await hooksPathConfigured(root)) {
+    return { ok: false, root, shared, uninstalled: false, actions: [], checks: [{ name: "hooks-path", ok: false, detail: "core.hooksPath is set; compose agent-ship with the owner hook before setup (no files changed)" }] };
+  }
+  if (options.uninstall || options.purge) return uninstallProject(root, options.purge === true);
+  const stateRoot = options.stateRoot ? await repositoryRoot(resolve(options.stateRoot), true) : root;
 
   await mkdir(join(root, ".agent-ship", "proposals"), { recursive: true });
   await mkdir(join(root, ".agent-ship", "contracts"), { recursive: true });
@@ -455,12 +490,11 @@ export async function setupProject(root: string, options: SetupOptions = {}): Pr
 
   await writeFile(join(root, ".agent-ship", "kit-root"), `${kit}\n`);
   await writeFile(join(root, ".agent-ship", "node-bin"), `${process.execPath}\n`);
+  await writeFile(join(root, ".agent-ship", "state-root"), `${stateRoot}\n`);
   actions.push({ path: ".agent-ship/kit-root", action: "updated" });
   actions.push({ path: ".agent-ship/node-bin", action: "updated" });
 
-  await mkdir(join(root, ".git", "hooks"), { recursive: true });
-  actions.push(await installHook(root, "pre-commit"));
-  actions.push(await installHook(root, "pre-push"));
+  actions.push(...(await manageHooks(root, false)).actions);
 
   const inAgents = ((await readOptional(join(root, "AGENTS.md"))) ?? "").includes(RULES_START);
   const checks = await selfCheck(root, shared, inAgents);
@@ -495,8 +529,8 @@ async function uninstallProject(root: string, purge: boolean): Promise<SetupRepo
       checks: [{ name: "git", ok: false, detail: "not a git repository" }],
     };
   }
-  actions.push(await uninstallHook(root, "pre-commit"));
-  actions.push(await uninstallHook(root, "pre-push"));
+  const hookRemoval = await manageHooks(root, true);
+  actions.push(...hookRemoval.actions);
 
   const agentsPath = join(root, "AGENTS.md");
   const agents = await readOptional(agentsPath);
@@ -527,7 +561,9 @@ async function uninstallProject(root: string, purge: boolean): Promise<SetupRepo
   try {
     const excludePath = await excludeFile(root);
     const exclude = await readOptional(excludePath);
-    if (purge || !(await directoryExists(dataDir))) {
+    if (hookRemoval.retained) {
+      // info/exclude is shared too: keep the other worktrees' protections.
+    } else if (purge || !(await directoryExists(dataDir))) {
       if (exclude && exclude.includes(EXCLUDE_START)) {
         const removed = removeMarked(exclude, EXCLUDE_START, EXCLUDE_END);
         await writeText(excludePath, removed.text, exclude);
@@ -558,17 +594,19 @@ async function uninstallProject(root: string, purge: boolean): Promise<SetupRepo
   if (!purge) {
     await rm(join(root, ".agent-ship", "kit-root"), { force: true });
     await rm(join(root, ".agent-ship", "node-bin"), { force: true });
+    await rm(join(root, ".agent-ship", "state-root"), { force: true });
+    await rm(join(root, ".agent-ship", "active-contract"), { force: true });
   }
 
   const hooksPath = await hooksPathConfigured(root);
-  const pre = await readOptional(join(root, ".git", "hooks", "pre-commit"));
-  const push = await readOptional(join(root, ".git", "hooks", "pre-push"));
+  const pre = await readOptional(await gitPath(root, "hooks/pre-commit"));
+  const push = await readOptional(await gitPath(root, "hooks/pre-push"));
   const agentsAfter = (await readOptional(agentsPath)) ?? "";
   const checks: SetupCheck[] = [
     {
       name: "hooks-removed",
-      ok: !(pre ?? "").includes(HOOK_START) && !(push ?? "").includes(HOOK_END),
-      detail: "agent-ship hooks cleared; chained hooks restored when present",
+      ok: hookRemoval.retained || (!(pre ?? "").includes(HOOK_START) && !(push ?? "").includes(HOOK_END)),
+      detail: hookRemoval.retained ? "shared hooks retained for other checkouts" : "agent-ship hooks cleared; chained hooks restored when present",
     },
     {
       name: "rules-removed",

@@ -1,5 +1,10 @@
 # Architecture
 
+多仓库与 worktree 的执行位置、共享状态、原子派工门禁和状态闭环以
+[工作空间接入说明](workspace-parallel.md) 为准。`repo_root` 是执行 checkout，
+`base_ref` 是派工时固定的提交，`sequence` 用于同毫秒事件排序；旧事件仍兼容。
+CLI 预留名额在 adapter spawn 之前，inbox 的待审/阻塞/审批事件同时更新运行视图。
+
 agent-ship-kit is an acceptance-and-attention layer. A captain agent is the
 only thing the human talks to. Workers are created when a contract is frozen
 and disappear when their slice is done. An orchestrator, if there is one,
@@ -90,7 +95,7 @@ Types:
 | --- | --- | --- |
 | `proposal_ready` | A draft card is ready for the human | — |
 | `contract_frozen` | The human froze a contract | — |
-| `worker_dispatched` | Adapter `spawn` returned | — |
+| `worker_dispatched` | CLI admitted the frozen slice before adapter spawn | — |
 | `needs_review` | A packet is waiting | `evidence_urls`, `priority`, `links` |
 | `blocked` | The worker cannot continue | `priority` |
 | `needs_approval` | The worker needs a mid-task decision | `priority` |
@@ -150,7 +155,7 @@ Default is local:
 
 ## Path check
 
-`agent-ship check --contract <id>` reads `.agent-ship/contracts/<id>.md`, lists paths with plain `git diff` against the base branch (`main` or `master`, or `--base`), and prints JSON. A changed path that matches Forbidden paths, or that matches none of the Allowed paths, fails the check. `--staged` is what the pre-commit hook uses. The JSON belongs in the review packet's verifier section.
+`agent-ship check --root <state> --contract <id> --slice <slice>` reads the shared contract and uses the recorded execution checkout, worker branch and pinned base commit. Unregistered single-repository checks may explicitly pass `--repo`, `--head` and `--base`. Ambiguous multi-repository/branch checks and scopes entering nested Git repositories are rejected. It lists paths with plain `git diff` and prints JSON. A changed path that matches Forbidden paths, or that matches none of the Allowed paths, fails the check. `--staged` is what the pre-commit hook uses. The JSON belongs in the review packet's verifier section.
 
 This does not need GitHub, GitLab, or CI. An optional extra, on any host, is to run the same command on the branch. A green extra check does not replace the verifier or the human.
 
@@ -165,7 +170,7 @@ The captain stops slices the change affects, drafts a new contract id with `Supe
 ## Adapters
 
 ```text
-spawn(contract_path, slice_id, prompt) -> task_id, worker_ref
+spawn(contract_path, slice_id, task_id, prompt) -> task_id, worker_ref
 status(task_id) -> queued | running | needs_review | blocked | needs_approval | failed | cancelled
 collect(task_id) -> summary, evidence_urls, links
 ```
