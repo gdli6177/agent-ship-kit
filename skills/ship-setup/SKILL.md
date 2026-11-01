@@ -27,7 +27,7 @@ Do not tell the human to commit `.git/hooks`, `.git/info/exclude`, or a local `A
 
 ## What the command does
 
-Run this in the project directory. Use `agent-ship` on `PATH` (the installer links it from `~/.local/bin`). If that command is not found, use `"$HOME/.agent-ship-kit/current/cli/bin/agent-ship.js"` with the same arguments. `current` is a symlink to the installed ref.
+Run this in the project directory. Use `agent-ship` on `PATH` (the installer links it from `~/.local/bin`). If that command is not found, use `node $HOME/.agent-ship-kit/current/cli/bin/agent-ship.js` with the same arguments. `current` is a symlink to the installed ref.
 
 ```bash
 agent-ship setup

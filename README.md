@@ -89,7 +89,7 @@ Each command is one skill. The name in the skill file matches the command withou
 | `/ship-e2e` | `skills/ship-e2e/SKILL.md` |
 | `/ship-watchdog` | `skills/ship-watchdog/SKILL.md` |
 
-**Plain terminal.** After the installer, run `agent-ship` in the project directory. If the command is not on `PATH`, use `"$HOME/.agent-ship-kit/current/cli/bin/agent-ship.js"`.
+**Plain terminal.** After the installer, run `agent-ship` in the project directory. If the command is not on `PATH`, use `node $HOME/.agent-ship-kit/current/cli/bin/agent-ship.js`.
 
 | Command | CLI |
 | --- | --- |
@@ -105,6 +105,8 @@ Each command is one skill. The name in the skill file matches the command withou
 The captain is a router. It does not edit code or run the long task, even when the change looks small, and it does not wait out a worker before taking the next request. Speculative drafts are off unless `.agent-ship/limits.json` sets `"speculative": true`, and even then nothing is dispatched without a frozen contract. A persistent runtime, compute/state split, and device daemons stay with the orchestrator.
 
 `agent-ship check --contract <id>` diffs the branch against its base with plain git and fails when a changed path is forbidden or outside the allow list. The local pre-commit hook runs the same check on staged files for `.agent-ship/active-contract`. pre-push refuses `main` and `master` unless a human sets `AGENT_SHIP_ALLOW_PROTECTED_PUSH=1`. CI can run `check` too; that is optional and not required for the hooks.
+
+`slice start` admits work only when the contract is frozen, `Frozen by` is a real name, `Frozen at` parses as a time, Forbidden paths is non-empty, the slice id is a row in the Slices table, and the branch already exists. The errors are `contract must record Frozen by`, `contract must record a valid Frozen at`, `contract needs non-empty Forbidden paths`, `slice <id> is not in the Slices table`, and `branch <name> does not exist in <repo>; create it first (git branch <name> <base>)`. Create the branch first. `.agent-ship/sequence` is the integer that orders events written in the same millisecond; do not edit it while a command holds the state lock. A lock directory `.agent-ship-lock` records `pid`, `hostname`, `started_at`, and `cmd`. A dead pid on this machine is reclaimed. Otherwise the error names the owner. Manual recovery is `rm -rf` on that lock directory after the owner has exited. See [docs/workspace-parallel.md](docs/workspace-parallel.md).
 
 ## Quickstart without Multica
 
@@ -127,7 +129,7 @@ agent-ship notify dry-run --latest \
   --allowlist "$HOME/.agent-ship-kit/current/templates/notify.allowlist.example.json"
 ```
 
-Run that in the project directory. If `agent-ship` is not on `PATH`, call `"$HOME/.agent-ship-kit/current/cli/bin/agent-ship.js"` instead.
+Run that in the project directory. If `agent-ship` is not on `PATH`, call `node $HOME/.agent-ship-kit/current/cli/bin/agent-ship.js` instead.
 
 Expect a `needs_review` event, then a plan whose `matched_rule` is `high priority page`, `allow` is true, and `executed` is false. Drop the `--evidence` flag and the same high item is not paged. `notify run` is opt-in and starts only an allowlisted argv, with no shell. `inbox decide <id> accept` writes `review_decided`; `inbox list` then hides that item.
 

@@ -450,7 +450,8 @@ export async function setupProject(root: string, options: SetupOptions = {}): Pr
     };
   }
 
-  root = await repositoryRoot(root, true);
+  // A subdirectory resolves to this worktree's top-level, not another linked worktree.
+  root = await repositoryRoot(root);
   if (await hooksPathConfigured(root)) {
     return { ok: false, root, shared, uninstalled: false, actions: [], checks: [{ name: "hooks-path", ok: false, detail: "core.hooksPath is set; compose agent-ship with the owner hook before setup (no files changed)" }] };
   }

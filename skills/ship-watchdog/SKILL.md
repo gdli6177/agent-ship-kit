@@ -39,7 +39,7 @@ item because something is wrong. `limits.example.json` is
    `agent-ship check`. A miss files one `blocked` item (`stalled` or `drift`).
    That inbox item is the only handoff to the captain.
 
-Run these in the project directory. Use `agent-ship` on `PATH`. If that command is not found, use `"$HOME/.agent-ship-kit/current/cli/bin/agent-ship.js"` with the same arguments.
+Run these in the project directory. Use `agent-ship` on `PATH`. If that command is not found, use `node $HOME/.agent-ship-kit/current/cli/bin/agent-ship.js` with the same arguments.
 
 ```bash
 agent-ship watchdog install

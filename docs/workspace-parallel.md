@@ -8,14 +8,15 @@
 
 ## 准备工作
 
-以下命令从本工具的 `cli/` 运行。`/work/workspace` 是控制仓库，
-`repos/alpha`、`repos/beta` 是两个独立 Git 仓库。
+在项目目录里运行 `agent-ship`。命令不在 `PATH` 上时，改用
+`node $HOME/.agent-ship-kit/current/cli/bin/agent-ship.js`，参数相同。
+`/work/workspace` 是控制仓库，`repos/alpha`、`repos/beta` 是两个独立 Git 仓库。
+在子目录里执行 `setup` 会解析到当前 worktree 的仓库根，不会误用另一个 worktree。
 
 ```sh
-pnpm install
-pnpm agent-ship setup --root /work/workspace
-pnpm agent-ship setup --root /work/workspace/repos/alpha --state-root /work/workspace
-pnpm agent-ship setup --root /work/workspace/repos/beta --state-root /work/workspace
+agent-ship setup --root /work/workspace
+agent-ship setup --root /work/workspace/repos/alpha --state-root /work/workspace
+agent-ship setup --root /work/workspace/repos/beta --state-root /work/workspace
 ```
 
 根目录的 hooks 不会传播到独立成员，必须分别安装。默认安装仍保留既有规则和忽略文件；
@@ -41,8 +42,18 @@ Git diff 不进入独立仓库，CLI 会拒绝这种跨 Git 边界的路径检�
 先由适配器准备独立 checkout 和分支，选定稳定的任务 ID，再调用 `slice start` **预留名额**。
 返回成功后才能启动工人；失败时不得启动。不同进程共享同一状态锁，因此两个并行登记也不能突破预算。
 
+`slice start` 拒绝不完整的合同。每一种失败都有单独的错误：
+
+- 没有 `Frozen by`，或仍是占位符：`contract must record Frozen by`
+- `Frozen at` 缺失或不是可解析的时间：`contract must record a valid Frozen at`
+- Forbidden paths 为空：`contract needs non-empty Forbidden paths`
+- 切片不在 Slices 表里：`slice <id> is not in the Slices table`
+- 分支在执行仓库里还不存在：`branch <name> does not exist in <repo>; create it first (git branch <name> <base>)`
+
+先创建分支，例如 `git branch ship/auth/middleware main`，再登记。
+
 ```sh
-pnpm agent-ship slice start --root /work/workspace \
+agent-ship slice start --root /work/workspace \
   --repo /work/workspace/repos/alpha \
   --contract auth --slice middleware --source-task-id task_auth_middleware \
   --branch ship/auth/middleware --base main \
@@ -56,7 +67,7 @@ pnpm agent-ship slice start --root /work/workspace \
 随后调用适配器 spawn，使用同一个稳定任务 ID 映射平台 run ID，并记录 worker 引用：
 
 ```sh
-pnpm agent-ship slice update --root /work/workspace \
+agent-ship slice update --root /work/workspace \
   --source-task-id task_auth_middleware --status running --worker platform_run_123 \
   --summary 'Worker started on the prepared checkout.'
 ```
@@ -73,8 +84,8 @@ pnpm agent-ship slice update --root /work/workspace \
 ```sh
 git -C /work/workspace/repos/alpha worktree add -b ship/auth/middleware /work/trees/auth main
 git -C /work/workspace/repos/alpha worktree add -b ship/billing/webhook /work/trees/billing main
-pnpm agent-ship setup --root /work/trees/auth --state-root /work/workspace
-pnpm agent-ship setup --root /work/trees/billing --state-root /work/workspace
+agent-ship setup --root /work/trees/auth --state-root /work/workspace
+agent-ship setup --root /work/trees/billing --state-root /work/workspace
 ```
 
 在每个 checkout 的 `.agent-ship/active-contract` 写入它负责的合同 ID，
@@ -84,9 +95,9 @@ pnpm agent-ship setup --root /work/trees/billing --state-root /work/workspace
 ## 核验、收件箱与状态闭环
 
 ```sh
-pnpm agent-ship check --root /work/workspace --contract auth --slice middleware
-pnpm agent-ship watchdog --root /work/workspace
-pnpm agent-ship inbox list --root /work/workspace --sort priority
+agent-ship check --root /work/workspace --contract auth --slice middleware
+agent-ship watchdog --root /work/workspace
+agent-ship inbox list --root /work/workspace --sort priority
 ```
 
 `check` 从登记记录确定实际 checkout、分支和固定基线。合同跨多个仓库或分支时，
@@ -99,6 +110,10 @@ watchdog 的提交进展与路径越界检查使用同一条切片的 checkout �
 独立核验通过后，船长使用 `inbox add --type needs_review` 汇总证据。运行视图同时折叠
 events 和 inbox，因此待审、阻塞和中途审批都会暂停 running/queued 状态；接受待审包后
 不会再把已交付任务判为停滞。相同毫秒写入的本地事件用状态锁内生成的 sequence 排序。
+`.agent-ship/sequence` 是锁内递增的一个整数，用来给同一时间戳的事件排稳定顺序。
+不要在命令运行时改这个文件。如果内容不是非负整数，CLI 报 `invalid state sequence` 并停止。
+确认没有进程持有锁之后，可以把文件改回最后一个正确整数，或写成 `0`。
+`created_at` 无法解析时，排序改用 sequence，再不行就保持文件里的原顺序。
 
 人的 `changes_requested` 不自动重启工人。记录决定后，船长调用
 `slice update --status running` 恢复同一任务；恢复也检查冻结合同和两层并行预算。
@@ -117,5 +132,8 @@ events 和 inbox，因此待审、阻塞和中途审批都会暂停 running/queu
 worktree hooks、人工决定后的状态闭环、显式恢复与替换、无法检查时的告警。
 测试使用临时 Git 仓库和工人进程夹具，不代表已完成 Herdr/Orca/Multica 的真实模型接入验收。
 
-状态锁在异常退出后可能保留。CLI 会报告锁路径并停止；先检查拥有者进程再手工移除，
-不会自动抢占可能仍在使用的锁。共享状态应放在本机文件系统；跨机器/网络文件系统不在本次保证范围。
+状态锁和 hook 注册锁都是目录 `.agent-ship-lock`，里面的 `owner.json` 记录
+`pid`、`hostname`、`started_at`、`cmd`。同一台机器上，如果记录的 pid 已经不存在，
+下一次命令会自动收回这把锁。pid 仍在，或锁来自别的主机，命令等到超时后报错，
+并写明拥有者和 pid 是否仍活着。手工恢复：确认拥有者已经退出后执行 `rm -rf <锁目录>`。
+不要在进程还活着时删除锁。共享状态应放在本机文件系统；跨机器/网络文件系统不在本次保证范围。

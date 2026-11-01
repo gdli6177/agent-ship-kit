@@ -1,13 +1,13 @@
 import assert from "node:assert/strict";
 import { execFile, spawnSync } from "node:child_process";
 import { mkdir, mkdtemp, readFile, realpath, rename, rm, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { hostname, tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
 import { fileURLToPath } from "node:url";
 import { test } from "node:test";
 import { main } from "../src/cli.js";
-import { activeSlices, runWatchdog } from "../src/watchdog.js";
+import { activeSlices, allSlices, runWatchdog } from "../src/watchdog.js";
 
 const exec = promisify(execFile);
 async function git(root: string, ...args: string[]): Promise<string> {
@@ -69,6 +69,74 @@ async function fixture(body: (root: string) => Promise<void>) {
     await rm(root, { recursive: true, force: true });
   }
 }
+
+test("slice start reports each frozen-contract and branch requirement", async () => fixture(async (root) => {
+  await repo(root);
+  await contract(root);
+  const missingBranch = await start(root, "nobranch", "a", ["--branch", "ship/missing"]);
+  assert.equal(missingBranch.code, 1);
+  assert.equal(
+    missingBranch.stderr.includes(`branch ship/missing does not exist in ${root}; create it first (git branch ship/missing main)`),
+    true,
+    missingBranch.stderr,
+  );
+
+  const text = await readFile(join(root, ".agent-ship", "contracts", "c.md"), "utf8");
+  await writeFile(join(root, ".agent-ship", "contracts", "c.md"), text.replace("Frozen by: Test human", "Frozen by: <name>"));
+  assert.match((await start(root, "no-by")).stderr, /contract must record Frozen by/);
+  await writeFile(join(root, ".agent-ship", "contracts", "c.md"), text.replace("Frozen at: 2026-10-31T10:00:00Z", "Frozen at: yesterday"));
+  assert.match((await start(root, "no-at")).stderr, /contract must record a valid Frozen at/);
+  await writeFile(join(root, ".agent-ship", "contracts", "c.md"), text.replace("- forbidden.txt\n", ""));
+  assert.match((await start(root, "no-forbidden")).stderr, /contract needs non-empty Forbidden paths/);
+  await writeFile(join(root, ".agent-ship", "contracts", "c.md"), text);
+  assert.match((await start(root, "unknown-slice", "missing")).stderr, /slice missing is not in the Slices table/);
+}));
+
+test("setup from a subdirectory uses that worktree's top-level", async () => fixture(async (root) => {
+  await repo(root);
+  const nested = join(root, "src", "nested");
+  await mkdir(nested, { recursive: true });
+  const here = await call(nested, "setup");
+  assert.equal(here.code, 0, here.stderr);
+  assert.equal(JSON.parse(here.stdout).root, root);
+  await readFile(join(root, ".agent-ship", "kit-root"), "utf8");
+
+  const member = join(root, "member");
+  const tree = join(root, "tree");
+  await repo(member);
+  await git(member, "worktree", "add", "-b", "ship/c/a", tree, "main");
+  const inside = join(tree, "inside");
+  await mkdir(inside);
+  const fromTree = await call(inside, "setup");
+  assert.equal(fromTree.code, 0, fromTree.stderr);
+  assert.equal(JSON.parse(fromTree.stdout).root, await realpath(tree));
+  await readFile(join(tree, ".agent-ship", "kit-root"), "utf8");
+  const hooks = await git(tree, "rev-parse", "--git-path", "hooks/pre-commit");
+  assert.match(await readFile(hooks.startsWith("/") ? hooks : join(tree, hooks), "utf8"), /agent-ship-hook-start/);
+}));
+
+test("a dead hook-registry lock is reclaimed", async () => fixture(async (root) => {
+  await repo(root);
+  const hooks = await git(root, "rev-parse", "--git-path", "hooks");
+  const hookDir = hooks.startsWith("/") ? hooks : join(root, hooks);
+  const lock = join(hookDir, ".agent-ship-lock");
+  await mkdir(lock, { recursive: true });
+  await writeFile(join(lock, "owner.json"), JSON.stringify({ pid: 2_000_000_001, hostname: hostname(), started_at: "2020-01-01T00:00:00Z", cmd: "stale-hook" }));
+  const result = await call(root, "setup");
+  assert.equal(result.code, 0, result.stderr);
+  await assert.rejects(readFile(join(lock, "owner.json"), "utf8"));
+}));
+
+test("allSlices uses sequence then file order when created_at does not parse", async () => fixture(async (root) => {
+  await mkdir(join(root, ".agent-ship"), { recursive: true });
+  const line = (task: string, sequence?: number) => JSON.stringify({
+    type: "worker_dispatched", source_task_id: task, title: task, summary: task, created_at: "not-a-date", status: "running", ...(sequence === undefined ? {} : { sequence }),
+  });
+  await writeFile(join(root, ".agent-ship", "events.jsonl"), `${line("file-a")}\n${line("file-b")}\n${line("file-c")}\n`);
+  assert.deepEqual((await allSlices(root)).map((slice) => slice.source_task_id), ["file-a", "file-b", "file-c"]);
+  await writeFile(join(root, ".agent-ship", "events.jsonl"), `${line("seq-3", 3)}\n${line("seq-1", 1)}\n${line("seq-2", 2)}\n`);
+  assert.deepEqual((await allSlices(root)).map((slice) => slice.source_task_id), ["seq-1", "seq-2", "seq-3"]);
+}));
 
 test("dispatch rejects missing/draft contracts, unknown slices and duplicate work", async () => fixture(async (root) => {
   await repo(root);

@@ -47,7 +47,7 @@ The parser and the match rules are normative in `docs/ARCHITECTURE.md`.
 
 ## Dry-run
 
-Run this in the project directory. Use `agent-ship` on `PATH`. If that command is not found, use `"$HOME/.agent-ship-kit/current/cli/bin/agent-ship.js"` with the same arguments.
+Run this in the project directory. Use `agent-ship` on `PATH`. If that command is not found, use `node $HOME/.agent-ship-kit/current/cli/bin/agent-ship.js` with the same arguments.
 
 ```bash
 agent-ship notify dry-run --latest \

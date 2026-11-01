@@ -64,7 +64,7 @@ Fill every section of `templates/review-packet.md`.
 
 ## Inbox CLI
 
-These are CLI subcommands, not the `/ship-inbox` name. Run them in the project directory. Use `agent-ship` on `PATH`. If that command is not found, use `"$HOME/.agent-ship-kit/current/cli/bin/agent-ship.js"` with the same arguments.
+These are CLI subcommands, not the `/ship-inbox` name. Run them in the project directory. Use `agent-ship` on `PATH`. If that command is not found, use `node $HOME/.agent-ship-kit/current/cli/bin/agent-ship.js` with the same arguments.
 
 ```bash
 agent-ship inbox add \

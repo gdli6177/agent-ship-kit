@@ -524,13 +524,34 @@ export async function activeSlices(root: string): Promise<SliceState[]> {
   return (await allSlices(root)).filter((slice) => slice.status === "queued" || slice.status === "running");
 }
 
-async function allSlices(root: string): Promise<SliceState[]> {
+function eventTime(value: unknown): number | null {
+  const parsed = Date.parse(String(value ?? ""));
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function eventSequence(value: unknown): number | null {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+/** Time order when both timestamps parse. Otherwise sequence, then original file order. */
+export function compareEvents(left: Record<string, unknown>, right: Record<string, unknown>, leftIndex: number, rightIndex: number): number {
+  const leftTime = eventTime(left.created_at);
+  const rightTime = eventTime(right.created_at);
+  if (leftTime !== null && rightTime !== null && leftTime !== rightTime) return leftTime - rightTime;
+  const leftSequence = eventSequence(left.sequence);
+  const rightSequence = eventSequence(right.sequence);
+  if (leftSequence !== null && rightSequence !== null && leftSequence !== rightSequence) return leftSequence - rightSequence;
+  return leftIndex - rightIndex;
+}
+
+export async function allSlices(root: string): Promise<SliceState[]> {
   const events = await readEvents(root);
   const inbox = await readInbox(root);
   // Fold the attention log directly instead of double-writing a second state event.
-  const combined: Record<string, unknown>[] = [...events, ...inbox.map((event) => ({ ...event }))];
-  combined.sort((a, b) => Date.parse(String(a.created_at)) - Date.parse(String(b.created_at)) || Number(a.sequence ?? 0) - Number(b.sequence ?? 0));
-  return foldSlices(combined);
+  const combined = [...events, ...inbox.map((event) => ({ ...event }))].map((event, index) => ({ event, index }));
+  combined.sort((left, right) => compareEvents(left.event, right.event, left.index, right.index));
+  return foldSlices(combined.map((item) => item.event));
 }
 
 async function drifted(root: string, slice: SliceState, checkDrift: boolean): Promise<boolean> {
@@ -651,12 +672,14 @@ async function dispatchTerms(root: string, contractId: string, sliceId: string) 
   if (status !== "frozen") throw new Error("contract must be frozen before dispatch or resume");
   const human = /^Frozen by:[ \t]*(.+)$/im.exec(markdown)?.[1]?.trim().replace(/^`|`$/g, "");
   const frozenAt = /^Frozen at:[ \t]*(.+)$/im.exec(markdown)?.[1]?.trim().replace(/^`|`$/g, "");
-  if (!human || human.startsWith("<") || !frozenAt || !Number.isFinite(Date.parse(frozenAt))) throw new Error("contract must record Frozen by and a valid Frozen at");
+  if (!human || human.startsWith("<")) throw new Error("contract must record Frozen by");
+  if (!frozenAt || !Number.isFinite(Date.parse(frozenAt))) throw new Error("contract must record a valid Frozen at");
   const paths = parseContractPaths(markdown);
-  if (!paths.allowed.length || !paths.forbidden.length) throw new Error("contract needs non-empty Allowed paths and Forbidden paths");
+  if (!paths.allowed.length) throw new Error("contract needs non-empty Allowed paths");
+  if (!paths.forbidden.length) throw new Error("contract needs non-empty Forbidden paths");
   const section = markdown.split(/^##[ \t]+/m).find((part) => /^Slices\b/i.test(part)) ?? "";
   const rows = section.split("\n").map((line) => /^\|[ \t]*`?([^|`]+)`?[ \t]*\|/.exec(line)?.[1]?.trim());
-  if (!/^[A-Za-z0-9._-]+$/.test(sliceId) || !rows.includes(sliceId)) throw new Error(`slice ${sliceId} is not in the frozen contract`);
+  if (!/^[A-Za-z0-9._-]+$/.test(sliceId) || !rows.includes(sliceId)) throw new Error(`slice ${sliceId} is not in the Slices table`);
   const cap = Number(/^max_parallel:[ \t]*(\S+)[ \t]*$/im.exec(section)?.[1] ?? 3);
   if (!Number.isSafeInteger(cap) || cap < 1) throw new Error("max_parallel must be a positive integer");
   return { cap, paths };
@@ -683,7 +706,12 @@ export async function startSlice(root: string, input: SliceStartInput): Promise<
     const base = await baseCommit(repo, input.base);
     const branch = input.branch ?? `ship/${input.contractId}/${input.sliceId}`;
     if (branch.startsWith("-")) throw new Error("branch must be a Git ref, not an option");
-    await gitOutput(repo, ["rev-parse", "--verify", `${branch}^{commit}`]);
+    const baseHint = input.base ?? "main";
+    try {
+      await gitOutput(repo, ["rev-parse", "--verify", `${branch}^{commit}`]);
+    } catch {
+      throw new Error(`branch ${branch} does not exist in ${repo}; create it first (git branch ${branch} ${baseHint})`);
+    }
     const threadRefs: ThreadRefs = {};
     if (input.threadRefs?.pr) threadRefs.pr = input.threadRefs.pr;
     if (input.threadRefs?.issue) threadRefs.issue = input.threadRefs.issue;

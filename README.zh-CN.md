@@ -103,7 +103,7 @@ cp -R skills/ship-setup skills/ship-watchdog skills/ship-contract skills/ship-di
 | `/ship-e2e` | `skills/ship-e2e/SKILL.md` |
 | `/ship-watchdog` | `skills/ship-watchdog/SKILL.md` |
 
-**纯终端。** 安装之后，在项目目录里跑 `agent-ship`。命令不在 `PATH` 上时，用 `"$HOME/.agent-ship-kit/current/cli/bin/agent-ship.js"`。
+**纯终端。** 安装之后，在项目目录里跑 `agent-ship`。命令不在 `PATH` 上时，用 `node $HOME/.agent-ship-kit/current/cli/bin/agent-ship.js`。
 
 | 命令 | CLI |
 | --- | --- |
@@ -124,7 +124,7 @@ cp -R skills/ship-setup skills/ship-watchdog skills/ship-contract skills/ship-di
 
 1. 讨论时只维持一张方案卡，每轮写明改了什么。
 2. 人冻结之后才有合同。合同写明允许路径和禁止路径。
-3. 在合同自己的并行上限和全局上限（默认同时 3 个工人）之内派工。`slice start` 把切片记下来，默认分支是 `ship/<合同>/<切片>`。第一条切片会登记看门狗定时器。
+3. 在合同自己的并行上限和全局上限（默认同时 3 个工人）之内派工。`slice start` 把切片记下来。分支必须已经存在，默认名是 `ship/<合同>/<切片>`。合同还必须有真实的 `Frozen by`、可解析的 `Frozen at`、非空 Forbidden paths，并且切片写在 Slices 表里。对应错误是 `contract must record Frozen by`、`contract must record a valid Frozen at`、`contract needs non-empty Forbidden paths`、`slice <id> is not in the Slices table`，以及 `branch <name> does not exist in <repo>; create it first (git branch <name> <base>)`。先 `git branch` 再登记。第一条切片会登记看门狗定时器。`.agent-ship/sequence` 是同一毫秒内事件的序号，命令持有状态锁时不要改它。锁目录 `.agent-ship-lock` 记下 `pid`、`hostname`、`started_at`、`cmd`。本机 pid 已退出就自动收回；否则错误里会写出拥有者。确认进程退出后，手工恢复是 `rm -rf` 那个锁目录。详见 [docs/workspace-parallel.md](docs/workspace-parallel.md)。
 4. 工人卡住或需要中途拍板时，只回给船长，收件箱用 `blocked` 或 `needs_approval`。人不要打开工人会话。
 5. 工人说做完之后，另开一个只读核验，只给冻结合同和分支，不给工人对话。核验重跑验收、`agent-ship check` 和相关冒烟。不一致就退回工人。
 6. 一致之后才写成待审包并 `inbox add`。`/ship-inbox` 先看短卡片，主人要求再展开。
@@ -193,7 +193,7 @@ agent-ship notify dry-run --latest \
   --allowlist "$HOME/.agent-ship-kit/current/templates/notify.allowlist.example.json"
 ```
 
-在项目目录里跑。`agent-ship` 不在 `PATH` 上时，改用 `"$HOME/.agent-ship-kit/current/cli/bin/agent-ship.js"`。
+在项目目录里跑。`agent-ship` 不在 `PATH` 上时，改用 `node $HOME/.agent-ship-kit/current/cli/bin/agent-ship.js`。
 
 预期得到一条 `needs_review`，然后计划的 `matched_rule` 是 `high priority page`，`allow` 为 true，`executed` 为 false。去掉 `--evidence` 之后，同样的高优先级项不会被呼叫。`notify run` 是可选的，只启动允许列表里的 argv，不经过 shell。`inbox decide <id> accept` 写入 `review_decided`，之后 `inbox list` 不再显示这一条。
 
