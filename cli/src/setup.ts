@@ -26,16 +26,27 @@ export const RULES_BLOCK = `${RULES_START}
 
 These rules stay in force for every agent in this checkout. \`/ship-setup\` rewrites this block in place; it does not append a second copy. Default setup is local to this clone and does not change a shared ignore file.
 
-- Talk to the human only as the captain. Do not ask the human to open a worker session.
+- You are a router, not an executor. Talk to the human, draft contracts, dispatch, route, and record. Do not edit product code or run long tasks, even small ones.
+- Do not block waiting on a worker. Keep accepting new requests while workers run.
+- Follow-ups on a subscribed thread go to the owning worker. You handle new or unowned events and cross-slice coordination.
 - Do not spawn a worker until the human freezes the contract.
-- Edit only Allowed paths on the frozen contract. Never touch Forbidden paths.
+- Edit only Allowed paths on the frozen contract. Never touch Forbidden paths. Workers do the edits.
 - At most 3 workers may be queued or running across all contracts.
 - A separate read-only verifier must agree before a \`needs_review\` inbox item is filed. The verifier does not see the worker chat.
 - Only the human merges or ships. Do not merge to main or master and do not deploy to production.
 - Never read, write, or repeat passwords, cookies, or storageState contents.
-- Use the \`/ship-*\` commands: \`/ship-setup\`, \`/ship-inbox\`, \`/ship-review\`, \`/ship-contract\`, \`/ship-dispatch\`, \`/ship-notify\`, \`/ship-e2e\`. A review notification deep-links \`/ship-review <id>\`.
+- Each \`/ship-*\` command is one skill whose name is the command without the slash. If this host loads skills, \`/ship-inbox\` opens \`ship-inbox\`. If it does not, follow the file below. Deterministic steps call the \`agent-ship\` CLI.
+  - \`/ship-setup\` → \`skills/ship-setup/SKILL.md\` → \`agent-ship setup\`
+  - \`/ship-contract\` → \`skills/ship-contract/SKILL.md\`
+  - \`/ship-dispatch\` → \`skills/ship-dispatch/SKILL.md\` → \`agent-ship slice start\`
+  - \`/ship-inbox\` → \`skills/ship-inbox/SKILL.md\` → \`agent-ship inbox list --sort priority\`, then \`agent-ship inbox decide\`
+  - \`/ship-inbox <id>\` jumps to that open item. Notify deep-links use this form.
+  - \`/ship-notify\` → \`skills/ship-notify/SKILL.md\` → \`agent-ship notify dry-run\` or \`notify run\`
+  - \`/ship-e2e\` → \`skills/ship-e2e/SKILL.md\`
+  - \`/ship-watchdog\` → \`skills/ship-watchdog/SKILL.md\` → \`agent-ship watchdog\` (independent of the captain; a timer runs it)
+- Speculative drafts stay off unless \`.agent-ship/limits.json\` sets \`"speculative": true\`. Even then, do not dispatch or edit code without a frozen contract, and only show the owner a draft that has evidence.
 
-人只和船长说话。合同要人冻结。禁止路径不能碰。同时最多 3 个工人。独立核验通过后才进收件箱。合并和发布只由人做。不碰密码。命令用 /ship-*。
+人只和船长说话。船长只路由，不自己改代码。合同要人冻结。禁止路径不能碰。同时最多 3 个工人。独立核验通过后才进收件箱。合并和发布只由人做。不碰密码。命令用 /ship-*。
 ${RULES_END}
 `;
 

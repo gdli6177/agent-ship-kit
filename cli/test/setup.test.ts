@@ -183,7 +183,7 @@ test("local setup does not edit a tracked AGENTS.md", async () => {
   try {
     assert.equal(await main(["setup", "--root", root], capture().io), 0);
     assert.equal(await readFile(join(root, "AGENTS.md"), "utf8"), "# Team rules\n\nKeep this shared.\n");
-    assert.match(await readFile(join(root, ".agent-ship", "AGENTS.local.md"), "utf8"), /Talk to the human only as the captain/);
+    assert.match(await readFile(join(root, ".agent-ship", "AGENTS.local.md"), "utf8"), /You are a router, not an executor/);
     const status = await git(root, ["status", "--short"]);
     assert.equal(status.includes("AGENTS.md"), false);
   } finally {

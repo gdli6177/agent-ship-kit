@@ -28,25 +28,32 @@ a shell pipeline. Merging and production deploy are out of scope even when
 `notify dry-run` only prints the plan. `notify run` is opt-in: it starts the
 allowlisted argv with no shell, and only when `allow` is true.
 
+This Instructions section is the slow path. The `## Rule:` blocks below are
+the fast path. A push stays under 100 words, asks for a decision, and names
+`/ship-inbox <id>`. Speculative drafts are off unless
+`.agent-ship/limits.json` sets `"speculative": true`. Even then the captain
+does not dispatch or edit code without a frozen contract, and it only shows
+the owner a draft that already has evidence.
+
 ## Rule: high priority page
 
 when.priority: high
 when.type: needs_review
 when.evidence_urls: nonempty
-action: curl -X POST https://hooks.example/ship?review=/ship-review/{id}
-note: Page only when evidence exists. Deep link /ship-review {id}. Do not merge or deploy.
+action: curl -X POST https://hooks.example/ship?review=/ship-inbox/{id}
+note: Page only when evidence exists. Deep link /ship-inbox {id}. Do not merge or deploy.
 
 ## Rule: blocked
 
 when.type: blocked
-action: multica issue create --assignee me --title blocked /ship-review/{id}
-note: Mid-task block. Open /ship-review {id}. The owner does not open the worker session.
+action: multica issue create --assignee me --title blocked /ship-inbox/{id}
+note: Mid-task block. Open /ship-inbox {id}. The owner does not open the worker session.
 
 ## Rule: needs approval
 
 when.type: needs_approval
-action: multica issue create --assignee me --title needs-approval /ship-review/{id}
-note: Mid-task approval. Open /ship-review {id}. The owner does not open the worker session.
+action: multica issue create --assignee me --title needs-approval /ship-inbox/{id}
+note: Mid-task approval. Open /ship-inbox {id}. The owner does not open the worker session.
 
 ## Never
 

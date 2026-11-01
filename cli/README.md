@@ -26,6 +26,24 @@ npm run agent-ship -- setup --uninstall --root ..
 
 `--shared` writes a marked block in `.gitignore` and merges the rules into `AGENTS.md` even when that file is tracked. Hooks remain uncommitted. `--uninstall` restores a chained hook and removes the rules block. Data under `.agent-ship/` is kept, and `.git/info/exclude` keeps a single `.agent-ship/` line so the directory does not show up as untracked. `--uninstall --purge` deletes `.agent-ship/` and that exclude line.
 
+## Watchdog
+
+```bash
+npm run agent-ship -- watchdog --root ..
+npm run agent-ship -- status --stale --root ..
+```
+
+Deterministic. No model. Reads heartbeats in `.agent-ship/events.jsonl`, the last commit time on the slice branch, and `check`. Files a `blocked` item only when a slice is stalled or drifting. If nothing is `queued` or `running`, it exits immediately and deletes the local timer.
+
+```bash
+npm run agent-ship -- slice start --root .. --contract contract_auth --slice auth \
+  --source-task-id task_1 --title "Auth slice" --summary "Opened."
+npm run agent-ship -- watchdog install --root ..
+npm run agent-ship -- watchdog uninstall --root ..
+```
+
+`slice start` records `worker_dispatched` and installs the timer when a slice is open. Install writes a cron snippet and a launchd plist under `~/.config/agent-ship/` (override with `AGENT_SHIP_TIMER_HOME`). Those files are not in the repo. Paste the cron line into `crontab -e`, or on macOS copy the plist into `~/Library/LaunchAgents` and `launchctl bootstrap` it. An orchestrator scheduler or an assistant routine can run `watchdog` instead of either timer.
+
 ## Check
 
 ```bash

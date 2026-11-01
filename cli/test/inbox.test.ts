@@ -83,6 +83,37 @@ test("inbox rejects a duplicate id and a blank title", async () => {
   });
 });
 
+test("inbox summary is capped and routing fields are stored", async () => {
+  await withRoot(async (root) => {
+    await assert.rejects(
+      () =>
+        addInboxItem(root, {
+          title: "Too long",
+          summary: "x".repeat(281),
+          sourceTaskId: "task_long",
+        }),
+      /at most 280/,
+    );
+    const added = await addInboxItem(root, {
+      type: "blocked",
+      title: "Waiting on review comments",
+      summary: "PR thread has a new comment.",
+      sourceTaskId: "task_route",
+      contractId: "contract_auth",
+      sliceId: "auth",
+      workerRef: "worker_1",
+      branch: "ship/contract_auth/auth",
+      threadRefs: { pr: "https://example.com/pull/12", chat: "thread_9" },
+      reason: "other",
+    });
+    assert.equal(added.contract_id, "contract_auth");
+    assert.equal(added.slice_id, "auth");
+    assert.equal(added.thread_refs?.pr, "https://example.com/pull/12");
+    assert.equal(added.thread_refs?.chat, "thread_9");
+    assert.equal(added.reason, "other");
+  });
+});
+
 test("decide closes an item so the default open list hides it", async () => {
   await withRoot(async (root) => {
     const blocked = await addInboxItem(root, {

@@ -9,11 +9,15 @@ import {
   type AttentionType,
   type Decision,
   type EventLinks,
+  type BlockReason,
   type InboxAddInput,
   type InboxRecord,
   type ListInboxOptions,
   type Priority,
   type ReviewDecidedEvent,
+  type ThreadRefs,
+  BLOCK_REASONS,
+  SUMMARY_MAX,
 } from "./types.js";
 
 const ID_PATTERN = /^evt_[A-Za-z0-9_-]+$/;
@@ -48,6 +52,19 @@ function requiredText(value: string, label: string): string {
   if (!trimmed) throw new Error(`${label} is required`);
   if (/[\r\n\0]/.test(trimmed)) throw new Error(`${label} must be a single line`);
   return trimmed;
+}
+
+export function assertSummary(value: string): string {
+  const summary = requiredText(value, "summary");
+  if (summary.length > SUMMARY_MAX) {
+    throw new Error(`summary must be at most ${SUMMARY_MAX} characters`);
+  }
+  return summary;
+}
+
+export function assertBlockReason(value: string): BlockReason {
+  if (value === "stalled" || value === "drift" || value === "other") return value;
+  throw new Error(`reason must be one of: ${BLOCK_REASONS.join(", ")}`);
 }
 
 function optionalLink(value: string | undefined, label: string): string | undefined {
@@ -140,7 +157,7 @@ async function appendRecord(root: string, record: InboxRecord): Promise<void> {
 
 export async function addInboxItem(root: string, input: InboxAddInput): Promise<AttentionEvent> {
   const title = requiredText(input.title, "title");
-  const summary = requiredText(input.summary, "summary");
+  const summary = assertSummary(input.summary);
   const sourceTaskId = requiredText(input.sourceTaskId, "source_task_id");
   const evidence = (input.evidenceUrls ?? []).map((url) => {
     const trimmed = requiredText(url, "evidence url");
@@ -156,6 +173,14 @@ export async function addInboxItem(root: string, input: InboxAddInput): Promise<
   if (issue) links.issue = issue;
   if (path) links.path = path;
 
+  const threadRefs: ThreadRefs = {};
+  const threadPr = optionalLink(input.threadRefs?.pr, "thread_refs.pr");
+  const threadIssue = optionalLink(input.threadRefs?.issue, "thread_refs.issue");
+  const threadChat = optionalLink(input.threadRefs?.chat, "thread_refs.chat");
+  if (threadPr) threadRefs.pr = threadPr;
+  if (threadIssue) threadRefs.issue = threadIssue;
+  if (threadChat) threadRefs.chat = threadChat;
+
   const event: AttentionEvent = {
     id: input.id === undefined ? newEventId() : requiredText(input.id, "id"),
     type: input.type ?? "needs_review",
@@ -167,6 +192,16 @@ export async function addInboxItem(root: string, input: InboxAddInput): Promise<
     source_task_id: sourceTaskId,
     links,
   };
+  const contractId = optionalLink(input.contractId, "contract_id");
+  const sliceId = optionalLink(input.sliceId, "slice_id");
+  const workerRef = optionalLink(input.workerRef, "worker_ref");
+  const branch = optionalLink(input.branch, "branch");
+  if (contractId) event.contract_id = contractId;
+  if (sliceId) event.slice_id = sliceId;
+  if (workerRef) event.worker_ref = workerRef;
+  if (branch) event.branch = branch;
+  if (Object.keys(threadRefs).length > 0) event.thread_refs = threadRefs;
+  if (input.reason) event.reason = input.reason;
 
   if (!ID_PATTERN.test(event.id)) {
     throw new Error("id must match evt_[A-Za-z0-9_-]+");
@@ -202,7 +237,7 @@ export async function decideInboxItem(
     id: newEventId(),
     type: "review_decided",
     title: `Decision ${decision}: ${subject.title}`,
-    summary: cleanedNote ?? `Human ${decision} on ${subject.id}.`,
+    summary: assertSummary(cleanedNote ?? `Human ${decision} on ${subject.id}.`),
     created_at: new Date().toISOString(),
     source_task_id: subject.source_task_id,
     decision,

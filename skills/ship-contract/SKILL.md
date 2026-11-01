@@ -1,10 +1,12 @@
 ---
 name: ship-contract
 description: >-
-  Turn a captain intake into a proposal card and, only after an explicit human
-  freeze, into an immutable contract card. Use when drafting a 方案卡, when the
-  human asks to freeze a contract (freeze, 冻结合同), or before any worker
-  would be spawned.
+  Slash command /ship-contract. The skill name is ship-contract, matching
+  that command, so hosts that support skills load this file when the human
+  types /ship-contract. Turn intake into a proposal card and, only after an
+  explicit human freeze, into an immutable contract card. Also use when
+  drafting a 方案卡, when the human says freeze or 冻结合同, or before any
+  worker would be spawned.
 ---
 
 # ship-contract
@@ -24,7 +26,7 @@ keep the same fields. Do not invent a second card format.
 
 ## When not to use
 
-- The human is reviewing evidence. Use `ship-review`.
+- The human is reviewing evidence. Use `ship-inbox`.
 - A frozen contract already covers the slice and its text is not changing. Use `ship-dispatch`.
 - The ask is to merge, release, or deploy. Refuse. This kit does not do those.
 

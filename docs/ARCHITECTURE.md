@@ -6,6 +6,22 @@ and disappear when their slice is done. An orchestrator, if there is one,
 sits behind an adapter. The kit stores events, evidence pointers, and a
 notification plan. It does not run models, merge to main, or deploy.
 
+## Captain is a router
+
+The captain talks to the owner, drafts contracts, dispatches, routes events, and records decisions. It does not edit product code and it does not run the long task, including work that looks small. It also does not block on a worker: the next owner request is accepted while slices run.
+
+Prompt-only delegation is unreliable. A sentence that says "stay the coordinator" sits in the same context that will be asked to implement the next edit, so the boundary dissolves. The frozen contract file is the handoff. Workers execute. The captain returns to the owner.
+
+Follow-up events on a subscribed thread (`thread_refs`: PR, issue, chat) go to the owning worker. The captain handles new or unowned events and coordination across slices.
+
+`worker_progress` in `.agent-ship/events.jsonl` is a heartbeat. `agent-ship watchdog` is a deterministic check, not a model call. It reads that heartbeat, the last commit time on the slice branch, and `agent-ship check`. It files a `blocked` item (`reason` `stalled` or `drift`) only when one of those is wrong. With no queued or running slice it exits immediately and removes its timer. `slice start` installs that timer when the first slice opens. The cron snippet and launchd plist live under `~/.config/agent-ship/` and are never committed. The captain sees only the inbox item.
+
+Inbox summaries are at most 280 characters and carry the recall chain: contract, slice, worker or branch, PR, evidence. `/ship-inbox` shows that card first. The packet is the spill, opened on request.
+
+Notify has two filters. The fast path is the deterministic rule list plus the allowlist. The slow path is the captain reading the policy's prose and optionally passing `--action`, still under the allowlist. A push is at most 100 words, decision-oriented, and includes `/ship-inbox <id>`. The packet stays complete.
+
+Speculative mode is off unless `limits.json` sets `"speculative": true`. The captain may then pre-draft a proposal or a read-only reproduction from an incoming signal, and may show it only when it has evidence. It still does not dispatch or edit code without a frozen contract.
+
 ## Captain loop
 
 ```mermaid
@@ -43,7 +59,7 @@ flowchart LR
    the captain. The captain files `blocked` or `needs_approval`. The human
    does not open the worker session.
 5. The worker returns evidence. The captain writes a review packet, including
-   E2E rows when smoke ran, and a `needs_review` inbox line (`skills/ship-review`,
+   E2E rows when smoke ran, and a `needs_review` inbox line (`skills/ship-inbox`,
    `skills/ship-e2e`).
 6. Normal inbox items are pull. The notify planner pushes only for a
    high-priority review that has evidence, or for `blocked` / `needs_approval`.
@@ -186,14 +202,14 @@ A rule:
 when.priority: high
 when.type: needs_review
 when.evidence_urls: nonempty
-action: curl -X POST https://hooks.example/ship?review=/ship-review/{id}
-note: Page only when evidence exists. Deep link /ship-review {id}. Do not merge or deploy.
+action: curl -X POST https://hooks.example/ship?review=/ship-inbox/{id}
+note: Page only when evidence exists. Deep link /ship-inbox {id}. Do not merge or deploy.
 ```
 
 - Conditions: `when.type`, `when.priority`, `when.source_task_id`, and `when.evidence_urls` (`nonempty` or `empty`). An unknown `when.*` key is an error.
 - Every `when.` line must match. A rule with no conditions is an error.
 - The first matching rule wins. `--action` replaces the matched action with the captain's argv and labels the rule `captain action`.
-- `action` is one line of whitespace-separated argv. No quoting. `{id}` is replaced with the event id so the message can name `/ship-review <id>`. No other placeholders are expanded.
+- `action` is one line of whitespace-separated argv. No quoting. `{id}` is replaced with the event id so the message can name `/ship-inbox <id>`. No other placeholders are expanded.
 - If `priority` is `high`, the type is not `blocked` or `needs_approval`, and `evidence_urls` is missing or empty, the plan is `missing_evidence` with `allow: false` even when a looser rule would have matched.
 
 `notify dry-run` prints the plan and does not start a process. `executed` on
@@ -250,3 +266,4 @@ Environment variables are not expanded, so a secret cannot be pulled into the pl
 - A Playwright suite inside this repo. `ship-e2e` is the procedure the captain copies into the project under test.
 - A model call inside the notify decision step. The markdown is ready for a later captain to read; the CLI does not need one.
 - Hosting model runtimes, multi-agent scheduling, auto-merge, and production deploy.
+- A persistent cloud runtime, compute/state separation, and device daemons. Those are the orchestrator's job. Adapters map onto them; this kit does not reimplement them.

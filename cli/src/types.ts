@@ -4,6 +4,12 @@ export type Priority = (typeof PRIORITIES)[number];
 export const DECISIONS = ["accept", "changes_requested", "reject"] as const;
 export type Decision = (typeof DECISIONS)[number];
 
+export const BLOCK_REASONS = ["stalled", "drift", "other"] as const;
+export type BlockReason = (typeof BLOCK_REASONS)[number];
+
+/** Inline summary budget for inbox items and review cards. */
+export const SUMMARY_MAX = 280;
+
 /** Inbox items the human still has to see. `review_decided` closes one of these. */
 export const ATTENTION_TYPES = ["needs_review", "blocked", "needs_approval"] as const;
 export type AttentionType = (typeof ATTENTION_TYPES)[number];
@@ -12,6 +18,7 @@ export const EVENT_TYPES = [
   "proposal_ready",
   "contract_frozen",
   "worker_dispatched",
+  "worker_progress",
   "needs_review",
   "blocked",
   "needs_approval",
@@ -26,6 +33,13 @@ export interface EventLinks {
   path?: string;
 }
 
+/** Subscription targets. Follow-ups on these threads route to the owning worker. */
+export interface ThreadRefs {
+  pr?: string;
+  issue?: string;
+  chat?: string;
+}
+
 /** Open inbox line. Field names match events/schema.json. */
 export interface AttentionEvent {
   id: string;
@@ -37,6 +51,12 @@ export interface AttentionEvent {
   created_at: string;
   source_task_id: string;
   links: EventLinks;
+  contract_id?: string;
+  slice_id?: string;
+  worker_ref?: string;
+  branch?: string;
+  thread_refs?: ThreadRefs;
+  reason?: BlockReason;
 }
 
 export interface ReviewDecidedEvent {
@@ -61,6 +81,12 @@ export interface InboxAddInput {
   sourceTaskId: string;
   evidenceUrls?: string[];
   links?: EventLinks;
+  contractId?: string;
+  sliceId?: string;
+  workerRef?: string;
+  branch?: string;
+  threadRefs?: ThreadRefs;
+  reason?: BlockReason;
   id?: string;
   createdAt?: string;
 }

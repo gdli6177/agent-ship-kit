@@ -1,11 +1,12 @@
 ---
 name: ship-e2e
 description: >-
-  Set up shared Playwright login and short smoke tests for a project under
-  test: one auth.setup.ts and storageState per project and environment,
-  read-only production smoke, and E2E rows on the review packet. Use when the
-  human mentions e2e, login, storageState, Playwright, smoke, captcha, or
-  production acceptance.
+  Slash command /ship-e2e. The skill name is ship-e2e, matching that command,
+  so hosts that support skills load this file when the human types /ship-e2e.
+  Set up shared Playwright login and short smoke tests: one auth.setup.ts and
+  storageState per project and environment, read-only production smoke, and
+  E2E rows on the review packet. Also use when the human mentions e2e, login,
+  storageState, Playwright, smoke, captcha, or production acceptance.
 ---
 
 # ship-e2e

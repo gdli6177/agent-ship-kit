@@ -3,6 +3,7 @@ import { pathToFileURL } from "node:url";
 import {
   addInboxItem,
   assertAttentionType,
+  assertBlockReason,
   assertDecision,
   assertPriority,
   decideInboxItem,
@@ -12,6 +13,7 @@ import { loadAllowlistFile, loadPolicyFile, planNotification, type NotifyEvent }
 import { executeArgv } from "./run.js";
 import { checkContract } from "./check.js";
 import { setupProject } from "./setup.js";
+import { installWatchdogTimer, runWatchdog, startSlice, uninstallWatchdogTimer } from "./watchdog.js";
 import type { AttentionType, EventLinks, InboxRecord, Priority } from "./types.js";
 
 export interface Io {
@@ -33,6 +35,11 @@ const USAGE = `agent-ship — local inbox, path check, and notify
 Usage:
   agent-ship setup|init [--shared] [--uninstall] [--purge] [--root DIR]
   agent-ship check --contract ID [--base REF] [--head REF] [--staged] [--root DIR]
+  agent-ship watchdog [--stale-minutes N] [--root DIR]
+  agent-ship watchdog install|uninstall [--root DIR]
+  agent-ship slice start --contract ID --slice ID --source-task-id ID
+                       --title TEXT --summary TEXT [--root DIR]
+  agent-ship status --stale [--stale-minutes N] [--root DIR]
   agent-ship inbox add --title TEXT --summary TEXT --source-task-id ID
                        [--type needs_review|blocked|needs_approval]
                        [--priority normal|high] [--evidence URL ...]
@@ -47,7 +54,7 @@ Usage:
   agent-ship notify run --policy FILE --allowlist FILE
                        (--latest | --event FILE) [--action ARGV] [--root DIR]
 
-Captain-facing names: /ship-setup, /ship-inbox, /ship-review [id].
+Captain-facing skills: /ship-setup, /ship-contract, /ship-dispatch, /ship-inbox [id], /ship-notify, /ship-e2e, /ship-watchdog.
 setup is local to this clone: hooks go in .git/hooks only, and ignore rules
 go in .git/info/exclude. Pass --shared to write a .gitignore block and a
 shared AGENTS.md rules section. setup never sets core.hooksPath.
@@ -77,9 +84,17 @@ const VALUE_OPTIONS = new Set([
   "base",
   "head",
   "sort",
+  "stale-minutes",
+  "slice",
+  "worker",
+  "branch",
+  "thread-pr",
+  "thread-issue",
+  "thread-chat",
+  "reason",
 ]);
 const REPEATABLE = new Set(["evidence"]);
-const BOOL_FLAGS = new Set(["json", "latest", "help", "all", "shared", "uninstall", "purge", "staged"]);
+const BOOL_FLAGS = new Set(["json", "latest", "help", "all", "shared", "uninstall", "purge", "staged", "stale"]);
 
 interface ParsedArgs {
   positionals: string[];
@@ -197,6 +212,16 @@ async function inboxAdd(parsed: ParsedArgs, io: Io): Promise<number> {
     priority,
     evidenceUrls: evidence,
     links,
+    contractId: one(parsed.values, "contract"),
+    sliceId: one(parsed.values, "slice"),
+    workerRef: one(parsed.values, "worker"),
+    branch: one(parsed.values, "branch"),
+    threadRefs: {
+      pr: one(parsed.values, "thread-pr"),
+      issue: one(parsed.values, "thread-issue"),
+      chat: one(parsed.values, "thread-chat"),
+    },
+    reason: one(parsed.values, "reason") ? assertBlockReason(one(parsed.values, "reason") as string) : undefined,
     id: one(parsed.values, "id"),
   });
   if (event.type === "needs_review" && event.priority === "high" && event.evidence_urls.length === 0) {
@@ -302,6 +327,38 @@ async function runSetup(parsed: ParsedArgs, io: Io): Promise<number> {
   return report.ok ? 0 : 1;
 }
 
+async function runSliceStart(parsed: ParsedArgs, io: Io): Promise<number> {
+  const root = one(parsed.values, "root") ?? process.cwd();
+  const started = await startSlice(root, {
+    title: requireOne(parsed.values, "title"),
+    summary: requireOne(parsed.values, "summary"),
+    sourceTaskId: requireOne(parsed.values, "source-task-id"),
+    contractId: requireOne(parsed.values, "contract"),
+    sliceId: requireOne(parsed.values, "slice"),
+    workerRef: one(parsed.values, "worker"),
+    branch: one(parsed.values, "branch"),
+    threadRefs: {
+      pr: one(parsed.values, "thread-pr"),
+      issue: one(parsed.values, "thread-issue"),
+      chat: one(parsed.values, "thread-chat"),
+    },
+  });
+  io.stdout(`${JSON.stringify(started, null, 2)}\n`);
+  return 0;
+}
+
+async function runWatchdogCommand(parsed: ParsedArgs, io: Io): Promise<number> {
+  const root = one(parsed.values, "root") ?? process.cwd();
+  const minutesText = one(parsed.values, "stale-minutes");
+  const staleMinutes = minutesText === undefined ? undefined : Number(minutesText);
+  if (staleMinutes !== undefined && (!Number.isFinite(staleMinutes) || staleMinutes <= 0)) {
+    throw new Error("--stale-minutes must be a positive number");
+  }
+  const report = await runWatchdog(root, { staleMinutes });
+  io.stdout(`${JSON.stringify(report, null, 2)}\n`);
+  return 0;
+}
+
 async function runCheck(parsed: ParsedArgs, io: Io): Promise<number> {
   const root = one(parsed.values, "root") ?? process.cwd();
   const result = await checkContract(root, requireOne(parsed.values, "contract"), {
@@ -332,6 +389,21 @@ export async function main(argv: string[], io: Io = defaultIo): Promise<number> 
   try {
     if ((group === "setup" || group === "init") && sub === undefined) return await runSetup(parsed, io);
     if (group === "check" && sub === undefined) return await runCheck(parsed, io);
+    if (group === "watchdog" && sub === "install") {
+      const root = one(parsed.values, "root") ?? process.cwd();
+      io.stdout(`${JSON.stringify(await installWatchdogTimer(root), null, 2)}\n`);
+      return 0;
+    }
+    if (group === "watchdog" && sub === "uninstall") {
+      const root = one(parsed.values, "root") ?? process.cwd();
+      io.stdout(`${JSON.stringify(await uninstallWatchdogTimer(root), null, 2)}\n`);
+      return 0;
+    }
+    if (group === "watchdog" && sub === undefined) return await runWatchdogCommand(parsed, io);
+    if (group === "slice" && sub === "start") return await runSliceStart(parsed, io);
+    if (group === "status" && sub === undefined && parsed.flags.has("stale")) {
+      return await runWatchdogCommand(parsed, io);
+    }
     if (group === "inbox" && sub === "add") return await inboxAdd(parsed, io);
     if (group === "inbox" && sub === "list") return await inboxList(parsed, io);
     if (group === "inbox" && sub === "decide") return await inboxDecide(parsed, io);

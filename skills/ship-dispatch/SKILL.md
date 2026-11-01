@@ -1,18 +1,42 @@
 ---
 name: ship-dispatch
 description: >-
-  Spawn on-demand workers for slices of a frozen contract, under the global
-  worker cap and that contract's max_parallel, via a thin orchestrator
-  adapter. Use when a contract is frozen, when a worker is blocked or needs
-  approval, or when mapping spawn onto Herdr, Orca, Multica, or a plain extra
-  agent session.
+  Slash command /ship-dispatch. The skill name is ship-dispatch, matching
+  that command, so hosts that support skills load this file when the human
+  types /ship-dispatch. Spawn on-demand workers for a frozen contract under
+  the global cap and max_parallel, and record the slice with agent-ship
+  slice start. Also use when a contract is frozen, when a worker is blocked
+  or needs approval, or when mapping spawn onto Herdr, Orca, Multica, or a
+  plain extra agent session.
 ---
 
 # ship-dispatch
 
-Dispatch is a gate in front of whatever orchestrator the human already uses.
-This skill does not schedule a fleet, does not keep a worker roster, and does
-not merge or deploy.
+The captain is a router, not an executor. Dispatch is a gate in front of
+whatever orchestrator the human already uses. This skill does not schedule a
+fleet, does not keep a worker roster, and does not merge or deploy.
+
+## Router
+
+The captain talks to the owner, drafts contracts, dispatches slices, routes
+events, and records decisions. It does not edit product code and it does not
+run the long task itself, including work that looks small. Prompt-only
+delegation is unreliable: the same context that holds the plan will start
+implementing. The frozen contract is the handoff.
+
+Do not block waiting on a worker. Accept the owner's next request while
+slices run. Ask the adapter for status when you need it; do not sit in the
+worker session.
+
+## Thread subscription
+
+Every dispatched slice records `contract_id`, `slice_id`, and `thread_refs`
+(PR URL, issue, chat thread) on its `worker_dispatched` event in
+`.agent-ship/events.jsonl`. Follow-up events on a subscribed thread — PR
+review comments, CI results, chat replies — go straight to the owning worker.
+The captain handles only new or unowned events, and coordination that crosses
+slices. Append a `worker_progress` heartbeat when the worker reports real
+progress; that is what `/ship-watchdog` reads.
 
 The adapter contract is `adapters/generic.md`. If the human named Herdr, Orca,
 or Multica, also read the short note under `adapters/` for that system. The
@@ -60,7 +84,18 @@ If any line fails, do not spawn. Tell the human which line failed.
    a log row is not editing the frozen terms. Write the contract id to
    `.agent-ship/active-contract` so the local pre-commit hook checks this
    contract. That file is local to the clone.
-4. The worker returns evidence or an escalation to the captain. It does not
+4. Record the slice and arm the watchdog timer. This installs a user-level
+   cron snippet and launchd plist outside the repo the first time a slice is
+   open. Later slices leave the timer in place.
+
+```bash
+cd cli
+npm run agent-ship -- slice start --root .. \
+  --contract <contract_id> --slice <slice_id> \
+  --source-task-id <task_id> --title "<slice>" --summary "<one line>" \
+  --worker <worker_ref> --branch ship/<contract_id>/<slice_id>
+```
+5. The worker returns evidence or an escalation to the captain. It does not
    notify the human. Notification is `ship-notify`, after the captain has
    filed an inbox item.
 
@@ -115,9 +150,9 @@ agent in the human's thread. Do not pretend that session is a standing worker.
 
 ## Handoff
 
-When the worker reports done, do not file the inbox and do not call `/ship-review` yet.
+When the worker reports done, do not file the inbox and do not call `/ship-inbox` yet.
 
 1. Spawn a separate read-only verifier. Its only prompt is `templates/verifier-prompt.md` plus the frozen contract path and the branch name. Do not attach the worker chat.
 2. The verifier re-runs the acceptance commands, `agent-ship check --contract <id>`, and any E2E smoke the contract requires.
 3. If the verifier disagrees, send that result back to the same worker. Do not tell the owner.
-4. If the verifier agrees, fill the packet's Verifier section and hand off to `ship-review`, which files `needs_review`. The notify text includes `/ship-review <id>`.
+4. If the verifier agrees, fill the packet's Verifier section and hand off to `ship-inbox`, which files `needs_review`. The notify text includes `/ship-inbox <id>`.

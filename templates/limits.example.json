@@ -1,0 +1,5 @@
+{
+  "global_max_parallel": 3,
+  "stale_minutes": 30,
+  "speculative": false
+}

@@ -1,8 +1,10 @@
 ---
 name: ship-setup
 description: >-
-  Initialize one clone for agent-ship-kit with /ship-setup. Use when the human
-  asks to set up, init, or uninstall the kit, or when AGENTS.md, local hooks,
+  Slash command /ship-setup. The skill name is ship-setup, matching that
+  command, so Cursor, Claude Code, and similar hosts load this file when the
+  human types /ship-setup. Initialize one clone via the agent-ship CLI
+  (setup, init, uninstall, purge). Also use it when AGENTS.md, local hooks,
   or .git/info/exclude are missing the captain rules.
 ---
 
@@ -43,7 +45,7 @@ It creates `.agent-ship/` (proposals, contracts, packets, e2e index, notify poli
 - An independent verifier must agree before `needs_review` is filed.
 - Only the human merges or ships.
 - Never handle passwords, cookies, or storageState contents.
-- Use `/ship-setup`, `/ship-inbox`, `/ship-review`, `/ship-contract`, `/ship-dispatch`, `/ship-notify`, and `/ship-e2e`.
+- Use `/ship-setup`, `/ship-contract`, `/ship-dispatch`, `/ship-inbox`, `/ship-notify`, `/ship-e2e`, and `/ship-watchdog`. Each name matches a skill. `/ship-inbox <id>` is the review deep link.
 
 ## Hooks
 
