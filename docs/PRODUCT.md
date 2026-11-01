@@ -23,7 +23,7 @@ agent-ship-kit 是并行 AI 编程交付的验收与注意力层。人从需求�
 - 不替代多代理编排器，不负责任务图和运行时
 - 不自动合并到 main，也不代人按合并按钮
 - 不自动部署到生产
-- 不托管模型运行时
+- 不托管模型运行时，也不做常驻云运行时、算力与状态分离、或设备守护进程。那是编排器的事，适配器只做映射
 - 不保存密钥，不执行允许列表之外的命令，不把密码、cookie 或 storageState 写进仓库、技能或对话
 - 生产环境的端到端验收只做只读冒烟。登录态由人在浏览器里导出，会话过期就重新导出
 
@@ -40,14 +40,19 @@ agent-ship-kit 是并行 AI 编程交付的验收与注意力层。人从需求�
 | 通知 | 策略里有给人读的自由文本，也有 CLI 解析的规则。允许列表始终生效 |
 | 端到端登录 | 每个项目一份 Playwright `auth.setup.ts`，冒烟复用 gitignore 的 storageState。见 `templates/e2e.md` |
 
-技能六份，复制到代理的 skill 目录即可用：
+船长是路由器，不是执行器。它和人说话、起草合同、派工、把已订阅线程上的后续事件转给对应工人，并记下决定。它不改产品代码，也不自己跑长任务，包括看起来很小的改动。只靠提示词约束「别自己动手」不可靠，所以边界写在冻结合同上。船长不等待工人结束，下一条请求照样接收。
+
+`/ship-inbox` 先给一张不超过 280 字的卡片和下一跳（合同 → 切片 → 工人/分支 → PR → 证据），主人要求再展开。推送不超过 100 词，并带 `/ship-inbox <id>`。推测草稿默认关闭。
+
+技能七份，复制到代理的 skill 目录即可用：
 
 - `ship-contract`：讨论模式维护一张方案卡，人冻结后才是合同。卡上写明允许路径和禁止路径
 - `ship-dispatch`：派工门禁、合同并行上限、全局并行上限。工人要拍板时只回给船长
-- `ship-review`：待审证据包。E2E 结果写进证据行
+- `ship-inbox`：待审证据包。E2E 结果写进证据行
 - `ship-notify`：默认为拉取；推送要过允许列表。可选 `notify run`
 - `ship-e2e`：共享登录、测试账号前提、生产只读冒烟
 - `ship-setup`：只初始化当前这份克隆。钩子写在 `.git/hooks`，忽略规则写在 `.git/info/exclude`，不改别人的 `.gitignore`，也不设置 `core.hooksPath`。`--shared` 才写入仓库共用的忽略规则和 `AGENTS.md`。`--uninstall` 卸掉钩子和规则块
+- `ship-watchdog`：独立于船长。定时看心跳和路径检查，超时或越界就写入 `blocked`（`stalled` 或 `drift`）
 
 ## 船长体验
 
@@ -86,7 +91,7 @@ agent-ship-kit 是并行 AI 编程交付的验收与注意力层。人从需求�
 
 工人说做完之后，船长另开一个只读核验，只给冻结合同和分支，不给工人对话。核验重跑验收、`agent-ship check` 和相关冒烟。不一致就退回工人，不把这圈交给人。一致之后才进收件箱。
 
-人用 `/ship-inbox` 看未决项，用 `/ship-review` 一次审一条（通知里的链接是 `/ship-review <id>`）。回复 `pass` / `通过`、`changes` / `要改` 加原因、或 `reject` / `拒绝`。
+人用 `/ship-inbox` 按优先级看未决项并逐条审。通知里的链接是 `/ship-inbox <id>`，直接打开那一条。回复 `pass` / `通过`、`changes` / `要改` 加原因、或 `reject` / `拒绝`。斜杠命令就是同名技能；没有技能支持时按 `AGENTS.md` 里的文件路径做，终端里用 `agent-ship inbox list` 和 `inbox decide`。
 
 状态词：方案是 `draft`（旧稿是 `superseded`）；合同是 `frozen`；工人是 `queued`、`running`、`needs_review`、`blocked`、`needs_approval`、`failed`、`cancelled`；人的决定是 `accept`、`changes_requested`、`reject`。`accept` 不是合并。
 

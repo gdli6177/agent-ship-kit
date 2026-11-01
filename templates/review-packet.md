@@ -8,6 +8,16 @@ Packet path: `.agent-ship/packets/<source_task_id>.md`
 
 船长根据工人交回的证据填写。工人不做决定，人做决定。这份包不合并、不部署。
 
+## Recall 回溯
+
+`/ship-inbox` 先只看这张卡片。下面的章节等主人要求再展开。
+
+Inline summary 摘要（最多 280 字）:
+
+`<one short paragraph>`
+
+Next hop 下一跳: contract `<contract_id>` → slice `<slice_id>` → worker `<worker_ref>` / branch `<branch>` → PR `<url>` → evidence `<url>`
+
 ## Summary 摘要
 
 用几句人能对照 diff 核对的话写清改了什么。

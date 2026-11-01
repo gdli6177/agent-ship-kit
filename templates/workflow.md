@@ -1,6 +1,6 @@
 # Delivery workflow 交付流程
 
-One person, one captain thread, from intake to ship. Workers exist only as
+One person, one captain thread, from intake to ship. The captain routes and does not execute the slice, even when the edit looks small, and does not wait out a worker before taking the next request. Workers exist only as
 adapter tasks spawned from a frozen contract. Nothing in this loop merges to
 main or deploys to production.
 
@@ -107,10 +107,10 @@ Changing a frozen contract does not edit that file. The captain stops the slices
 7. On agreement, the captain writes the review packet, including the verifier
    section and E2E rows, and `inbox add`s a `needs_review` event.
 8. Normal items are pull: they sit in `/ship-inbox`. `notify dry-run` before
-   any push. The message includes `/ship-review <id>`. `notify run` only when
+   any push. The message includes `/ship-inbox <id>`. `notify run` only when
    the plan says `allow: true`. High priority with empty `evidence_urls` does
    not page.
-9. The owner reviews with `/ship-review` (or `/ship-review <id>` from a
+9. The owner reviews with `/ship-inbox` (or `/ship-inbox <id>` from a
    notification): one item at a time, then `inbox decide`. The default list
    then hides that item.
 10. On `changes_requested`, continue the same task if the adapter allows it.

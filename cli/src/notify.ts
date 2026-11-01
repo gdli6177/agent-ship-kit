@@ -45,6 +45,8 @@ export interface NotifyPlan {
     | "allowlisted";
   pattern: string | null;
   note: string | null;
+  push_words: number;
+  push_within_budget: boolean;
 }
 
 const WHEN_KEYS = new Set(["type", "priority", "source_task_id", "evidence_urls"]);
@@ -269,7 +271,16 @@ export function assertDirectArgv(argv: readonly string[]): void {
   if (SHELL_PROGRAMS.has(programBase(program))) throw new Error("shell_interpreter");
 }
 
-/** Replace `{id}` with the inbox id so a notify message can deep-link `/ship-review <id>`. */
+/** Push notifications stay short. The review packet is the long form. */
+export const PUSH_WORD_BUDGET = 100;
+
+export function countWords(text: string): number {
+  const trimmed = text.trim();
+  if (!trimmed) return 0;
+  return trimmed.split(/\s+/).length;
+}
+
+/** Replace `{id}` with the inbox id so a notify message can deep-link `/ship-inbox <id>`. */
 export function fillReviewHint(text: string, id: string): string {
   if (!text.includes("{id}")) return text;
   if (!/^evt_[A-Za-z0-9_-]+$/.test(id)) return text;
@@ -288,6 +299,18 @@ function unmatched(eventId: string): NotifyPlan {
     reason: "no_matching_rule",
     pattern: null,
     note: null,
+    push_words: 0,
+    push_within_budget: true,
+  };
+}
+
+function withPushBudget(plan: NotifyPlan): NotifyPlan {
+  const prose = plan.note ?? plan.action ?? "";
+  const pushWords = countWords(prose);
+  return {
+    ...plan,
+    push_words: pushWords,
+    push_within_budget: pushWords <= PUSH_WORD_BUDGET,
   };
 }
 
@@ -308,7 +331,7 @@ export function planNotification(
       : rules.find((candidate) =>
           Object.entries(candidate.when).every(([key, expected]) => conditionMatches(event, key, expected)),
         );
-  if (!rule) return unmatched(event.id);
+  if (!rule) return withPushBudget(unmatched(event.id));
 
   const action = fillReviewHint(rule.action, event.id);
   const note = rule.note === null ? null : fillReviewHint(rule.note, event.id);
@@ -322,35 +345,35 @@ export function planNotification(
 
   if (refusesHighPriorityPage(event)) {
     plan.reason = "missing_evidence";
-    return plan;
+    return withPushBudget(plan);
   }
 
   if (SHELL_META.test(action)) {
     plan.reason = "shell_metacharacter";
-    return plan;
+    return withPushBudget(plan);
   }
 
   const argv = action.trim().split(/\s+/).filter(Boolean);
   const program = argv[0];
   if (!program) {
     plan.reason = "empty_action";
-    return plan;
+    return withPushBudget(plan);
   }
   plan.argv = argv;
   if (SHELL_PROGRAMS.has(programBase(program))) {
     plan.reason = "shell_interpreter";
-    return plan;
+    return withPushBudget(plan);
   }
 
   const pattern = allowlist.patterns.find((candidate) => matchPattern(argv, candidate)) ?? null;
   if (!pattern) {
     plan.reason = "not_allowlisted";
-    return plan;
+    return withPushBudget(plan);
   }
   plan.pattern = pattern;
   plan.allow = true;
   plan.reason = "allowlisted";
-  return plan;
+  return withPushBudget(plan);
 }
 
 export async function loadPolicyFile(path: string): Promise<NotifyRule[]> {

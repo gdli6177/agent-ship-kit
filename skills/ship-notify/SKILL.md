@@ -1,17 +1,28 @@
 ---
 name: ship-notify
 description: >-
-  Plan or send a human notification from a markdown policy and an argv
-  allowlist. Use when a needs_review, blocked, or needs_approval event should
-  reach the human, when editing notify policy, or when running agent-ship
-  notify dry-run or notify run.
+  Slash command /ship-notify. The skill name is ship-notify, matching that
+  command, so hosts that support skills load this file when the human types
+  /ship-notify. Plan or send a notification from a markdown policy and an
+  argv allowlist by calling agent-ship notify dry-run or notify run. Also
+  use when a needs_review, blocked, or needs_approval event should reach the
+  human, or when editing notify policy.
 ---
 
 # ship-notify
 
+Two filters, in order:
+
+1. **Fast path.** The CLI matches `## Rule:` blocks and the allowlist. It does not call a model. Push only for a high-priority `needs_review` that has evidence, or for `blocked` / `needs_approval`. A normal review stays in the inbox (pull).
+2. **Slow path.** The captain reads the prose Instructions section and may pass `--action`. The allowlist and the empty-evidence refusal still apply. The slow path does not outrank a fast-path denial.
+
 Pull is the default. A normal `needs_review` stays in the inbox. Push only
 for a high-priority `needs_review` that has evidence, or for `blocked` /
 `needs_approval`.
+
+## Channel norms
+
+A push notification is at most 100 words, says what decision is needed, and includes `/ship-inbox <id>`. The plan reports `push_words` and `push_within_budget`. The review packet and the PR body are the long form: structured, complete, and separate from the push. Do not paste the packet into the push.
 
 `notify dry-run` prints a plan and starts nothing. `notify run` is opt-in: it
 starts the allowlisted argv with no shell, and only when the plan says
@@ -45,7 +56,7 @@ npm run agent-ship -- notify dry-run --root .. --latest \
 
 Use `--event <file.json>` instead of `--latest` when the event is not the newest open inbox item. Add `--action 'multica issue create --assignee me --title from-captain'` only when the free-text section told you to plan an argv the rules did not already name.
 
-`notify run` takes the same flags and, only when `allow` is true, executes that argv with no shell. Dry-run first. Do not run when `allow` is false. The example actions include `/ship-review {id}`, which the planner fills with the inbox id so the owner can open that one item.
+`notify run` takes the same flags and, only when `allow` is true, executes that argv with no shell. Dry-run first. Do not run when `allow` is false. The example actions include `/ship-inbox {id}`, which the planner fills with the inbox id so the owner can open that one item.
 
 Read the JSON plan:
 

@@ -39,9 +39,9 @@ test("example policy pulls normal items and pushes only evidenced high or escala
   assert.equal(high.allow, true);
   assert.equal(high.reason, "allowlisted");
   assert.equal(high.matched_rule, "high priority page");
-  assert.deepEqual(high.argv, ["curl", "-X", "POST", "https://hooks.example/ship?review=/ship-review/evt_example"]);
-  assert.match(high.note ?? "", /\/ship-review evt_example/);
-  assert.equal(high.pattern, "curl -X POST https://hooks.example/*");
+  assert.deepEqual(high.argv, ["curl", "-X", "POST", "https://hooks.example/ship", "/ship-inbox", "evt_example"]);
+  assert.match(high.note ?? "", /\/ship-inbox evt_example/);
+  assert.equal(high.pattern, "curl -X POST https://hooks.example/* *");
 
   const normal = planNotification(
     event({ priority: "normal", evidence_urls: ["https://ci.example/runs/1"] }),
@@ -64,7 +64,8 @@ test("example policy pulls normal items and pushes only evidenced high or escala
     "me",
     "--title",
     "blocked",
-    "/ship-review/evt_example",
+    "/ship-inbox",
+    "evt_example",
   ]);
   assert.equal(blocked.pattern, "multica issue create --assignee me *");
 
@@ -78,7 +79,8 @@ test("example policy pulls normal items and pushes only evidenced high or escala
     "me",
     "--title",
     "needs-approval",
-    "/ship-review/evt_example",
+    "/ship-inbox",
+    "evt_example",
   ]);
 });
 
@@ -218,6 +220,11 @@ test("event schema is JSON and describes needs_review", async () => {
   assert.equal(schema.examples[0].type, "needs_review");
   assert.ok(schema.properties.type.enum.includes("blocked"));
   assert.ok(schema.properties.type.enum.includes("needs_approval"));
+  assert.ok(schema.properties.type.enum.includes("worker_progress"));
+  assert.equal(schema.properties.summary.maxLength, 280);
+  assert.deepEqual(Object.keys(schema.properties.thread_refs.properties).sort(), ["chat", "issue", "pr"]);
+  assert.ok(schema.properties.reason.enum.includes("stalled"));
+  assert.ok(schema.properties.reason.enum.includes("drift"));
   const decided = schema.allOf.find(
     (entry: { then?: { required?: string[] } }) => entry.then?.required?.includes("subject_id"),
   );

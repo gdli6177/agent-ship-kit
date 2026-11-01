@@ -45,7 +45,7 @@ Out:
 - `links.pr`, `links.issue`, `links.path` when they exist
 
 `collect` returns evidence to the captain. The captain writes the review
-packet and the inbox event (`ship-review`). The worker does not notify the
+packet and the inbox event (`ship-inbox`). The worker does not notify the
 human and does not merge.
 
 ## No orchestrator
@@ -55,8 +55,23 @@ human and does not merge.
 review packet path plus any URLs the session actually produced. The human
 still has a single captain thread.
 
-## Non-calls
+## Thread routing
+
+`spawn` returns `thread_refs`: the PR URL, issue, and chat thread for this
+slice. Later events on those refs go to that worker. The captain is not on
+that subscription.
+
+## Watchdog schedule
+
+Something outside the captain runs `agent-ship watchdog` on a timer. The
+adapter appends a `worker_progress` event when the slice makes real progress.
+No heartbeat before the stale window (default 30 minutes, or
+`stale_minutes` in `.agent-ship/limits.json`) becomes a `blocked` item with
+`reason: stalled`.
+
+## Not these calls
 
 Do not map merge-to-default-branch, tag, release, or production deploy onto
 these three calls. If the underlying product has those buttons, leave them
-for the human.
+for the human. Do not map a persistent cloud runtime, a compute/state split,
+or a device daemon onto them either. Those stay inside the orchestrator.

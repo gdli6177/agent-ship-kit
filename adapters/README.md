@@ -23,6 +23,20 @@ card, the inbox event, or the notify allowlist.
 4. Return evidence to the captain. The captain files `needs_review`.
 5. Leave merge and production deploy on the human's side of the product. Do
    not add them to the adapter to "complete the loop".
+6. Subscribe each slice's `thread_refs` (PR, issue, chat). Deliver follow-up
+   events on those threads to the owning worker. Send the captain only new
+   or unowned events, and anything that crosses slices.
+7. Run `agent-ship watchdog` on a schedule: cron, the orchestrator's
+   scheduler, or the owner's assistant routine. Append `worker_progress`
+   heartbeats to `.agent-ship/events.jsonl` when the worker makes real
+   progress. The watchdog is not the captain.
+
+## Not this kit
+
+Persistent cloud runtimes, splitting compute from state, and device daemons
+belong to the orchestrator. An adapter maps `spawn`, `status`, `collect`,
+thread delivery, and a watchdog schedule onto that product. It does not
+reimplement them inside agent-ship-kit.
 
 ## No orchestrator
 

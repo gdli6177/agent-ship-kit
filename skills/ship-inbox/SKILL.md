@@ -1,22 +1,30 @@
 ---
-name: ship-review
+name: ship-inbox
 description: >-
-  Run /ship-review: present one open inbox item at a time after an independent
-  verifier agrees. Use when the human says /ship-review, /ship-inbox, pass,
-  changes, or reject, or when a notification deep-links /ship-review <id>.
+  Slash command /ship-inbox. The skill name is ship-inbox, matching that
+  command, so Cursor, Claude Code, and similar hosts load this file when the
+  human types /ship-inbox or /ship-inbox <id>. With no id, list open items
+  by priority and review them one at a time. With an id, jump to that item.
+  The owner replies pass, changes plus a reason, or reject. Record the
+  decision with the agent-ship inbox decide CLI. Also use when a notification
+  deep-links /ship-inbox <id>.
 ---
 
-# ship-review
+# ship-inbox
 
-`/ship-review` is how the owner reviews. `/ship-review <id>` jumps to one inbox item, which is also the deep link in notify messages. `/ship-inbox` only lists open items, highest priority first (`agent-ship inbox list --sort priority`). It does not decide.
+`/ship-inbox` is how the owner sees and reviews the queue. With no id, list
+open items sorted by priority (high first), then review them one at a time.
+`/ship-inbox <id>` jumps straight to that item. Notify messages use that deep
+link. The CLI subcommands stay `inbox list` and `inbox decide`.
 
-The human reviews evidence. The captain files it only after the verifier agrees. A worker's summary is not evidence until it points at something the human can open.
+The captain files an item only after the verifier agrees. A worker's summary
+is not evidence until it points at something the human can open.
 
-## /ship-review
+## /ship-inbox
 
 1. If the owner passed an id, load that open item. If it is missing or already decided, say so and stop.
-2. Otherwise list open items and sort `priority: high` first.
-3. Present ONE item: contract id, allowed and forbidden paths, evidence pointers, the verifier section, and open risks. Do not paste the worker chat.
+2. Otherwise list open items (`agent-ship inbox list --sort priority`) and sort `priority: high` first. Show that list, then start at the top.
+3. Present ONE compact card. Do not paste the worker chat or the whole packet. The card is the inline summary (at most 280 characters) plus the recall chain: contract → slice → worker/branch → PR → evidence, then the risks. Expand a section only when the owner asks.
 4. Wait. Map the reply:
    - `pass` or `通过` → `inbox decide <id> accept`
    - `changes` or `要改` plus a reason → `inbox decide <id> changes_requested --note "<reason>"`
@@ -36,14 +44,14 @@ a report, never at a storageState file.
 ## When to use
 
 - Adapter `collect` returned for a task, or a worker session handed back a write-up.
-- The human asks what is waiting on them.
+- The human asks what is waiting on them, or says `/ship-inbox`.
 - Someone asks to merge or ship. File or show the packet first. Do not merge.
 
 ## Packet
 
-Fill every section of the template.
+Fill every section of `templates/review-packet.md`.
 
-- Summary: what changed, short enough to check against the diff.
+- Summary: what changed, at most 280 characters in the inline card.
 - Evidence table: one row per acceptance line this slice owns. Kind, pointer, result.
 - Commands with exit codes, in a fence. "Tests passed" without a command and a pointer does not count.
 - What was not run.
@@ -53,16 +61,16 @@ Fill every section of the template.
 
 `priority: high` requires both a reason the human asked to be interrupted (or a deadline they set) and at least one evidence URL. Otherwise use `normal`.
 
-## Inbox
+## Inbox CLI
 
-From the agent-ship-kit repo:
+From the agent-ship-kit repo. These are CLI subcommands, not the `/ship-inbox` name:
 
 ```bash
 cd cli
 npm run agent-ship -- inbox add --root .. \
   --type needs_review \
   --title "<slice> is ready for review" \
-  --summary "<one paragraph>" \
+  --summary "<one paragraph, at most 280 characters>" \
   --priority normal \
   --source-task-id "<task id>" \
   --evidence "<url>" \
@@ -80,8 +88,7 @@ for `needs_review`: `id`, `type`, `title`, `summary`, `evidence_urls`,
 `priority`, `created_at`, `source_task_id`, `links` (`pr`, `issue`, `path`
 as available). Append it as a single line. `id` matches `evt_[A-Za-z0-9_-]+`.
 
-Then use `ship-notify` for the dry-run. Do not ping the human through a
-channel this packet invented.
+Then use `ship-notify` for the dry-run. The push text includes `/ship-inbox <id>`.
 
 ## Human decision
 

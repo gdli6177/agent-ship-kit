@@ -18,6 +18,7 @@
         "proposal_ready",
         "contract_frozen",
         "worker_dispatched",
+        "worker_progress",
         "needs_review",
         "blocked",
         "needs_approval",
@@ -31,7 +32,9 @@
     },
     "summary": {
       "type": "string",
-      "minLength": 1
+      "minLength": 1,
+      "maxLength": 280,
+      "description": "Inline summary. At most 280 characters so /ship-inbox can show a compact card before the owner asks for the rest."
     },
     "created_at": {
       "type": "string",
@@ -68,6 +71,26 @@
     "contract_id": { "type": "string", "minLength": 1 },
     "slice_id": { "type": "string", "minLength": 1 },
     "worker_ref": { "type": "string", "minLength": 1 },
+    "branch": { "type": "string", "minLength": 1 },
+    "thread_refs": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Subscribed threads. Follow-up events on these refs route to the owning worker, not the captain.",
+      "properties": {
+        "pr": { "type": "string", "minLength": 1 },
+        "issue": { "type": "string", "minLength": 1 },
+        "chat": { "type": "string", "minLength": 1 }
+      }
+    },
+    "reason": {
+      "type": "string",
+      "enum": ["stalled", "drift", "other"],
+      "description": "Why a blocked item was filed. stalled means no heartbeat; drift means agent-ship check failed."
+    },
+    "status": {
+      "type": "string",
+      "enum": ["queued", "running", "needs_review", "blocked", "failed", "cancelled"]
+    },
     "decision": {
       "type": "string",
       "enum": ["accept", "changes_requested", "reject"],
@@ -88,6 +111,24 @@
       },
       "then": {
         "required": ["evidence_urls", "priority", "links"]
+      }
+    },
+    {
+      "if": {
+        "properties": { "type": { "const": "worker_dispatched" } },
+        "required": ["type"]
+      },
+      "then": {
+        "required": ["contract_id", "slice_id"]
+      }
+    },
+    {
+      "if": {
+        "properties": { "type": { "const": "worker_progress" } },
+        "required": ["type"]
+      },
+      "then": {
+        "required": ["contract_id", "slice_id"]
       }
     },
     {
@@ -134,7 +175,12 @@
         "path": ".agent-ship/packets/task_auth_mw.md"
       },
       "contract_id": "contract_auth",
-      "slice_id": "auth-middleware"
+      "slice_id": "auth-middleware",
+      "branch": "ship/contract_auth/auth-middleware",
+      "thread_refs": {
+        "pr": "https://example.com/pull/12",
+        "issue": "https://example.com/issues/4"
+      }
     },
     {
       "id": "evt_example_needs_approval",
