@@ -2,6 +2,6 @@
   "version": 1,
   "patterns": [
     "multica issue create --assignee me *",
-    "curl -X POST https://hooks.example/*"
+    "curl -X POST https://hooks.example/* *"
   ]
 }

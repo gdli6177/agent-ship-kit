@@ -42,7 +42,7 @@ npm run agent-ship -- watchdog install --root ..
 npm run agent-ship -- watchdog uninstall --root ..
 ```
 
-`slice start` records `worker_dispatched` and installs the timer when a slice is open. Install writes a cron snippet and a launchd plist under `~/.config/agent-ship/` (override with `AGENT_SHIP_TIMER_HOME`). Those files are not in the repo. Paste the cron line into `crontab -e`, or on macOS copy the plist into `~/Library/LaunchAgents` and `launchctl bootstrap` it. An orchestrator scheduler or an assistant routine can run `watchdog` instead of either timer.
+`slice start` records `worker_dispatched` on branch `ship/<contract>/<slice>` unless `--branch` is set, and registers the timer when a slice is open. On Linux and WSL, `watchdog install` adds a marked block to the user crontab. On macOS it writes `~/Library/LaunchAgents` and runs `launchctl bootstrap`. `--dry-run` does not register. Tests can point `AGENT_SHIP_CRONTAB_CMD` at a fake `crontab` and `AGENT_SHIP_TIMER_HOME` at a throwaway directory. If registration fails, the command prints a warning. `watchdog` and `inbox list` also warn when slices are running and the timer is not active. An orchestrator scheduler or an assistant routine can run `watchdog` instead of the timer. Staleness uses heartbeats and commits on the slice branch only.
 
 ## Check
 

@@ -40,19 +40,19 @@ the owner a draft that already has evidence.
 when.priority: high
 when.type: needs_review
 when.evidence_urls: nonempty
-action: curl -X POST https://hooks.example/ship?review=/ship-inbox/{id}
+action: curl -X POST https://hooks.example/ship /ship-inbox {id}
 note: Page only when evidence exists. Deep link /ship-inbox {id}. Do not merge or deploy.
 
 ## Rule: blocked
 
 when.type: blocked
-action: multica issue create --assignee me --title blocked /ship-inbox/{id}
+action: multica issue create --assignee me --title blocked /ship-inbox {id}
 note: Mid-task block. Open /ship-inbox {id}. The owner does not open the worker session.
 
 ## Rule: needs approval
 
 when.type: needs_approval
-action: multica issue create --assignee me --title needs-approval /ship-inbox/{id}
+action: multica issue create --assignee me --title needs-approval /ship-inbox {id}
 note: Mid-task approval. Open /ship-inbox {id}. The owner does not open the worker session.
 
 ## Never

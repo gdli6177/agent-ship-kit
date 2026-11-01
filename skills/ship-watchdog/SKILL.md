@@ -19,10 +19,17 @@ item because something is wrong.
 
 1. Dispatch runs `agent-ship slice start` when a slice opens. If that is the
    first queued or running slice, the command installs a local timer.
-2. The timer runs `agent-ship watchdog` every five minutes. Cron, launchd, an
-   orchestrator scheduler, or the owner's assistant routine are all valid
-   triggers. The files live under `~/.config/agent-ship/` (or
-   `AGENT_SHIP_TIMER_HOME`). They are never committed.
+2. The timer runs `agent-ship watchdog` every five minutes. On Linux and WSL,
+   `watchdog install` adds one marked block with `crontab -l | … | crontab -`.
+   Other crontab lines stay. On macOS it writes the plist to
+   `~/Library/LaunchAgents` and runs `launchctl bootstrap gui/$UID`.
+   `watchdog uninstall` removes only that entry (`bootout` on macOS).
+   `--dry-run` prints the entry and does not register it. A copy of the cron
+   line and plist is also saved under `~/.config/agent-ship/` (or
+   `AGENT_SHIP_TIMER_HOME`) and is never committed. If registration fails, or
+   the platform is neither Linux nor macOS, the command prints a warning.
+   An orchestrator scheduler or the owner's assistant routine can run the
+   same CLI instead of the timer.
 3. Each run reads `.agent-ship/events.jsonl` first. If no slice is `queued` or
    `running`, it removes the timer and exits. It does not call `check` and it
    does not file an inbox item.
@@ -39,21 +46,15 @@ npm run agent-ship -- watchdog uninstall --root ..
 npm run agent-ship -- status --stale --root ..
 ```
 
-Cron line, also written to `~/.config/agent-ship/cron.d/agent-ship-<slug>`:
+The registered cron line looks like:
 
 ```cron
+# agent-ship-watchdog-begin <slug>
 */5 * * * * cd <kit>/cli && <node> --import tsx src/cli.ts watchdog --root <project>
+# agent-ship-watchdog-end <slug>
 ```
 
-Paste that into `crontab -e`. The install command does not edit the system crontab for you.
-
-launchd plist, written beside it under `launchd/`. On macOS, copy it into `~/Library/LaunchAgents/` and bootstrap it:
-
-```bash
-launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.agent-ship.watchdog.<slug>.plist
-```
-
-`watchdog uninstall` deletes the snippets under `~/.config/agent-ship/`. If you loaded the plist, boot it out and delete that copy too. Neither file belongs in the project repo.
+`watchdog install` inserts that block. You do not paste it yourself. `watchdog uninstall` deletes that block and leaves every other crontab line. On macOS the same command bootstraps `~/Library/LaunchAgents/com.agent-ship.watchdog.<slug>.plist`, and uninstall runs `launchctl bootout` and deletes that plist.
 
 `--stale-minutes` overrides `.agent-ship/limits.json`. If that file is
 missing, the window is 30 minutes. Shape:

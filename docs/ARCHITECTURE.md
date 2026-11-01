@@ -14,7 +14,7 @@ Prompt-only delegation is unreliable. A sentence that says "stay the coordinator
 
 Follow-up events on a subscribed thread (`thread_refs`: PR, issue, chat) go to the owning worker. The captain handles new or unowned events and coordination across slices.
 
-`worker_progress` in `.agent-ship/events.jsonl` is a heartbeat. `agent-ship watchdog` is a deterministic check, not a model call. It reads that heartbeat, the last commit time on the slice branch, and `agent-ship check`. It files a `blocked` item (`reason` `stalled` or `drift`) only when one of those is wrong. With no queued or running slice it exits immediately and removes its timer. `slice start` installs that timer when the first slice opens. The cron snippet and launchd plist live under `~/.config/agent-ship/` and are never committed. The captain sees only the inbox item.
+`worker_progress` in `.agent-ship/events.jsonl` is a heartbeat. `agent-ship watchdog` is a deterministic check, not a model call. It reads that heartbeat, the last commit on the slice's own branch (`slice start --branch`, default `ship/<contract>/<slice>`), and `agent-ship check`. A commit on another branch does not count. It files a `blocked` item (`reason` `stalled` or `drift`) only when one of those is wrong. With no queued or running slice it exits immediately and removes its timer. `slice start` registers that timer when the first slice opens: a marked user crontab line on Linux/WSL, or `launchctl bootstrap` of a plist in `~/Library/LaunchAgents` on macOS. Copies under `~/.config/agent-ship/` are not the activation and are never committed. If registration fails, install prints a warning, and later `watchdog` / `inbox list` runs warn while slices are active and the timer is not. The captain sees only the inbox item.
 
 Inbox summaries are at most 280 characters and carry the recall chain: contract, slice, worker or branch, PR, evidence. `/ship-inbox` shows that card first. The packet is the spill, opened on request.
 
@@ -202,7 +202,7 @@ A rule:
 when.priority: high
 when.type: needs_review
 when.evidence_urls: nonempty
-action: curl -X POST https://hooks.example/ship?review=/ship-inbox/{id}
+action: curl -X POST https://hooks.example/ship /ship-inbox {id}
 note: Page only when evidence exists. Deep link /ship-inbox {id}. Do not merge or deploy.
 ```
 
@@ -234,7 +234,7 @@ code. It does not merge or deploy.
 
 ### Allowlist patterns
 
-The file is JSON: `{ "patterns": ["multica issue create --assignee me *", "curl -X POST https://hooks.example/*"] }`. Extra keys such as `version` are ignored. Prefer an exact subcommand over a broad `multica *`.
+The file is JSON: `{ "patterns": ["multica issue create --assignee me *", "curl -X POST https://hooks.example/* *"] }`. Extra keys such as `version` are ignored. Prefer an exact subcommand over a broad `multica *`. The curl pattern's last `*` is where `/ship-inbox <id>` goes.
 
 Matching rules, implemented by `validatePattern` and `matchPattern`:
 

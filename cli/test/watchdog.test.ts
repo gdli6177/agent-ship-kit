@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
@@ -14,11 +14,51 @@ function line(event: Record<string, unknown>): string {
   return `${JSON.stringify(event)}\n`;
 }
 
+async function useFakeCrontab(timerHome: string): Promise<() => void> {
+  const file = join(timerHome, "crontab.txt");
+  const cmd = join(timerHome, "crontab.mjs");
+  await writeFile(
+    cmd,
+    `#!/usr/bin/env node
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
+const store = process.env.AGENT_SHIP_CRONTAB_FILE;
+const args = process.argv.slice(2);
+if (args.includes("-l")) {
+  if (!existsSync(store)) {
+    process.stderr.write("no crontab for user\\n");
+    process.exit(1);
+  }
+  process.stdout.write(readFileSync(store, "utf8"));
+  process.exit(0);
+}
+if (args.includes("-")) {
+  const chunks = [];
+  for await (const chunk of process.stdin) chunks.push(chunk);
+  writeFileSync(store, Buffer.concat(chunks));
+  process.exit(0);
+}
+process.exit(2);
+`,
+  );
+  await chmod(cmd, 0o755);
+  const prevCmd = process.env.AGENT_SHIP_CRONTAB_CMD;
+  const prevFile = process.env.AGENT_SHIP_CRONTAB_FILE;
+  process.env.AGENT_SHIP_CRONTAB_CMD = cmd;
+  process.env.AGENT_SHIP_CRONTAB_FILE = file;
+  return () => {
+    if (prevCmd === undefined) delete process.env.AGENT_SHIP_CRONTAB_CMD;
+    else process.env.AGENT_SHIP_CRONTAB_CMD = prevCmd;
+    if (prevFile === undefined) delete process.env.AGENT_SHIP_CRONTAB_FILE;
+    else process.env.AGENT_SHIP_CRONTAB_FILE = prevFile;
+  };
+}
+
 test("watchdog is a no-op with no active slices and removes its timer", async () => {
   const root = await mkdtemp(join(tmpdir(), "agent-ship-noop-"));
   const timerHome = await mkdtemp(join(tmpdir(), "agent-ship-timer-"));
   const previous = process.env.AGENT_SHIP_TIMER_HOME;
   process.env.AGENT_SHIP_TIMER_HOME = timerHome;
+  const restoreCron = await useFakeCrontab(timerHome);
   try {
     const installed = await installWatchdogTimer(root);
     assert.equal(installed.action, "created");
@@ -40,6 +80,43 @@ test("watchdog is a no-op with no active slices and removes its timer", async ()
   } finally {
     if (previous === undefined) delete process.env.AGENT_SHIP_TIMER_HOME;
     else process.env.AGENT_SHIP_TIMER_HOME = previous;
+    restoreCron();
+    await rm(root, { recursive: true, force: true });
+    await rm(timerHome, { recursive: true, force: true });
+  }
+});
+
+test("crontab install keeps other lines and dry-run does not register", async () => {
+  const root = await mkdtemp(join(tmpdir(), "agent-ship-cron-"));
+  const timerHome = await mkdtemp(join(tmpdir(), "agent-ship-timer-"));
+  const previous = process.env.AGENT_SHIP_TIMER_HOME;
+  process.env.AGENT_SHIP_TIMER_HOME = timerHome;
+  const restoreCron = await useFakeCrontab(timerHome);
+  const store = process.env.AGENT_SHIP_CRONTAB_FILE ?? "";
+  try {
+    await writeFile(store, "0 1 * * * echo keep-me\n");
+    const preview = await installWatchdogTimer(root, { dryRun: true });
+    assert.equal(preview.dry_run, true);
+    assert.equal(preview.registered, false);
+    assert.equal(await readFile(store, "utf8"), "0 1 * * * echo keep-me\n");
+
+    const installed = await installWatchdogTimer(root);
+    assert.equal(installed.registered, true);
+    const once = await readFile(store, "utf8");
+    assert.match(once, /echo keep-me/);
+    assert.equal(once.split("agent-ship-watchdog-begin").length - 1, 1);
+    await installWatchdogTimer(root);
+    assert.equal((await readFile(store, "utf8")).split("agent-ship-watchdog-begin").length - 1, 1);
+
+    const removed = await uninstallWatchdogTimer(root);
+    assert.equal(removed.action, "removed");
+    const after = await readFile(store, "utf8");
+    assert.match(after, /echo keep-me/);
+    assert.equal(after.includes("agent-ship-watchdog-begin"), false);
+  } finally {
+    if (previous === undefined) delete process.env.AGENT_SHIP_TIMER_HOME;
+    else process.env.AGENT_SHIP_TIMER_HOME = previous;
+    restoreCron();
     await rm(root, { recursive: true, force: true });
     await rm(timerHome, { recursive: true, force: true });
   }
@@ -50,6 +127,7 @@ test("the first slice installs the local timer and a fresh commit is progress", 
   const timerHome = await mkdtemp(join(tmpdir(), "agent-ship-timer-"));
   const previous = process.env.AGENT_SHIP_TIMER_HOME;
   process.env.AGENT_SHIP_TIMER_HOME = timerHome;
+  const restoreCron = await useFakeCrontab(timerHome);
   try {
     await exec("git", ["init", "-b", "main"], { cwd: root });
     await exec("git", ["config", "user.email", "test@example.com"], { cwd: root });
@@ -85,8 +163,58 @@ test("the first slice installs the local timer and a fresh commit is progress", 
   } finally {
     if (previous === undefined) delete process.env.AGENT_SHIP_TIMER_HOME;
     else process.env.AGENT_SHIP_TIMER_HOME = previous;
+    restoreCron();
     await rm(root, { recursive: true, force: true });
     await rm(timerHome, { recursive: true, force: true });
+  }
+});
+
+test("a recent commit on another branch does not reset staleness", async () => {
+  const root = await mkdtemp(join(tmpdir(), "agent-ship-other-"));
+  const old = new Date(Date.now() - 3 * 60 * 60 * 1000).toISOString();
+  try {
+    await exec("git", ["init", "-b", "main"], { cwd: root });
+    await exec("git", ["config", "user.email", "test@example.com"], { cwd: root });
+    await exec("git", ["config", "user.name", "Test"], { cwd: root });
+    await writeFile(join(root, "README.md"), "base\n");
+    await exec("git", ["add", "README.md"], { cwd: root });
+    await exec("git", ["commit", "-m", "base"], {
+      cwd: root,
+      env: { ...process.env, GIT_AUTHOR_DATE: old, GIT_COMMITTER_DATE: old },
+    });
+    await exec("git", ["checkout", "-b", "ship/contract_auth/auth"], { cwd: root });
+    await writeFile(join(root, "slice.txt"), "old slice\n");
+    await exec("git", ["add", "slice.txt"], { cwd: root });
+    await exec("git", ["commit", "-m", "slice"], {
+      cwd: root,
+      env: { ...process.env, GIT_AUTHOR_DATE: old, GIT_COMMITTER_DATE: old },
+    });
+    await exec("git", ["checkout", "main"], { cwd: root });
+    await writeFile(join(root, "other.txt"), "fresh elsewhere\n");
+    await exec("git", ["add", "other.txt"], { cwd: root });
+    await exec("git", ["commit", "-m", "other"], { cwd: root });
+    await mkdir(join(root, ".agent-ship"), { recursive: true });
+    await writeFile(
+      eventsFile(root),
+      line({
+        id: "evt_disp_other",
+        type: "worker_dispatched",
+        title: "Auth slice",
+        summary: "Dispatched.",
+        created_at: old,
+        source_task_id: "task_other",
+        contract_id: "contract_auth",
+        slice_id: "auth",
+        branch: "ship/contract_auth/auth",
+        status: "running",
+      }),
+    );
+    const report = await runWatchdog(root, { staleMinutes: 30, checkDrift: false });
+    assert.equal(report.flagged.length, 1);
+    assert.equal(report.flagged[0]?.reason, "stalled");
+    assert.equal(report.flagged[0]?.source_task_id, "task_other");
+  } finally {
+    await rm(root, { recursive: true, force: true });
   }
 });
 

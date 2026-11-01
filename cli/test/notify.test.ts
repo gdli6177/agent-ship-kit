@@ -39,9 +39,9 @@ test("example policy pulls normal items and pushes only evidenced high or escala
   assert.equal(high.allow, true);
   assert.equal(high.reason, "allowlisted");
   assert.equal(high.matched_rule, "high priority page");
-  assert.deepEqual(high.argv, ["curl", "-X", "POST", "https://hooks.example/ship?review=/ship-inbox/evt_example"]);
+  assert.deepEqual(high.argv, ["curl", "-X", "POST", "https://hooks.example/ship", "/ship-inbox", "evt_example"]);
   assert.match(high.note ?? "", /\/ship-inbox evt_example/);
-  assert.equal(high.pattern, "curl -X POST https://hooks.example/*");
+  assert.equal(high.pattern, "curl -X POST https://hooks.example/* *");
 
   const normal = planNotification(
     event({ priority: "normal", evidence_urls: ["https://ci.example/runs/1"] }),
@@ -64,7 +64,8 @@ test("example policy pulls normal items and pushes only evidenced high or escala
     "me",
     "--title",
     "blocked",
-    "/ship-inbox/evt_example",
+    "/ship-inbox",
+    "evt_example",
   ]);
   assert.equal(blocked.pattern, "multica issue create --assignee me *");
 
@@ -78,7 +79,8 @@ test("example policy pulls normal items and pushes only evidenced high or escala
     "me",
     "--title",
     "needs-approval",
-    "/ship-inbox/evt_example",
+    "/ship-inbox",
+    "evt_example",
   ]);
 });
 

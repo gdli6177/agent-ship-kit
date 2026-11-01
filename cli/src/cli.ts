@@ -13,7 +13,7 @@ import { loadAllowlistFile, loadPolicyFile, planNotification, type NotifyEvent }
 import { executeArgv } from "./run.js";
 import { checkContract } from "./check.js";
 import { setupProject } from "./setup.js";
-import { installWatchdogTimer, runWatchdog, startSlice, uninstallWatchdogTimer } from "./watchdog.js";
+import { activeSlices, installWatchdogTimer, runWatchdog, startSlice, timerIsActive, uninstallWatchdogTimer } from "./watchdog.js";
 import type { AttentionType, EventLinks, InboxRecord, Priority } from "./types.js";
 
 export interface Io {
@@ -36,7 +36,7 @@ Usage:
   agent-ship setup|init [--shared] [--uninstall] [--purge] [--root DIR]
   agent-ship check --contract ID [--base REF] [--head REF] [--staged] [--root DIR]
   agent-ship watchdog [--stale-minutes N] [--root DIR]
-  agent-ship watchdog install|uninstall [--root DIR]
+  agent-ship watchdog install|uninstall [--dry-run] [--root DIR]
   agent-ship slice start --contract ID --slice ID --source-task-id ID
                        --title TEXT --summary TEXT [--root DIR]
   agent-ship status --stale [--stale-minutes N] [--root DIR]
@@ -94,7 +94,7 @@ const VALUE_OPTIONS = new Set([
   "reason",
 ]);
 const REPEATABLE = new Set(["evidence"]);
-const BOOL_FLAGS = new Set(["json", "latest", "help", "all", "shared", "uninstall", "purge", "staged", "stale"]);
+const BOOL_FLAGS = new Set(["json", "latest", "help", "all", "shared", "uninstall", "purge", "staged", "stale", "dry-run"]);
 
 interface ParsedArgs {
   positionals: string[];
@@ -242,6 +242,7 @@ async function inboxList(parsed: ParsedArgs, io: Io): Promise<number> {
     type,
     openOnly: !parsed.flags.has("all"),
   });
+  await warnIfTimerInactive(root, io);
   if (one(parsed.values, "sort") === "priority") {
     const rank = (item: InboxRecord) => (item.type === "review_decided" ? 0 : item.priority === "high" ? 2 : 1);
     items.sort((left, right) => rank(right) - rank(left));
@@ -329,14 +330,16 @@ async function runSetup(parsed: ParsedArgs, io: Io): Promise<number> {
 
 async function runSliceStart(parsed: ParsedArgs, io: Io): Promise<number> {
   const root = one(parsed.values, "root") ?? process.cwd();
+  const contractId = requireOne(parsed.values, "contract");
+  const sliceId = requireOne(parsed.values, "slice");
   const started = await startSlice(root, {
     title: requireOne(parsed.values, "title"),
     summary: requireOne(parsed.values, "summary"),
     sourceTaskId: requireOne(parsed.values, "source-task-id"),
-    contractId: requireOne(parsed.values, "contract"),
-    sliceId: requireOne(parsed.values, "slice"),
+    contractId,
+    sliceId,
     workerRef: one(parsed.values, "worker"),
-    branch: one(parsed.values, "branch"),
+    branch: one(parsed.values, "branch") ?? `ship/${contractId}/${sliceId}`,
     threadRefs: {
       pr: one(parsed.values, "thread-pr"),
       issue: one(parsed.values, "thread-issue"),
@@ -355,8 +358,20 @@ async function runWatchdogCommand(parsed: ParsedArgs, io: Io): Promise<number> {
     throw new Error("--stale-minutes must be a positive number");
   }
   const report = await runWatchdog(root, { staleMinutes });
+  if (!report.noop) await warnIfTimerInactive(root, io);
   io.stdout(`${JSON.stringify(report, null, 2)}\n`);
   return 0;
+}
+
+async function warnIfTimerInactive(root: string, io: Io): Promise<void> {
+  const slices = await activeSlices(root);
+  if (slices.length === 0) return;
+  if (await timerIsActive(root)) return;
+  io.stderr("warning: slices are active but the watchdog timer is not registered. Run: agent-ship watchdog install\n");
+}
+
+function printTimer(result: { warning?: string }, io: Io): void {
+  if (result.warning) io.stderr(`warning: ${result.warning}\n`);
 }
 
 async function runCheck(parsed: ParsedArgs, io: Io): Promise<number> {
@@ -391,13 +406,17 @@ export async function main(argv: string[], io: Io = defaultIo): Promise<number> 
     if (group === "check" && sub === undefined) return await runCheck(parsed, io);
     if (group === "watchdog" && sub === "install") {
       const root = one(parsed.values, "root") ?? process.cwd();
-      io.stdout(`${JSON.stringify(await installWatchdogTimer(root), null, 2)}\n`);
-      return 0;
+      const result = await installWatchdogTimer(root, { dryRun: parsed.flags.has("dry-run") });
+      printTimer(result, io);
+      io.stdout(`${JSON.stringify(result, null, 2)}\n`);
+      return result.registered || result.dry_run ? 0 : 1;
     }
     if (group === "watchdog" && sub === "uninstall") {
       const root = one(parsed.values, "root") ?? process.cwd();
-      io.stdout(`${JSON.stringify(await uninstallWatchdogTimer(root), null, 2)}\n`);
-      return 0;
+      const result = await uninstallWatchdogTimer(root, { dryRun: parsed.flags.has("dry-run") });
+      printTimer(result, io);
+      io.stdout(`${JSON.stringify(result, null, 2)}\n`);
+      return result.warning ? 1 : 0;
     }
     if (group === "watchdog" && sub === undefined) return await runWatchdogCommand(parsed, io);
     if (group === "slice" && sub === "start") return await runSliceStart(parsed, io);

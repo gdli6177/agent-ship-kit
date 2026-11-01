@@ -1,4 +1,4 @@
-import { execFile } from "node:child_process";
+import { execFile, spawn } from "node:child_process";
 import { createHash } from "node:crypto";
 import { appendFile, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
@@ -41,6 +41,11 @@ export type TimerAction = "created" | "unchanged" | "removed" | "absent";
 
 export interface TimerInstall {
   action: TimerAction;
+  registered: boolean;
+  platform: "cron" | "launchd" | "unsupported";
+  dry_run: boolean;
+  warning?: string;
+  entry: string;
   cron_file: string;
   launchd_file: string;
   project_root: string;
@@ -53,7 +58,8 @@ interface SliceState {
   title: string;
   summary: string;
   dispatched_at: string;
-  last_progress_at: string;
+  /** Set only by worker_progress events. Dispatch time is not progress. */
+  last_heartbeat_at: string | null;
   worker_ref?: string;
   branch?: string;
   thread_refs?: ThreadRefs;
@@ -101,17 +107,20 @@ function watchdogCommand(root: string): { nodeBin: string; cli: string; workdir:
   };
 }
 
-function cronText(root: string): string {
+export function cronMarker(root: string): { begin: string; end: string; line: string } {
+  const slug = projectSlug(root);
   const command = watchdogCommand(root);
   const line = `*/5 * * * * cd ${shellQuote(command.workdir)} && ${shellQuote(command.nodeBin)} --import tsx src/cli.ts watchdog --root ${shellQuote(root)}`;
-  return `# agent-ship watchdog for ${root}
-# Local timer entry. Do not commit this file.
-# cron: paste the line below into crontab -e, or: crontab -l | cat - ${cronFile(root)} | crontab -
-# launchd: copy ${launchdFile(root)} to ~/Library/LaunchAgents and
-#   launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/$(basename ${launchdFile(root)})
-# Remove that LaunchAgents copy when you uninstall if you loaded it.
-${line}
-`;
+  return {
+    begin: `# agent-ship-watchdog-begin ${slug}`,
+    end: `# agent-ship-watchdog-end ${slug}`,
+    line,
+  };
+}
+
+function cronText(root: string): string {
+  const marked = cronMarker(root);
+  return `${marked.begin}\n${marked.line}\n${marked.end}\n`;
 }
 
 function launchdText(root: string): string {
@@ -142,19 +151,208 @@ function launchdText(root: string): string {
 `;
 }
 
-export async function installWatchdogTimer(root: string): Promise<TimerInstall> {
+export function timerPlatform(): "cron" | "launchd" | "unsupported" {
+  const override = process.env.AGENT_SHIP_TIMER_PLATFORM;
+  if (override === "cron" || override === "launchd" || override === "unsupported") return override;
+  if (process.platform === "darwin") return "launchd";
+  if (process.platform === "linux") return "cron";
+  return "unsupported";
+}
+
+export function launchAgentsDir(): string {
+  return process.env.AGENT_SHIP_LAUNCH_AGENTS_DIR ?? join(timerHome(), "Library", "LaunchAgents");
+}
+
+function userId(): number {
+  return typeof process.getuid === "function" ? process.getuid() : 0;
+}
+
+function runCommand(cmd: string, args: string[], stdin?: string): Promise<{ code: number; stdout: string; stderr: string }> {
+  return new Promise((resolve, reject) => {
+    const child = spawn(cmd, args, { shell: false });
+    const out: Buffer[] = [];
+    const err: Buffer[] = [];
+    child.stdout.on("data", (chunk: Buffer) => out.push(chunk));
+    child.stderr.on("data", (chunk: Buffer) => err.push(chunk));
+    child.on("error", reject);
+    child.on("close", (code) => {
+      resolve({
+        code: code ?? 1,
+        stdout: Buffer.concat(out).toString("utf8"),
+        stderr: Buffer.concat(err).toString("utf8"),
+      });
+    });
+    if (stdin !== undefined) child.stdin.write(stdin);
+    child.stdin.end();
+  });
+}
+
+async function crontabList(): Promise<{ ok: boolean; text: string; warning?: string }> {
+  const bin = process.env.AGENT_SHIP_CRONTAB_CMD ?? "crontab";
+  try {
+    const result = await runCommand(bin, ["-l"]);
+    if (result.code === 0) return { ok: true, text: result.stdout };
+    if (/no crontab/i.test(`${result.stderr}\n${result.stdout}`)) return { ok: true, text: "" };
+    return { ok: false, text: "", warning: `crontab -l failed: ${result.stderr.trim() || result.stdout.trim()}` };
+  } catch (error) {
+    return { ok: false, text: "", warning: `crontab -l failed: ${error instanceof Error ? error.message : String(error)}` };
+  }
+}
+
+async function crontabReplace(text: string): Promise<string | undefined> {
+  const bin = process.env.AGENT_SHIP_CRONTAB_CMD ?? "crontab";
+  try {
+    const result = await runCommand(bin, ["-"], text.endsWith("\n") || text === "" ? text : `${text}\n`);
+    if (result.code !== 0) return `crontab - failed: ${result.stderr.trim() || result.stdout.trim()}`;
+    return undefined;
+  } catch (error) {
+    return `crontab - failed: ${error instanceof Error ? error.message : String(error)}`;
+  }
+}
+
+function upsertCronBlock(existing: string, root: string): string {
+  const marked = cronMarker(root);
+  const lines = existing.split("\n");
+  const start = lines.findIndex((line) => line.trim() === marked.begin);
+  const finish = lines.findIndex((line) => line.trim() === marked.end);
+  if (start !== -1 && finish >= start) lines.splice(start, finish - start + 1);
+  const kept = lines.join("\n").replace(/\n+$/, "");
+  return `${kept}${kept ? "\n" : ""}${marked.begin}\n${marked.line}\n${marked.end}\n`;
+}
+
+function stripCronBlock(existing: string, root: string): string {
+  const marked = cronMarker(root);
+  const lines = existing.split("\n");
+  const start = lines.findIndex((line) => line.trim() === marked.begin);
+  const finish = lines.findIndex((line) => line.trim() === marked.end);
+  if (start === -1 || finish < start) return existing;
+  lines.splice(start, finish - start + 1);
+  return lines.join("\n").replace(/\n{3,}/g, "\n\n").replace(/^\n+/, "");
+}
+
+async function registerCron(root: string, dryRun: boolean): Promise<{ registered: boolean; warning?: string; action: TimerAction }> {
+  const listed = await crontabList();
+  if (!listed.ok) return { registered: false, warning: listed.warning, action: "unchanged" };
+  const next = upsertCronBlock(listed.text, root);
+  if (next === (listed.text.endsWith("\n") || listed.text === "" ? listed.text : `${listed.text}\n`)) {
+    return { registered: true, action: "unchanged" };
+  }
+  if (dryRun) return { registered: false, action: "unchanged" };
+  const warning = await crontabReplace(next);
+  return { registered: warning === undefined, warning, action: listed.text.includes(cronMarker(root).begin) ? "unchanged" : "created" };
+}
+
+async function unregisterCron(root: string, dryRun: boolean): Promise<{ removed: boolean; warning?: string }> {
+  const listed = await crontabList();
+  if (!listed.ok) return { removed: false, warning: listed.warning };
+  if (!listed.text.includes(cronMarker(root).begin)) return { removed: false };
+  if (dryRun) return { removed: true };
+  const next = stripCronBlock(listed.text, root);
+  const warning = await crontabReplace(next.endsWith("\n") || next === "" ? next : `${next}\n`);
+  return { removed: warning === undefined, warning };
+}
+
+function plistLabel(root: string): string {
+  return `com.agent-ship.watchdog.${projectSlug(root)}`;
+}
+
+function installedPlistPath(root: string): string {
+  return join(launchAgentsDir(), `${plistLabel(root)}.plist`);
+}
+
+async function launchctl(args: string[]): Promise<{ code: number; stderr: string }> {
+  const bin = process.env.AGENT_SHIP_LAUNCHCTL_CMD ?? "launchctl";
+  try {
+    const result = await runCommand(bin, args);
+    return { code: result.code, stderr: result.stderr };
+  } catch (error) {
+    return { code: 1, stderr: error instanceof Error ? error.message : String(error) };
+  }
+}
+
+async function registerLaunchd(root: string, dryRun: boolean): Promise<{ registered: boolean; warning?: string; action: TimerAction }> {
+  const dest = installedPlistPath(root);
+  const body = launchdText(root);
+  const previous = await readOptionalText(dest);
+  const domain = `gui/${userId()}`;
+  const label = plistLabel(root);
+  if (dryRun) return { registered: false, action: previous === body ? "unchanged" : "created" };
+  await mkdir(launchAgentsDir(), { recursive: true });
+  if (previous !== body) await writeFile(dest, body);
+  await launchctl(["bootout", `${domain}/${label}`]);
+  const boot = await launchctl(["bootstrap", domain, dest]);
+  if (boot.code !== 0) {
+    return {
+      registered: false,
+      warning: `launchctl bootstrap failed: ${boot.stderr.trim() || "unknown error"}`,
+      action: previous === null ? "created" : "unchanged",
+    };
+  }
+  return { registered: true, action: previous === null ? "created" : "unchanged" };
+}
+
+async function unregisterLaunchd(root: string, dryRun: boolean): Promise<{ removed: boolean; warning?: string }> {
+  const dest = installedPlistPath(root);
+  const domain = `gui/${userId()}`;
+  const label = plistLabel(root);
+  const had = (await readOptionalText(dest)) !== null;
+  if (dryRun) return { removed: had };
+  const boot = await launchctl(["bootout", `${domain}/${label}`]);
+  await rm(dest, { force: true });
+  if (!had && boot.code !== 0) return { removed: false };
+  return { removed: had || boot.code === 0 };
+}
+
+export async function timerIsActive(root: string): Promise<boolean> {
+  const platform = timerPlatform();
+  if (platform === "cron") {
+    const listed = await crontabList();
+    return listed.ok && listed.text.includes(cronMarker(root).begin);
+  }
+  if (platform === "launchd") {
+    const print = await launchctl(["print", `gui/${userId()}/${plistLabel(root)}`]);
+    return print.code === 0;
+  }
+  return false;
+}
+
+export async function installWatchdogTimer(root: string, options: { dryRun?: boolean } = {}): Promise<TimerInstall> {
+  const dryRun = options.dryRun === true;
+  const platform = timerPlatform();
   const cronPath = cronFile(root);
   const plistPath = launchdFile(root);
-  const cronBody = cronText(root);
-  const plistBody = launchdText(root);
-  const beforeCron = await readOptionalText(cronPath);
-  const beforePlist = await readOptionalText(plistPath);
-  await mkdir(join(cronPath, ".."), { recursive: true });
-  await mkdir(join(plistPath, ".."), { recursive: true });
-  if (beforeCron !== cronBody) await writeFile(cronPath, cronBody);
-  if (beforePlist !== plistBody) await writeFile(plistPath, plistBody);
-  const action: TimerAction = beforeCron === null || beforePlist === null ? "created" : "unchanged";
-  return { action, cron_file: cronPath, launchd_file: plistPath, project_root: root };
+  const entry = cronMarker(root).line;
+  if (!dryRun) {
+    await mkdir(join(cronPath, ".."), { recursive: true });
+    await mkdir(join(plistPath, ".."), { recursive: true });
+    await writeFile(cronPath, cronText(root));
+    await writeFile(plistPath, launchdText(root));
+  }
+  if (platform === "unsupported") {
+    return {
+      action: "unchanged",
+      registered: false,
+      platform,
+      dry_run: dryRun,
+      warning: `watchdog timer is not registered on platform ${process.platform}. Use the cron line or launchd plist printed by --dry-run.`,
+      entry,
+      cron_file: cronPath,
+      launchd_file: plistPath,
+      project_root: root,
+    };
+  }
+  const result = platform === "cron" ? await registerCron(root, dryRun) : await registerLaunchd(root, dryRun);
+  return {
+    action: result.action,
+    registered: result.registered,
+    platform,
+    dry_run: dryRun,
+    warning: result.warning,
+    entry,
+    cron_file: cronPath,
+    launchd_file: plistPath,
+    project_root: root,
+  };
 }
 
 async function readOptionalText(path: string): Promise<string | null> {
@@ -166,15 +364,36 @@ async function readOptionalText(path: string): Promise<string | null> {
   }
 }
 
-export async function uninstallWatchdogTimer(root: string): Promise<TimerInstall> {
+export async function uninstallWatchdogTimer(root: string, options: { dryRun?: boolean } = {}): Promise<TimerInstall> {
+  const dryRun = options.dryRun === true;
+  const platform = timerPlatform();
   const cronPath = cronFile(root);
   const plistPath = launchdFile(root);
-  const hadCron = (await readOptionalText(cronPath)) !== null;
-  const hadPlist = (await readOptionalText(plistPath)) !== null;
-  await rm(cronPath, { force: true });
-  await rm(plistPath, { force: true });
+  const entry = cronMarker(root).line;
+  let warning: string | undefined;
+  let removed = false;
+  if (platform === "cron") {
+    const result = await unregisterCron(root, dryRun);
+    removed = result.removed;
+    warning = result.warning;
+  } else if (platform === "launchd") {
+    const result = await unregisterLaunchd(root, dryRun);
+    removed = result.removed;
+    warning = result.warning;
+  } else {
+    warning = `watchdog timer is not registered on platform ${process.platform}.`;
+  }
+  if (!dryRun) {
+    await rm(cronPath, { force: true });
+    await rm(plistPath, { force: true });
+  }
   return {
-    action: hadCron || hadPlist ? "removed" : "absent",
+    action: removed ? "removed" : "absent",
+    registered: false,
+    platform,
+    dry_run: dryRun,
+    warning,
+    entry,
     cron_file: cronPath,
     launchd_file: plistPath,
     project_root: root,
@@ -263,7 +482,7 @@ export function foldSlices(events: readonly Record<string, unknown>[]): SliceSta
         title: text(event.title) ?? current?.title ?? task,
         summary: text(event.summary) ?? current?.summary ?? task,
         dispatched_at: created,
-        last_progress_at: current?.last_progress_at ?? created,
+        last_heartbeat_at: current?.last_heartbeat_at ?? null,
         worker_ref: text(event.worker_ref) ?? current?.worker_ref,
         branch: text(event.branch) ?? current?.branch,
         thread_refs: threadRefs(event.thread_refs) ?? current?.thread_refs,
@@ -274,7 +493,7 @@ export function foldSlices(events: readonly Record<string, unknown>[]): SliceSta
     const current = slices.get(task);
     if (!current) continue;
     if (type === "worker_progress") {
-      current.last_progress_at = created;
+      current.last_heartbeat_at = created;
       if (status) current.status = status;
       continue;
     }
@@ -297,11 +516,10 @@ function laterIso(left: string, right: string | null): string {
   return rightMs > Date.parse(left) ? right : left;
 }
 
-async function lastCommitIso(root: string, branch: string | undefined): Promise<string | null> {
+/** Commit time on the slice branch only. Never `git log` of the current checkout. */
+async function lastCommitIso(root: string, branch: string): Promise<string | null> {
   try {
-    const args = ["log", "-1", "--format=%cI"];
-    if (branch) args.push(branch);
-    const { stdout } = await execFileAsync("git", args, { cwd: root });
+    const { stdout } = await execFileAsync("git", ["log", "-1", "--format=%cI", branch], { cwd: root });
     const iso = stdout.trim();
     return iso || null;
   } catch {
@@ -347,8 +565,8 @@ export async function runWatchdog(
   const flagged: WatchdogFlag[] = [];
 
   for (const slice of slices) {
-    const commitAt = await lastCommitIso(root, slice.branch);
-    const progressAt = laterIso(slice.last_progress_at, commitAt);
+    const commitAt = slice.branch ? await lastCommitIso(root, slice.branch) : null;
+    const progressAt = laterIso(laterIso(slice.dispatched_at, slice.last_heartbeat_at), commitAt);
     const idle = idleMinutes(progressAt, now);
     const drift = await drifted(root, slice.contract_id, options.checkDrift !== false);
     const stalled = idle >= staleMinutes;
@@ -434,7 +652,7 @@ export async function startSlice(root: string, input: SliceStartInput): Promise<
     slice_id: input.sliceId,
     status: "running",
     ...(input.workerRef ? { worker_ref: input.workerRef } : {}),
-    ...(input.branch ? { branch: input.branch } : {}),
+    branch: input.branch ?? `ship/${input.contractId}/${input.sliceId}`,
     ...(Object.keys(threadRefs).length > 0 ? { thread_refs: threadRefs } : {}),
   };
   await mkdir(join(root, ".agent-ship"), { recursive: true });
