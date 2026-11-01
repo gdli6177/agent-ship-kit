@@ -1,5 +1,7 @@
 # agent-ship CLI
 
+第一次使用先看 [Quick Start（中文）](../README.zh-CN.md#quick-start) 或 [English](../README.md#quick-start)：从让 Agent 安装、指定船长到第一条需求和验收。
+
 `setup --shared` 初始化或引用团队手册；普通 setup 只建立本地引用。
 `team context --tag <tag>` 返回必读资料引用和有限经验摘要。
 `lesson add/review/search/show/check/pending` 提供候选准入、评审、检索和交付检查。

@@ -2,13 +2,140 @@
 
 # agent-ship-kit
 
-Team handbooks and bounded learning: [setup, lesson admission, review gates and scoped retrieval](docs/team-and-learning.md).
-
-Multiple repositories or Git worktrees: see the [workspace parallel-delivery guide](docs/workspace-parallel.md).
+Start with [Quick Start](#quick-start). Configuration details: [team handbooks and bounded learning](docs/team-and-learning.md); execution isolation: [multiple repositories and worktrees](docs/workspace-parallel.md).
 
 agent-ship-kit is the acceptance-and-attention layer for parallel AI coding-agent delivery. A person talks to one captain from intake through ship. Workers are spawned on demand, one slice per frozen contract, and are not a standing roster. The kit sits on Herdr, Orca, Multica, or any other orchestrator through thin adapters, and it also works with no orchestrator at all. It does not schedule the fleet, does not merge to main, and does not deploy to production. The captain prepares a proposal, the human freezes the contract, workers return evidence, and the human accepts that evidence before anything ships.
 
 Status: v0. Skills, templates, an event schema, adapter notes, and a local inbox / notify CLI.
+
+## Quick Start
+
+Walk through one request: add an “unfinished only” filter to a task list. Each text block below is an example message to send to your agent. Use the proposal, contract and task ids your captain actually returns.
+
+Install → choose a captain → set up the project → propose → freeze → dispatch → review evidence.
+
+### 1. Ask your current agent to install the kit
+
+Have a working agent host, Node.js 20+, npm and an existing Git project. Use macOS, Linux or WSL on Windows. Send:
+
+```text
+Read the installation instructions at https://github.com/gdli6177/agent-ship-kit and install the kit.
+Check Node.js 20+ and npm, and read the installer before running it.
+Explicitly select the correct --agent codex, --agent claude or --agent cursor for my current host.
+If you cannot identify the host, ask me first; do not install into another host's directory.
+Only install the CLI and skills at this step. Do not initialize a project or edit product code.
+Run agent-ship --help, report the skill path, and tell me whether the session needs reloading.
+```
+
+Expect a successful CLI check and the skill directory for your host. Reload skills or start a fresh session as your host requires if the current conversation does not see them yet. For manual installation, see [Install](#install).
+
+### 2. Designate one project conversation as the captain
+
+The team lead is called the captain here. It is a role you assign to an agent, not a separate program that appears after installation. Open your target project and one main conversation. You might name it “Task list · captain”. Send:
+
+```text
+Act as this project's agent-ship-kit captain. I will submit requests and review deliveries here.
+Read the existing project rules and the installed ship-setup, ship-contract, ship-dispatch and ship-inbox skills.
+Explain whether you can create independent worker sessions, inspect their status and collect results,
+and which execution mechanism you intend to use. Do not edit product code or dispatch yet.
+```
+
+This conversation handles proposals, dispatch and the review inbox. Workers are created for tasks. Installing the CLI does not supply a worker runtime: execution needs your host's subagent/session capabilities or a connected orchestrator. See [Adapters](adapters/README.md).
+
+### 3. Initialize this project with the captain
+
+To adopt a shared team handbook, send in the same conversation:
+
+```text
+/ship-setup
+Run shared setup for this project: agent-ship setup --shared.
+Reference an existing handbook, or create the starter handbook if none exists.
+Preserve existing rules and hooks, and list the files actually changed.
+```
+
+Expect a successful setup report, `agent-ship.team.json` and a created or referenced handbook. Shared files can be versioned; runtime records stay in local `.agent-ship/`. Review new shared files before committing them through your project's usual process.
+
+For a personal trial, request plain `agent-ship setup` instead. It installs local integration without creating a shared handbook. Resolve any existing hook configuration conflict before proceeding.
+
+### 4. Submit your first request and review the proposal
+
+```text
+/ship-contract
+Add an “unfinished only” filter to this project's task list.
+Turning it off must preserve the existing list behavior. Leave login, billing and deployment outside the scope.
+Inspect the current implementation and propose the scope, acceptance checks and slices. Do not start work yet.
+```
+
+Expect one proposal card: goal, non-goals, allowed/forbidden paths, acceptance checks and slices. The captain loads applicable project rules and relevant lessons. You can still revise it, for example: “The filter does not need to persist after a page refresh.”
+
+### 5. Explicitly freeze the agreed proposal
+
+If the returned proposal id is `proposal_todo_filter`, send:
+
+```text
+Freeze proposal_todo_filter. Create the contract from its current text without expanding the scope.
+```
+
+Expect a contract id, frozen-by identity, timestamp and acceptance conditions. No dispatch happens before freeze. A later scope expansion needs a revised proposal and another freeze. “Looks roughly right” is insufficient. Replace the example id with your actual id.
+
+### 6. Ask the captain to start execution
+
+If the contract id is `contract_todo_filter`:
+
+```text
+/ship-dispatch
+Start contract_todo_filter. Confirm that the execution mechanism works, prepare isolated branches or worktrees,
+and pass the admission checks before spawning workers. Report the real task ids, worker references and branches.
+Run independent verification before filing completed work in the inbox.
+```
+
+Expect real worker references and execution locations. You can then ask for progress in the main conversation. `slice start` only records and reserves work; success does not prove a worker process has started.
+
+If the host cannot create and collect independent sessions, stop at “execution integration needed” and connect a mechanism using the [generic adapter](adapters/generic.md). A host with native session capabilities can work without an orchestrator account. If task packets need manual transfer, explicitly describe that manual workflow rather than claiming automatic parallel execution.
+
+### 7. Resolve mid-task decisions in the same conversation
+
+The captain presents blocked or needs_approval items. If a worker needs to change a shared component outside the agreed scope, reply:
+
+```text
+Explain the impact and alternatives first. If the scope must expand, draft a revised proposal
+and wait for me to freeze it before continuing.
+```
+
+After an in-scope decision the captain resumes the same task; changed scope returns to proposal review. Ordinary reviews are pull by default. Do not assume push notifications are configured when you leave; ask for progress or open the inbox when you return.
+
+### 8. Inspect evidence, then accept or request changes
+
+```text
+/ship-inbox
+```
+
+The captain shows one compact card at a time: change, contract and branch, evidence, unverified checks and remaining risks. Ask to expand a report or show a screenshot when that evidence exists. Then reply:
+
+| Your reply | Next action |
+| --- | --- |
+| `pass` | Record accept and close that review item. |
+| `changes: when the filter is on, a task should disappear immediately after I complete it.` | Return to the original task, then verify and review again. |
+| `reject: cancel this request.` | End the task. |
+
+The captain and verifier handle the pre-review learning check. Routine work may produce none; you do not need a new lesson for every delivery. Candidates do not automatically become team rules. After accepting evidence, merge and release through your normal project process.
+
+### Continue your daily work
+
+**Another request:** start again with `/ship-contract` in the same main conversation. You may discuss another proposal while work is running. Dispatch only independent, eligible tasks; exceeding the parallel cap does not start another worker.
+
+```text
+Open a separate request: add CSV export to the task list. Propose it first.
+Check whether it overlaps the filter work, and explain the isolation or execution order.
+```
+
+**Another project:** designate a captain and run setup for that project. For one captain across repositories, explicitly separate the shared state root from execution repositories using the [multi-repository/worktree guide](docs/workspace-parallel.md).
+
+**A new conversation:** open the original project, assign the captain role, and ask it to read existing contracts, runtime records and inbox, verify actual worker status, and restore the progress view without duplicate dispatch. Records alone do not prove old workers are still running.
+
+**Unrecognized commands:** check the installed skill directory. If slash commands are not routed, ask the agent to read `~/.agent-ship-kit/current/skills/<skill-name>/SKILL.md` and follow it. If the CLI is not on PATH, check it with `node "$HOME/.agent-ship-kit/current/cli/bin/agent-ship.js" --help`.
+
+**Version mismatch:** the installer defaults to main, which contains merged features only. When reviewing this guide on a feature branch, install that `--ref` to use its new commands.
 
 ## What you get
 
@@ -44,7 +171,7 @@ curl -fsSL https://raw.githubusercontent.com/gdli6177/agent-ship-kit/main/instal
 
 Windows: use WSL (Ubuntu), then run the command above inside it. Git Bash and MSYS are refused.
 
-Then open a project and tell the captain `/ship-setup`.
+After installation, follow [Quick Start](#quick-start) to designate the project's captain conversation, then use `/ship-setup`.
 
 ### Manual clone
 
@@ -110,7 +237,7 @@ The captain is a router. It does not edit code or run the long task, even when t
 
 `slice start` admits work only when the contract is frozen, `Frozen by` is a real name, `Frozen at` parses as a time, Forbidden paths is non-empty, the slice id is a row in the Slices table, and the branch already exists. The errors are `contract must record Frozen by`, `contract must record a valid Frozen at`, `contract needs non-empty Forbidden paths`, `slice <id> is not in the Slices table`, and `branch <name> does not exist in <repo>; create it first (git branch <name> <base>)`. Create the branch first. `.agent-ship/sequence` is the integer that orders events written in the same millisecond; do not edit it while a command holds the state lock. A lock directory `.agent-ship-lock` records `pid`, `hostname`, `started_at`, and `cmd`. A dead pid on this machine is reclaimed. Otherwise the error names the owner. Manual recovery is `rm -rf` on that lock directory after the owner has exited. See [docs/workspace-parallel.md](docs/workspace-parallel.md).
 
-## Quickstart without Multica
+## Inbox and notification smoke test (no workers)
 
 No orchestrator account, no `multica` binary, no webhook. The inbox is a JSONL file. The dry-run prints a plan and does not run it. A normal-priority item is pull: it stays on `inbox list` and matches no push rule. The high-priority example below has an evidence URL, so the plan is allowed and still not executed.
 
