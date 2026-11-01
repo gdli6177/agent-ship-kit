@@ -33,11 +33,13 @@ Install agent-ship-kit without cloning.
 
 Options:
   --ref <name>     Branch or tag to install (default: main, or AGENT_SHIP_REF).
-                   Names may contain letters, numbers, dot, underscore, and hyphen.
+                   Slashes are allowed, as in feature/foo. The directory name
+                   uses __ in place of /.
   --agent <name>   cursor, claude, codex, or all. Repeatable.
   --target <dir>   Copy skills into this directory instead of detecting agents.
-  --uninstall      Remove the shim, this ref's kit directory, and only the
-                   skill directories the installer recorded.
+  --uninstall      Remove the shim, the skill directories this installer
+                   recorded, and the whole ~/.agent-ship-kit directory
+                   (every ref and the current symlink).
   -h, --help       Show this help.
 
 The installer never uses sudo and never edits a project repository.
@@ -61,7 +63,37 @@ refuse_windows() {
 }
 
 valid_ref() {
-  [[ "$1" =~ ^[A-Za-z0-9._-]+$ ]]
+  local ref="$1" name
+  [[ -n "$ref" ]] || return 1
+  [[ "$ref" =~ ^[A-Za-z0-9._/-]+$ ]] || return 1
+  [[ "$ref" != *..* ]] || return 1
+  [[ "$ref" != /* && "$ref" != */ && "$ref" != *//* ]] || return 1
+  name="${ref//\//__}"
+  [[ -n "$name" && "$name" != "current" && "$name" != "manifest" && "$name" != .* ]] || return 1
+  return 0
+}
+
+ref_dir_name() {
+  printf '%s\n' "${1//\//__}"
+}
+
+urlencode() {
+  local s="$1" out="" i c hex
+  for ((i = 0; i < ${#s}; i++)); do
+    c="${s:i:1}"
+    case "$c" in
+      [A-Za-z0-9._~-]) out+="$c" ;;
+      *)
+        printf -v hex '%%%02X' "'$c"
+        out+="$hex"
+        ;;
+    esac
+  done
+  printf '%s\n' "$out"
+}
+
+codeload_url() {
+  printf 'https://codeload.github.com/%s/tar.gz/%s\n' "$REPO" "$(urlencode "$1")"
 }
 
 require_node() {
@@ -198,12 +230,78 @@ write_manifest() {
   {
     printf '%s\n' "# agent-ship-kit-manifest"
     printf 'ref=%s\n' "$REF"
+    printf 'dir=%s\n' "$(ref_dir_name "$REF")"
     printf 'kit=%s\n' "$kit"
     printf 'shim=%s\n' "$SHIM_PATH"
     for line in "${INSTALLED_SKILLS[@]}"; do
       printf 'skill=%s\n' "$line"
     done
   } >"$MANIFEST"
+}
+
+remove_kit_dir() {
+  local kit="$1" base
+  [[ -n "$kit" ]] || return 0
+  case "$kit" in
+    "$KIT_HOME"/*) ;;
+    *)
+      echo "warning: refused to delete $kit" >&2
+      return 0
+      ;;
+  esac
+  case "$kit" in
+    *"/.."*|*"../"*)
+      echo "warning: refused to delete $kit" >&2
+      return 0
+      ;;
+  esac
+  base="$(basename "$kit")"
+  [[ "$base" != "current" && "$base" != "manifest" && "$kit" != "$KIT_HOME" ]] || return 0
+  if [[ -L "$kit" ]]; then
+    echo "warning: refused to delete symlink $kit" >&2
+    return 0
+  fi
+  if [[ -d "$kit" ]]; then
+    rm -rf "$kit"
+    echo "removed previous kit $kit"
+  fi
+}
+
+remove_recorded_kits() {
+  local keep="$1" manifest="$KIT_HOME/manifest" line kit
+  [[ -f "$manifest" ]] || return 0
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    case "$line" in
+      kit=*)
+        kit="${line#kit=}"
+        if [[ "$kit" != "$keep" ]]; then
+          remove_kit_dir "$kit"
+        fi
+        ;;
+    esac
+  done <"$manifest"
+}
+
+link_current() {
+  local dest="$1" link="$KIT_HOME/current" name
+  name="$(basename "$dest")"
+  if [[ -e "$link" && ! -L "$link" ]]; then
+    die "$link exists and is not a symlink"
+  fi
+  ln -sfn "$name" "$link"
+}
+
+kit_home_is_ours() {
+  [[ "$KIT_HOME" == /* ]] || return 1
+  [[ "$KIT_HOME" != "/" && "$KIT_HOME" != "$HOME" && "$KIT_HOME" != "$HOME/" ]] || return 1
+  case "$KIT_HOME" in
+    *"/.."*|*"../"*) return 1 ;;
+  esac
+  [[ -d "$KIT_HOME" ]] || return 1
+  if [[ "$(basename "$KIT_HOME")" == ".agent-ship-kit" ]]; then
+    return 0
+  fi
+  [[ -f "$KIT_HOME/manifest" ]] && grep -q -F "agent-ship-kit-manifest" "$KIT_HOME/manifest"
 }
 
 on_path() {
@@ -240,7 +338,7 @@ cleanup_install() {
 }
 
 install_kit() {
-  valid_ref "$REF" || die "ref must be a branch or tag without slashes (for example main or v0.1.0)"
+  valid_ref "$REF" || die "ref must be a branch or tag (for example main, v0.1.0, or feature/foo)"
   require_node
   command -v tar >/dev/null 2>&1 || die "tar is required"
   trap cleanup_install EXIT
@@ -254,7 +352,8 @@ install_kit() {
     tar -xzf "$AGENT_SHIP_TARBALL" -C "$extract"
   else
     command -v curl >/dev/null 2>&1 || die "curl is required"
-    local url="https://codeload.github.com/${REPO}/tar.gz/${REF}"
+    local url
+    url="$(codeload_url "$REF")"
     echo "Downloading agent-ship-kit ($REF)"
     curl -fsSL "$url" | tar -xz -C "$extract"
   fi
@@ -277,15 +376,20 @@ install_kit() {
   [[ ${#TARGETS[@]} -gt 0 ]] || die "no skill directory to install into"
   unique_targets
 
-  dest="$KIT_HOME/$REF"
-  STAGE_DIR="$KIT_HOME/.staging-$REF"
+  local ref_dir
+  ref_dir="$(ref_dir_name "$REF")"
+  dest="$KIT_HOME/$ref_dir"
+  STAGE_DIR="$KIT_HOME/.staging-$ref_dir"
   mkdir -p "$KIT_HOME"
   rm -rf "$STAGE_DIR"
   mkdir -p "$STAGE_DIR"
   cp -a "$src"/. "$STAGE_DIR"/
   rm -rf "$STAGE_DIR/node_modules" "$STAGE_DIR/cli/node_modules"
   echo "Installing the agent-ship CLI (Node $(node -v))"
-  (cd "$STAGE_DIR" && npm install --omit=dev --no-fund --no-audit --loglevel error </dev/null)
+  (
+    cd "$STAGE_DIR" &&
+      npm install --omit=dev --no-update-notifier --no-fund --no-audit --silent </dev/null
+  ) || die "npm install failed"
   chmod 755 "$STAGE_DIR/cli/bin/agent-ship.js"
   rm -rf "$dest"
   mv "$STAGE_DIR" "$dest"
@@ -293,8 +397,10 @@ install_kit() {
   rm -rf "$TMP_DIR"
   TMP_DIR=""
 
-  write_shim "$dest/cli/bin/agent-ship.js"
-  copy_skills "$dest"
+  remove_recorded_kits "$dest"
+  link_current "$dest"
+  write_shim "$KIT_HOME/current/cli/bin/agent-ship.js"
+  copy_skills "$KIT_HOME/current"
   write_manifest "$dest"
 
   if ! on_path; then
@@ -304,9 +410,10 @@ install_kit() {
 
   echo
   echo "agent-ship-kit installed"
-  echo "  ref:    $REF"
-  echo "  kit:    $dest"
-  echo "  shim:   $SHIM_PATH"
+  echo "  ref:     $REF"
+  echo "  kit:     $dest"
+  echo "  current: $KIT_HOME/current"
+  echo "  shim:    $SHIM_PATH"
   local target
   for target in "${TARGETS[@]}"; do
     echo "  skills: $target"
@@ -338,66 +445,32 @@ remove_skill() {
 }
 
 uninstall_kit() {
-  valid_ref "$REF" || die "ref must be a branch or tag without slashes"
   local manifest="$KIT_HOME/manifest"
-  local kit="$KIT_HOME/$REF"
   local shim="$BIN_DIR/agent-ship"
-  local recorded_ref="" recorded_kit="" recorded_shim=""
   local skills=()
-  local line skill remove_recorded=0
+  local line skill
   if [[ -f "$manifest" ]]; then
     while IFS= read -r line || [[ -n "$line" ]]; do
       case "$line" in
-        ref=*) recorded_ref="${line#ref=}" ;;
-        kit=*) recorded_kit="${line#kit=}" ;;
-        shim=*) recorded_shim="${line#shim=}" ;;
+        shim=*) shim="${line#shim=}" ;;
         skill=*) skills+=("${line#skill=}") ;;
       esac
     done <"$manifest"
+  else
+    echo "No install manifest found. Removing the shim (if it is ours) and $KIT_HOME." >&2
   fi
-
-  # A plain --uninstall follows the manifest. --ref and AGENT_SHIP_REF stay pinned.
-  if [[ -n "$recorded_ref" && "$recorded_ref" != "$REF" && "${UNINSTALL_EXPLICIT_REF:-0}" -eq 0 && -z "${AGENT_SHIP_REF:-}" ]]; then
-    REF="$recorded_ref"
-    kit="$KIT_HOME/$REF"
-  fi
-
-  if [[ -n "$recorded_ref" && "$recorded_ref" == "$REF" ]]; then
-    remove_recorded=1
+  if [[ ${#skills[@]} -gt 0 ]]; then
     for skill in "${skills[@]}"; do
       remove_skill "$skill"
     done
-    [[ -n "$recorded_shim" ]] && shim="$recorded_shim"
-    [[ -n "$recorded_kit" ]] && kit="$recorded_kit"
-  elif [[ ! -f "$manifest" ]]; then
-    echo "No install manifest found. Removing the shim (if it is ours) and $kit. Skill copies were not removed." >&2
-  else
-    echo "Manifest records ref $recorded_ref, not $REF. Leaving those skills in place." >&2
   fi
-
-  if [[ "$remove_recorded" -eq 1 || ! -f "$manifest" ]]; then
-    remove_shim "$shim"
-  elif [[ -f "$shim" ]] && grep -q -F "$SHIM_MARKER" "$shim" && grep -q -F -- "$kit" "$shim"; then
-    remove_shim "$shim"
+  remove_shim "$shim"
+  if kit_home_is_ours; then
+    rm -rf "$KIT_HOME"
+    echo "removed $KIT_HOME"
+  elif [[ -e "$KIT_HOME" ]]; then
+    echo "warning: refused to delete $KIT_HOME" >&2
   fi
-
-  case "$kit" in
-    "$KIT_HOME"/*)
-      if [[ "$(basename "$kit")" == "$REF" && "$kit" != "$KIT_HOME" ]]; then
-        rm -rf "$kit"
-        echo "removed kit $kit"
-        if [[ "$remove_recorded" -eq 1 ]]; then
-          rm -f "$manifest"
-        fi
-      else
-        echo "warning: refused to delete $kit" >&2
-      fi
-      ;;
-    *)
-      echo "warning: refused to delete $kit" >&2
-      ;;
-  esac
-  rmdir "$KIT_HOME" 2>/dev/null || true
   echo
   echo "agent-ship-kit removed"
   echo

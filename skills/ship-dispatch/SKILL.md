@@ -15,7 +15,7 @@ description: >-
 The captain is a router, not an executor. Dispatch is a gate in front of
 whatever orchestrator the human already uses. This skill does not schedule a
 fleet, does not keep a worker roster, and does not merge or deploy. Templates
-and adapters live in the kit at `$HOME/.agent-ship-kit/main/`.
+and adapters live in the kit at `$HOME/.agent-ship-kit/current/`.
 
 ## Router
 
@@ -89,7 +89,7 @@ If any line fails, do not spawn. Tell the human which line failed.
    cron snippet and launchd plist outside the repo the first time a slice is
    open. Later slices leave the timer in place.
 
-Run this in the project directory. Use `agent-ship` on `PATH`. If that command is not found, use `"$HOME/.agent-ship-kit/main/cli/bin/agent-ship.js"` with the same arguments.
+Run this in the project directory. Use `agent-ship` on `PATH`. If that command is not found, use `"$HOME/.agent-ship-kit/current/cli/bin/agent-ship.js"` with the same arguments.
 
 ```bash
 agent-ship slice start \

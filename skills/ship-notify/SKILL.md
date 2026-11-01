@@ -33,8 +33,8 @@ The example policy has an Instructions section the captain reads. Structured
 free-text section into an argv and pass `--action`. The allowlist and the
 empty-evidence refusal still apply.
 
-Policy: `.agent-ship/notify.policy.md` after `/ship-setup`, or `$HOME/.agent-ship-kit/main/templates/notify.policy.example.md`.
-Allowlist: `.agent-ship/notify.allowlist.json`, or `$HOME/.agent-ship-kit/main/templates/notify.allowlist.example.json`.
+Policy: `.agent-ship/notify.policy.md` after `/ship-setup`, or `$HOME/.agent-ship-kit/current/templates/notify.policy.example.md`.
+Allowlist: `.agent-ship/notify.allowlist.json`, or `$HOME/.agent-ship-kit/current/templates/notify.allowlist.example.json`.
 Prefer an exact subcommand such as `multica issue create --assignee me *`.
 Do not widen that to `multica *`.
 The parser and the match rules are normative in `docs/ARCHITECTURE.md`.
@@ -47,7 +47,7 @@ The parser and the match rules are normative in `docs/ARCHITECTURE.md`.
 
 ## Dry-run
 
-Run this in the project directory. Use `agent-ship` on `PATH`. If that command is not found, use `"$HOME/.agent-ship-kit/main/cli/bin/agent-ship.js"` with the same arguments.
+Run this in the project directory. Use `agent-ship` on `PATH`. If that command is not found, use `"$HOME/.agent-ship-kit/current/cli/bin/agent-ship.js"` with the same arguments.
 
 ```bash
 agent-ship notify dry-run --latest \

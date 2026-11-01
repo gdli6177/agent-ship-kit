@@ -34,7 +34,7 @@ agent-ship-kit 是并行 AI 编程交付的验收与注意力层。人从需求�
 
 ## 安装
 
-一条命令。不克隆仓库，不用 sudo，也不改任何项目。它把工具装到 `~/.agent-ship-kit/main`，在 `~/.local/bin` 放上 `agent-ship` 命令，并把七份技能拷进它找到的代理 skill 目录（`~/.cursor/skills`、`~/.claude/skills`、`~/.codex/skills`）。
+一条命令。不克隆仓库，不用 sudo，也不改任何项目。它把工具下载到 `~/.agent-ship-kit/<ref>`（默认 `main`），并用符号链接 `~/.agent-ship-kit/current` 指向这一版。它在 `~/.local/bin` 放上 `agent-ship` 命令，并把七份技能拷进它找到的代理 skill 目录（`~/.cursor/skills`、`~/.claude/skills`、`~/.codex/skills`）。技能和命令垫片都走 `current`，之后换 `--ref` 也不用改这些路径。
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/gdli6177/agent-ship-kit/main/install.sh | bash
@@ -46,7 +46,7 @@ curl -fsSL https://raw.githubusercontent.com/gdli6177/agent-ship-kit/main/instal
 curl -fsSL https://raw.githubusercontent.com/gdli6177/agent-ship-kit/main/install.sh | bash -s -- --ref v0.1.0
 ```
 
-`--agent cursor|claude|codex|all` 选择 skill 目录。`--target <目录>` 只拷到那个目录。卸载会删掉命令垫片、这一版的工具目录，以及安装脚本自己拷进去的技能目录：
+`--agent cursor|claude|codex|all` 选择 skill 目录。`--target <目录>` 只拷到那个目录。分支名可以带斜杠（`feature/foo`），目录名会写成 `feature__foo`。换一个 ref 安装时，会删掉上一个 ref 的目录。卸载会删掉命令垫片、安装脚本自己拷进去的技能目录，以及整个 `~/.agent-ship-kit`（所有 ref 和 `current`）：
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/gdli6177/agent-ship-kit/main/install.sh | bash -s -- --uninstall
@@ -101,7 +101,7 @@ cp -R skills/ship-setup skills/ship-watchdog skills/ship-contract skills/ship-di
 | `/ship-e2e` | `skills/ship-e2e/SKILL.md` |
 | `/ship-watchdog` | `skills/ship-watchdog/SKILL.md` |
 
-**纯终端。** 安装之后，在项目目录里跑 `agent-ship`。命令不在 `PATH` 上时，用 `"$HOME/.agent-ship-kit/main/cli/bin/agent-ship.js"`。
+**纯终端。** 安装之后，在项目目录里跑 `agent-ship`。命令不在 `PATH` 上时，用 `"$HOME/.agent-ship-kit/current/cli/bin/agent-ship.js"`。
 
 | 命令 | CLI |
 | --- | --- |
@@ -112,7 +112,7 @@ cp -R skills/ship-setup skills/ship-watchdog skills/ship-contract skills/ship-di
 | `/ship-notify` | `agent-ship notify dry-run --latest --policy .agent-ship/notify.policy.md --allowlist .agent-ship/notify.allowlist.json` |
 | `/ship-watchdog` | `agent-ship watchdog` |
 
-`/ship-contract` 和 `/ship-e2e` 是技能里的流程，没有单独的子命令。派工或审阅时的路径检查是 `agent-ship check --contract <id>`。`/ship-setup` 会把通知策略和允许列表写进 `.agent-ship/`。在那之前，把 `--policy` 和 `--allowlist` 指到 `$HOME/.agent-ship-kit/main/templates/`。
+`/ship-contract` 和 `/ship-e2e` 是技能里的流程，没有单独的子命令。派工或审阅时的路径检查是 `agent-ship check --contract <id>`。`/ship-setup` 会把通知策略和允许列表写进 `.agent-ship/`。在那之前，把 `--policy` 和 `--allowlist` 指到 `$HOME/.agent-ship-kit/current/templates/`。
 
 `agent-ship check --contract <id>` 用普通 git 把工作分支和基线分支做 diff。改动的路径落在禁止列表里，或不在允许列表里，检查就失败。本地 pre-commit 对 `.agent-ship/active-contract` 里的合同做暂存区检查。pre-push 拒绝推到 `main` 和 `master`，除非人自己设置 `AGENT_SHIP_ALLOW_PROTECTED_PUSH=1`。CI 也可以跑同一条 `check`，那是附加的，钩子不依赖它。
 
@@ -187,11 +187,11 @@ agent-ship inbox add \
 agent-ship inbox list
 
 agent-ship notify dry-run --latest \
-  --policy "$HOME/.agent-ship-kit/main/templates/notify.policy.example.md" \
-  --allowlist "$HOME/.agent-ship-kit/main/templates/notify.allowlist.example.json"
+  --policy "$HOME/.agent-ship-kit/current/templates/notify.policy.example.md" \
+  --allowlist "$HOME/.agent-ship-kit/current/templates/notify.allowlist.example.json"
 ```
 
-在项目目录里跑。`agent-ship` 不在 `PATH` 上时，改用 `"$HOME/.agent-ship-kit/main/cli/bin/agent-ship.js"`。
+在项目目录里跑。`agent-ship` 不在 `PATH` 上时，改用 `"$HOME/.agent-ship-kit/current/cli/bin/agent-ship.js"`。
 
 预期得到一条 `needs_review`，然后计划的 `matched_rule` 是 `high priority page`，`allow` 为 true，`executed` 为 false。去掉 `--evidence` 之后，同样的高优先级项不会被呼叫。`notify run` 是可选的，只启动允许列表里的 argv，不经过 shell。`inbox decide <id> accept` 写入 `review_decided`，之后 `inbox list` 不再显示这一条。
 
