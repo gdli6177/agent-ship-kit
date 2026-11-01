@@ -20,7 +20,7 @@ The product definition in Chinese is [docs/PRODUCT.md](docs/PRODUCT.md). Event, 
 
 ## Install
 
-One command. It does not clone the repo, does not use sudo, and does not modify any project. It downloads the kit into `~/.agent-ship-kit/main`, installs the `agent-ship` command in `~/.local/bin`, and copies the seven skills into each agent skill directory it finds (`~/.cursor/skills`, `~/.claude/skills`, `~/.codex/skills`).
+One command. It does not clone the repo, does not use sudo, and does not modify any project. It downloads the kit into `~/.agent-ship-kit/<ref>` (default `main`) and points the `~/.agent-ship-kit/current` symlink at that directory. It installs the `agent-ship` command in `~/.local/bin`, and copies the seven skills into each agent skill directory it finds (`~/.cursor/skills`, `~/.claude/skills`, `~/.codex/skills`). Skills and the shim use `current`, so a later `--ref` does not change those paths.
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/gdli6177/agent-ship-kit/main/install.sh | bash
@@ -32,7 +32,7 @@ Node.js 20 or newer. No API keys. If `~/.local/bin` is not on `PATH`, the instal
 curl -fsSL https://raw.githubusercontent.com/gdli6177/agent-ship-kit/main/install.sh | bash -s -- --ref v0.1.0
 ```
 
-`--agent cursor|claude|codex|all` chooses skill directories. `--target <dir>` copies skills only there. Remove the shim, that ref's kit directory, and only the skill directories this installer copied:
+`--agent cursor|claude|codex|all` chooses skill directories. `--target <dir>` copies skills only there. A branch name may contain slashes (`feature/foo`); the directory is `feature__foo`. Installing a different ref removes the previous ref directory. `--uninstall` removes the shim, the skill directories this installer copied, and the whole `~/.agent-ship-kit` directory:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/gdli6177/agent-ship-kit/main/install.sh | bash -s -- --uninstall
@@ -87,7 +87,7 @@ Each command is one skill. The name in the skill file matches the command withou
 | `/ship-e2e` | `skills/ship-e2e/SKILL.md` |
 | `/ship-watchdog` | `skills/ship-watchdog/SKILL.md` |
 
-**Plain terminal.** After the installer, run `agent-ship` in the project directory. If the command is not on `PATH`, use `"$HOME/.agent-ship-kit/main/cli/bin/agent-ship.js"`.
+**Plain terminal.** After the installer, run `agent-ship` in the project directory. If the command is not on `PATH`, use `"$HOME/.agent-ship-kit/current/cli/bin/agent-ship.js"`.
 
 | Command | CLI |
 | --- | --- |
@@ -98,7 +98,7 @@ Each command is one skill. The name in the skill file matches the command withou
 | `/ship-notify` | `agent-ship notify dry-run --latest --policy .agent-ship/notify.policy.md --allowlist .agent-ship/notify.allowlist.json` |
 | `/ship-watchdog` | `agent-ship watchdog` |
 
-`/ship-contract` and `/ship-e2e` are procedures in their skill files. They do not have a single CLI subcommand. Path checks used while dispatching or reviewing are `agent-ship check --contract <id>`. `/ship-setup` writes the notify policy and allowlist into `.agent-ship/`. Before that, point `--policy` and `--allowlist` at `$HOME/.agent-ship-kit/main/templates/`.
+`/ship-contract` and `/ship-e2e` are procedures in their skill files. They do not have a single CLI subcommand. Path checks used while dispatching or reviewing are `agent-ship check --contract <id>`. `/ship-setup` writes the notify policy and allowlist into `.agent-ship/`. Before that, point `--policy` and `--allowlist` at `$HOME/.agent-ship-kit/current/templates/`.
 
 The captain is a router. It does not edit code or run the long task, even when the change looks small, and it does not wait out a worker before taking the next request. Speculative drafts are off unless `.agent-ship/limits.json` sets `"speculative": true`, and even then nothing is dispatched without a frozen contract. A persistent runtime, compute/state split, and device daemons stay with the orchestrator.
 
@@ -121,11 +121,11 @@ agent-ship inbox add \
 agent-ship inbox list
 
 agent-ship notify dry-run --latest \
-  --policy "$HOME/.agent-ship-kit/main/templates/notify.policy.example.md" \
-  --allowlist "$HOME/.agent-ship-kit/main/templates/notify.allowlist.example.json"
+  --policy "$HOME/.agent-ship-kit/current/templates/notify.policy.example.md" \
+  --allowlist "$HOME/.agent-ship-kit/current/templates/notify.allowlist.example.json"
 ```
 
-Run that in the project directory. If `agent-ship` is not on `PATH`, call `"$HOME/.agent-ship-kit/main/cli/bin/agent-ship.js"` instead.
+Run that in the project directory. If `agent-ship` is not on `PATH`, call `"$HOME/.agent-ship-kit/current/cli/bin/agent-ship.js"` instead.
 
 Expect a `needs_review` event, then a plan whose `matched_rule` is `high priority page`, `allow` is true, and `executed` is false. Drop the `--evidence` flag and the same high item is not paged. `notify run` is opt-in and starts only an allowlisted argv, with no shell. `inbox decide <id> accept` writes `review_decided`; `inbox list` then hides that item.
 
