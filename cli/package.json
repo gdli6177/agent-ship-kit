@@ -1,0 +1,21 @@
+{
+  "name": "agent-ship-kit",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Local inbox and notify dry-run for the agent-ship-kit captain. Never merges, deploys, or starts a shell.",
+  "license": "MIT",
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "agent-ship": "tsx src/cli.ts",
+    "test": "tsx --test test/*.test.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@types/node": "^22.20.0",
+    "tsx": "^4.20.6",
+    "typescript": "^5.9.3"
+  }
+}

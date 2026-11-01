@@ -1,0 +1,151 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/gdli6177/agent-ship-kit/blob/main/events/schema.json",
+  "title": "agent-ship-kit event",
+  "description": "Acceptance and attention events emitted around the captain. An event never authorizes a merge to main or a production deploy. needs_review, blocked, and needs_approval are inbox items a human acts on. review_decided closes one of those items. The other types are lifecycle siblings that share this envelope.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["id", "type", "title", "summary", "created_at", "source_task_id"],
+  "properties": {
+    "id": {
+      "type": "string",
+      "pattern": "^evt_[A-Za-z0-9_-]+$",
+      "description": "Stable event id. Inbox JSONL lines use the same id."
+    },
+    "type": {
+      "type": "string",
+      "enum": [
+        "proposal_ready",
+        "contract_frozen",
+        "worker_dispatched",
+        "needs_review",
+        "blocked",
+        "needs_approval",
+        "review_decided",
+        "notify_planned"
+      ]
+    },
+    "title": {
+      "type": "string",
+      "minLength": 1
+    },
+    "summary": {
+      "type": "string",
+      "minLength": 1
+    },
+    "created_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "source_task_id": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Adapter task id. Before dispatch, use the proposal id or contract id."
+    },
+    "evidence_urls": {
+      "type": "array",
+      "description": "Pointers to checks, logs, or artifacts the human can open. Claims without a pointer do not belong here.",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "priority": {
+      "type": "string",
+      "enum": ["normal", "high"]
+    },
+    "links": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Where the slice lives. All three keys are optional; the object itself is required on needs_review.",
+      "properties": {
+        "pr": { "type": "string", "minLength": 1 },
+        "issue": { "type": "string", "minLength": 1 },
+        "path": { "type": "string", "minLength": 1 }
+      }
+    },
+    "proposal_id": { "type": "string", "minLength": 1 },
+    "contract_id": { "type": "string", "minLength": 1 },
+    "slice_id": { "type": "string", "minLength": 1 },
+    "worker_ref": { "type": "string", "minLength": 1 },
+    "decision": {
+      "type": "string",
+      "enum": ["accept", "changes_requested", "reject"],
+      "description": "Human decision recorded by the captain after review. Required when type is review_decided."
+    },
+    "subject_id": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Id of the inbox item this decision closes. Required when type is review_decided."
+    },
+    "note": { "type": "string" }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": { "type": { "const": "needs_review" } },
+        "required": ["type"]
+      },
+      "then": {
+        "required": ["evidence_urls", "priority", "links"]
+      }
+    },
+    {
+      "if": {
+        "properties": { "type": { "const": "blocked" } },
+        "required": ["type"]
+      },
+      "then": {
+        "required": ["priority"]
+      }
+    },
+    {
+      "if": {
+        "properties": { "type": { "const": "needs_approval" } },
+        "required": ["type"]
+      },
+      "then": {
+        "required": ["priority"]
+      }
+    },
+    {
+      "if": {
+        "properties": { "type": { "const": "review_decided" } },
+        "required": ["type"]
+      },
+      "then": {
+        "required": ["decision", "subject_id"]
+      }
+    }
+  ],
+  "examples": [
+    {
+      "id": "evt_example_needs_review",
+      "type": "needs_review",
+      "title": "Auth middleware slice is ready for review",
+      "summary": "Slice auth-middleware met the frozen contract checks. Nothing has been merged.",
+      "evidence_urls": ["https://ci.example/runs/1001"],
+      "priority": "high",
+      "created_at": "2026-10-31T17:05:00.000Z",
+      "source_task_id": "task_auth_mw",
+      "links": {
+        "pr": "https://example.com/pull/12",
+        "issue": "https://example.com/issues/4",
+        "path": ".agent-ship/packets/task_auth_mw.md"
+      },
+      "contract_id": "contract_auth",
+      "slice_id": "auth-middleware"
+    },
+    {
+      "id": "evt_example_needs_approval",
+      "type": "needs_approval",
+      "title": "Worker is waiting on a path exception",
+      "summary": "The slice wants to edit a forbidden path. The owner decides in the captain thread.",
+      "priority": "high",
+      "created_at": "2026-10-31T17:06:00.000Z",
+      "source_task_id": "task_auth_mw",
+      "contract_id": "contract_auth",
+      "slice_id": "auth-middleware"
+    }
+  ]
+}
