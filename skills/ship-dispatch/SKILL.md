@@ -18,9 +18,18 @@ whatever orchestrator the human already uses. This skill does not schedule a
 fleet, does not keep a worker roster, and does not merge or deploy. Templates
 and adapters live in the kit at `$HOME/.agent-ship-kit/current/`.
 
+## Parallel lanes and authority (v0.2)
+
+Read `$HOME/.agent-ship-kit/current/docs/owner-lanes.md` (or the actual kit clone). One human-facing captain routes a durable `intake add/list/claim` queue; temporary owners hold independent lanes and coordinate scouts/workers/verifiers. Keep one current proposal **per lane**. The captain delegates repository inspection/tests/Git work and returns a concise conclusion/tradeoff/evidence/recommendation/id list. External channels enqueue only.
+
+The trusted host binds actors, initializes human/captain authority, connects `scripts/host-pre-tool.mjs`, and starts each captain turn with heartbeat outside model-controlled tools. Never choose another actor or reset your own budget. Registered human channel alone freezes/decides/changes limits; captain alone executes notification. Owners/workers only return lane artifacts/inbox. These application guards require host authentication and sandbox enforcement; local env names alone are not authenticated identities.
+
+Use Lane/Owner headers, independent checkouts, optional slice role cards, and `--lane` for routed actions. `slice open` prepares worktree/hooks/admission/pending packet/check; its `spawn_required` means the adapter must still launch a real instance. A missing/malformed role blocks dispatch. Role forbiddens add to contract forbiddens, never widen scope. A frozen file is immutable; append state to events, not its dispatch-log table.
+
+
 ## Router
 
-The captain talks to the owner, drafts contracts, dispatches slices, routes
+The captain talks to the human; lane owners draft contracts, coordinate slices and route
 events, and records decisions. It does not edit product code and it does not
 run the long task itself, including work that looks small. Prompt-only
 delegation is unreliable: the same context that holds the plan will start
@@ -93,7 +102,7 @@ If any line fails, do not spawn. Tell the human which line failed.
 
 ## 规范与经验上下文
 
-使用 `team context --repo <checkout> --tag <topic> [--project <id>]` 读取必读引用和
+使用 `team context --auto --repo <checkout> --tag <topic> [--project <id>]` 读取必读引用和
 匹配的 active 摘要。同样的标签和项目标识传给 `slice start`，将返回的 context
 交给工人：读取 required_sources，使用匹配经验，必要时只展开一条 `lesson show`。
 派工事件记录所用来源和经验编号。不要把候选、失效经验或整段历史当作执行规范。
@@ -128,16 +137,23 @@ agent-ship slice start --root <shared_state_root> \
    `.agent-ship/active-contract`. Install that checkout with `setup --root
    <checkout> --state-root <shared_state_root>` so its hook reads the shared
    contract and checks its own index.
+   Check `timer.registered` and run `watchdog status` / `watchdog doctor` before
+   spawn. Registration failure or known runtime failure stops dispatch without
+   consuming the task id. `registered_unverified` means no scheduled success
+   has been observed yet; verify the first run instead of claiming healthy.
+   Only an explicit manual-supervision choice permits `--allow-untimed`.
 5. Call adapter spawn with the contract path, slice id, stable kit task id and
-   prompt. Map the kit id to the platform run id. Record its reference with
+   prompt. Allocate a unique adapter session ref before admission and use that same ref in
+   `slice start --worker` and progress updates. Keep the native platform run id in
+   the adapter record. Record progress with
    `slice update --root <shared_state_root> --source-task-id <id> --status
    running --worker <platform_ref>`. Do not admit the slice a second time.
 6. If spawn fails, update the reservation to `failed`. Replace failed/cancelled
    work only with human authorization, a new task id and `slice start --replace`.
-7. Append the human-readable dispatch log. The CLI event/inbox view is the
+7. Record the human-readable dispatch view in the review packet, never append to the frozen contract. The CLI event/inbox view is the
    authoritative count for admission; the Markdown log is an audit view.
 
-The worker returns evidence or escalations to the captain. It does not notify
+The worker returns evidence or escalations to its lane owner (captain in legacy single-lane mode). It does not notify
 the human. Notification is `ship-notify`, after the captain files an inbox item.
 
 ## While work is in flight
@@ -151,8 +167,8 @@ Record the human decision before resuming; resumption rechecks both caps.
   review. Do not busy-loop.
 - Map foreign states onto `queued`, `running`, `needs_review`, `blocked`,
   `needs_approval`, `failed`, or `cancelled` (see `templates/workflow.md`).
-  Append a dispatch-log row when the status changes. The latest row for a
-  task id is the one that counts.
+  Append state to the CLI event log and packet, never to the frozen contract.
+  The latest event for a task id is the one that counts.
 - On `failed` or `cancelled`, report the adapter's reason. Do not spawn a
   replacement unless the human asks.
 - `status` and `collect` never include a merge or a production deploy. If the
@@ -204,6 +220,12 @@ failed/cancelled 必须能立即停工，随后用 `lesson pending` 查收尾遗
 ## Handoff
 
 When the worker reports done, do not file the inbox and do not call `/ship-inbox` yet.
+
+Before verification, retrieve `team context --auto --project <id> --tag verify`.
+Read required source bodies. The active guidance supplied by slice start, check
+and needs_review is soft and recorded as lesson_used; it never grants scope.
+At wrap-up run learning extract and learning review for pre-dispatch corrections
+as well as dispatched tasks. Do not turn candidates into active rules yourself.
 
 1. Spawn a separate read-only verifier. Its only prompt is `templates/verifier-prompt.md` plus the frozen contract path and the branch name. Do not attach the worker chat.
 2. The verifier reads `.agent-ship/hard-rules.json`, re-runs the acceptance commands, `agent-ship check --contract <id>`, and any E2E smoke the contract requires. A `hard_rule` violation or a failed checklist hint is a disagreement.

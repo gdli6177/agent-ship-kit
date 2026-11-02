@@ -1,5 +1,8 @@
 **English** | [简体中文](README.zh-CN.md)
 
+
+v0.2: [reliability changes and trial](docs/reliability-v0.2.md).
+
 # agent-ship-kit
 
 Start with [Quick Start](#quick-start). Configuration details: [team handbooks and bounded learning](docs/team-and-learning.md); execution isolation: [multiple repositories and worktrees](docs/workspace-parallel.md).
@@ -35,7 +38,7 @@ An installed CLI does not supply a worker runtime. The captain should discover e
 Add an “unfinished only” filter to the task list. Keep other behavior unchanged.
 ```
 
-The captain inspects the implementation, reads applicable rules and bounded lessons, and proposes acceptance checks. It shows one short plan: what changes, what is affected and how completion will be judged. It resolves technical details itself and asks only questions that need your decision.
+The captain requests a concise scout investigation, reads applicable rules and bounded lessons, and proposes acceptance checks. It shows one short plan: what changes, what is affected and how completion will be judged. It resolves technical details itself and asks only questions that need your decision.
 
 Revise the request if necessary. To approve the exact plan just shown and authorize work, reply:
 
@@ -87,9 +90,15 @@ Ordinary reviews are pull by default: ask for progress or results when you retur
 
 The product definition in Chinese is [docs/PRODUCT.md](docs/PRODUCT.md). Event, adapter, and notify behavior is [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
+## Parallel demands in v0.2
+
+Keep one human-facing captain and a temporary owner per demand lane. `intake add/list/claim` is a durable queue; current proposals and active contracts are lane-scoped, so request B cannot invalidate A. `status --brief` reports availability, per-lane stage/owner/idle time and the exact pending-human counters. Portable owner/scout/worker/verifier cards define capabilities, while runtime instances are created only when needed.
+
+[Owner lanes and host integration](docs/owner-lanes.md) covers authenticated actor binding, human freeze receipts, approved limits, captain-only notifications, the executable pre-tool guard, turn budgets, role cards and `slice open`. A generic hook must be connected by the host; installing skills alone does not enforce tool access or authenticate a human. Legacy default-lane workflows remain available; actual notification execution now requires registered captain authority.
+
 ## Install
 
-One command. It does not clone the repo, does not use sudo, and does not modify any project. It downloads the kit into `~/.agent-ship-kit/<ref>` (default `main`) and points the `~/.agent-ship-kit/current` symlink at that directory. It installs the `agent-ship` command in `~/.local/bin`, and copies the seven skills into each agent skill directory it finds (`~/.cursor/skills`, `~/.claude/skills`, `~/.codex/skills`). Skills and the shim use `current`, so a later `--ref` does not change those paths.
+One command. It does not clone the repo, does not use sudo, and does not modify any project. It downloads the kit into `~/.agent-ship-kit/<ref>` (default `main`) and points the `~/.agent-ship-kit/current` symlink at that directory. It installs the `agent-ship` command in `~/.local/bin`, and copies the seven skills into each agent skill directory it finds (`~/.cursor/skills`, `~/.claude/skills`, `~/.codex/skills`, `~/.qoder/skills`, `~/.kiro/skills`, `~/.omp/agent/skills`, `~/.agents/skills`). Skills and the shim use `current`, so a later `--ref` does not change those paths.
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/gdli6177/agent-ship-kit/main/install.sh | bash
@@ -101,7 +110,7 @@ Node.js 20 or newer. No API keys. If `~/.local/bin` is not on `PATH`, the instal
 curl -fsSL https://raw.githubusercontent.com/gdli6177/agent-ship-kit/main/install.sh | bash -s -- --ref v0.1.0
 ```
 
-`--agent cursor|claude|codex|all` chooses skill directories. `--target <dir>` copies skills only there. A branch name may contain slashes (`feature/foo`); the directory is `feature__foo`. Installing a different ref removes the previous ref directory. `--uninstall` removes the shim, the skill directories this installer copied, and the whole `~/.agent-ship-kit` directory:
+`--agent cursor|claude|codex|qoder|kiro|omp|agents|all` chooses skill directories. `--target <dir>` copies skills only there. A branch name may contain slashes (`feature/foo`); the directory is `feature__foo`. Installing a different ref removes the previous ref directory. `--uninstall` removes the shim, the skill directories this installer copied, and the whole `~/.agent-ship-kit` directory:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/gdli6177/agent-ship-kit/main/install.sh | bash -s -- --uninstall
@@ -118,7 +127,7 @@ If you cannot use the installer, clone and copy the skills yourself:
 ```bash
 git clone https://github.com/gdli6177/agent-ship-kit.git
 cd agent-ship-kit
-npm install
+pnpm install
 mkdir -p ~/.cursor/skills
 cp -R skills/ship-setup skills/ship-watchdog skills/ship-contract skills/ship-dispatch skills/ship-inbox skills/ship-notify skills/ship-e2e ~/.cursor/skills/
 ```
@@ -138,7 +147,7 @@ These names are for the captain thread. They do not depend on a forge.
 | `/ship-inbox <id>` | Jump straight to that item. Notify messages use this deep link. The first view is a compact card (summary ≤ 280 characters plus the recall chain). |
 | `/ship-notify` | Dry-run or send an allowlisted notification. |
 | `/ship-e2e` | Shared login and smoke tests. Production stays read-only. |
-| `/ship-watchdog` | Not the captain. `watchdog install` registers a user timer: Linux/WSL writes a marked crontab line; macOS writes `~/Library/LaunchAgents` and runs `launchctl bootstrap`. The check reads heartbeats, commits on the slice branch only, and `check`. It files `blocked` only when something is wrong. With no running slice it exits and removes that timer. |
+| `/ship-watchdog` | Not the captain. `watchdog install` registers a user timer: Linux/WSL writes a marked crontab line; macOS writes `~/Library/LaunchAgents` and runs `launchctl bootstrap`. The check reads heartbeats, commits on the slice branch only, and `check`. It files `blocked` only when something is wrong. With no running slice it exits with noop and retains the timer until explicit uninstall. |
 
 ## How a slash command runs
 
@@ -217,8 +226,8 @@ To do the same loop with a captain and no CLI, follow [templates/workflow.md](te
 
 ```bash
 cd cli
-npm test
-npm run typecheck
+pnpm test
+pnpm typecheck
 ```
 
 ## Layout

@@ -1,5 +1,8 @@
 [English](README.md) | **简体中文**
 
+
+v0.2: [reliability changes and trial](docs/reliability-v0.2.md).
+
 # agent-ship-kit
 
 第一次使用，从 [Quick Start](#quick-start) 开始。配置细节见[团队手册与经验回流](docs/team-and-learning.md)，并行工作目录见[多仓库与 worktree](docs/workspace-parallel.md)。
@@ -103,7 +106,7 @@ Agent 应读取安装说明和脚本、检查 Node.js 20+ 与 npm、选择当前
 
 ## 安装
 
-一条命令。不克隆仓库，不用 sudo，也不改任何项目。它把工具下载到 `~/.agent-ship-kit/<ref>`（默认 `main`），并用符号链接 `~/.agent-ship-kit/current` 指向这一版。它在 `~/.local/bin` 放上 `agent-ship` 命令，并把七份技能拷进它找到的代理 skill 目录（`~/.cursor/skills`、`~/.claude/skills`、`~/.codex/skills`）。技能和命令垫片都走 `current`，之后换 `--ref` 也不用改这些路径。
+一条命令。不克隆仓库，不用 sudo，也不改任何项目。它把工具下载到 `~/.agent-ship-kit/<ref>`（默认 `main`），并用符号链接 `~/.agent-ship-kit/current` 指向这一版。它在 `~/.local/bin` 放上 `agent-ship`，并把七份技能拷进已探测到的 Cursor、Claude、Codex、Qoder、Kiro、OMP 与共享 .agents 目录；OMP 为 `~/.omp/agent/skills`，其余为对应主目录的 `skills/`。其他宿主可用 `--target`。技能和命令垫片都走 `current`，换 `--ref` 无需改这些路径。
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/gdli6177/agent-ship-kit/main/install.sh | bash
@@ -115,7 +118,7 @@ curl -fsSL https://raw.githubusercontent.com/gdli6177/agent-ship-kit/main/instal
 curl -fsSL https://raw.githubusercontent.com/gdli6177/agent-ship-kit/main/install.sh | bash -s -- --ref v0.1.0
 ```
 
-`--agent cursor|claude|codex|all` 选择 skill 目录。`--target <目录>` 只拷到那个目录。分支名可以带斜杠（`feature/foo`），目录名会写成 `feature__foo`。换一个 ref 安装时，会删掉上一个 ref 的目录。卸载会删掉命令垫片、安装脚本自己拷进去的技能目录，以及整个 `~/.agent-ship-kit`（所有 ref 和 `current`）：
+`--agent cursor|claude|codex|qoder|kiro|omp|agents|all` 选择 skill 目录。`--target <目录>` 只拷到那个目录。分支名可以带斜杠（`feature/foo`），目录名会写成 `feature__foo`。换一个 ref 安装时，会删掉上一个 ref 的目录。卸载会删掉命令垫片、安装脚本自己拷进去的技能目录，以及整个 `~/.agent-ship-kit`（所有 ref 和 `current`）：
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/gdli6177/agent-ship-kit/main/install.sh | bash -s -- --uninstall
@@ -132,7 +135,7 @@ Windows 用 WSL（Ubuntu），在里面跑上面的命令。Git Bash 和 MSYS �
 ```bash
 git clone https://github.com/gdli6177/agent-ship-kit.git
 cd agent-ship-kit
-npm install
+pnpm install
 mkdir -p ~/.cursor/skills
 cp -R skills/ship-setup skills/ship-watchdog skills/ship-contract skills/ship-dispatch skills/ship-inbox skills/ship-notify skills/ship-e2e ~/.cursor/skills/
 ```
@@ -222,9 +225,9 @@ agent-ship check --hard-rules
 
 `agent-ship watchdog` 是确定性检查，里面没有模型。它读 `.agent-ship/events.jsonl` 里的 `worker_progress` 心跳、切片自己那条分支上的最近一次提交，以及 `agent-ship check`。别的分支上的新提交不算进展。只有超时（`stalled`）或路径越界（`drift`）才写入一条 `blocked`。船长看到这条收件箱之后才介入。
 
-没有 `queued` 或 `running` 的切片时，它立刻退出，并卸掉定时器，不跑检查，也不写收件箱。
+没有 `queued` 或 `running` 的切片时，它立刻以 noop 退出，保留已装定时器，不跑检查，也不写收件箱；显式 `watchdog uninstall` 才卸载。
 
-`slice start` 在第一条切片打开时登记定时器。Linux 和 WSL 上，`watchdog install` 用 `crontab -l | … | crontab -` 写入一块带标记的内容，可以重复执行，其他 crontab 行保留。macOS 上把 plist 写到 `~/Library/LaunchAgents`，并执行 `launchctl bootstrap gui/$UID`；卸载时 `bootout` 并删掉这个 plist。`--dry-run` 只打印将要登记的内容，不真的登记。登记失败，或者系统既不是 Linux 也不是 macOS，命令会打印警告。之后只要还有切片在跑而定时器没有生效，`watchdog` 和 `inbox list` 也会警告。
+`slice start` 登记定时器。Linux/WSL 保留其他 crontab 行；macOS 写入权限为 0600 的 plist 并执行 `launchctl bootstrap`。登记失败或已知运行失败会拒绝派工，不留下 running 切片；显式 `--allow-untimed` 才允许人工监督。`watchdog status` / `doctor` 区分注册、运行次数、退出码和完成时间。`--dry-run` 不登记；备份文件不作注册证据。
 
 `~/.config/agent-ship/` 里会留一份 cron 行和 plist 的副本，方便查看，那不是登记本身，也不进仓库。编排器的调度器或人自己的助手例程也可以直接跑 `watchdog`，代替这个定时器。窗口默认 30 分钟，可在 `.agent-ship/limits.json` 里用 `stale_minutes` 修改。
 
@@ -297,8 +300,8 @@ agent-ship notify dry-run --latest \
 
 ```bash
 cd cli
-npm test
-npm run typecheck
+pnpm test
+pnpm typecheck
 ```
 
 ## 目录

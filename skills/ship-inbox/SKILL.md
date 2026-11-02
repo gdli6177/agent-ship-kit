@@ -20,6 +20,15 @@ The captain files an item only after the verifier agrees. A worker's summary
 is not evidence until it points at something the human can open. Templates
 live in the kit at `$HOME/.agent-ship-kit/current/templates/`.
 
+## Parallel lanes and authority (v0.2)
+
+Read `$HOME/.agent-ship-kit/current/docs/owner-lanes.md` (or the actual kit clone). One human-facing captain routes a durable `intake add/list/claim` queue; temporary owners hold independent lanes and coordinate scouts/workers/verifiers. Keep one current proposal **per lane**. The captain delegates repository inspection/tests/Git work and returns a concise conclusion/tradeoff/evidence/recommendation/id list. External channels enqueue only.
+
+The trusted host binds actors, initializes human/captain authority, connects `scripts/host-pre-tool.mjs`, and starts each captain turn with heartbeat outside model-controlled tools. Never choose another actor or reset your own budget. Registered human channel alone freezes/decides/changes limits; captain alone executes notification. Owners/workers only return lane artifacts/inbox. These application guards require host authentication and sandbox enforcement; local env names alone are not authenticated identities.
+
+Use Lane/Owner headers, independent checkouts, optional slice role cards, and `--lane` for routed actions. `slice open` prepares worktree/hooks/admission/pending packet/check; its `spawn_required` means the adapter must still launch a real instance. A missing/malformed role blocks dispatch. Role forbiddens add to contract forbiddens, never widen scope. A frozen file is immutable; append state to events, not its dispatch-log table.
+
+
 ## /ship-inbox
 
 Natural-language requests use the same procedure; slash commands and event ids

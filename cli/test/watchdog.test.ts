@@ -57,7 +57,7 @@ process.exit(2);
   };
 }
 
-test("watchdog is a no-op with no active slices and removes its timer", async () => {
+test("watchdog is a no-op with no active slices and retains its timer until explicit uninstall", async () => {
   const root = await mkdtemp(join(tmpdir(), "agent-ship-noop-"));
   const timerHome = await mkdtemp(join(tmpdir(), "agent-ship-timer-"));
   const previous = process.env.AGENT_SHIP_TIMER_HOME;
@@ -74,13 +74,13 @@ test("watchdog is a no-op with no active slices and removes its timer", async ()
     assert.equal(report.noop, true);
     assert.equal(report.checked, 0);
     assert.deepEqual(report.flagged, []);
-    assert.equal(report.timer, "removed");
-    await assert.rejects(readFile(cronFile(root), "utf8"));
-    await assert.rejects(readFile(launchdFile(root), "utf8"));
+    assert.equal(report.timer, "unchanged");
+    await readFile(cronFile(root), "utf8");
+    await readFile(launchdFile(root), "utf8");
     assert.equal((await listInbox(root, { openOnly: true })).length, 0);
 
     const again = await uninstallWatchdogTimer(root);
-    assert.equal(again.action, "absent");
+    assert.equal(again.action, "removed");
   } finally {
     if (previous === undefined) delete process.env.AGENT_SHIP_TIMER_HOME;
     else process.env.AGENT_SHIP_TIMER_HOME = previous;

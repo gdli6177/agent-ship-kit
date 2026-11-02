@@ -1,6 +1,8 @@
 # Contract card 合同卡
 
-Status: frozen
+Status: draft
+Lane: `<lane_id; default for legacy single lane>`
+Owner: `<temporary owner ref>`
 Contract id: `<contract_id>`
 Supersedes: `<previous contract id, or none>`
 Proposal id: `<proposal_id>`
@@ -11,7 +13,7 @@ Frozen by: `<human>`
 Frozen at: `<ISO-8601>`
 
 冻结合同不可就地修改。要改就新开合同号，并在 Supersedes 指向这一份。
-只有 status 为 `frozen` 才能派工。
+只有 status 为 `frozen` 才能派工。启用 authority 后，由宿主绑定的已登记人类通道调用 `contract freeze` 写入批准回执，不能由 owner 自填人名。
 
 ## Goal 目标
 
@@ -66,9 +68,9 @@ already_automated: `<硬检查已经覆盖的事；不需要就删掉这一行>`
 
 max_parallel: 3
 
-| Slice id | Inputs the worker may see 工人能看到的输入 | Done when 完成标准 |
-| --- | --- | --- |
-| `<slice_id>` | 本合同路径、本切片、允许/禁止路径。不要附上船长对话。 | `<acceptance lines this slice covers>` |
+| Slice id | role | Inputs the worker may see 工人能看到的输入 | Done when 完成标准 |
+| --- | --- | --- | --- |
+| `<slice_id>` | generic-worker | 本合同路径、本切片、允许/禁止路径。不要附上船长对话。 | `<acceptance lines this slice covers>` |
 
 ## Standing context 长期上下文
 
@@ -82,12 +84,12 @@ max_parallel: 3
 
 - 工人提示词 = 本切片 + 它负责的验收项 + 允许路径 + 禁止路径。
 - 工人拿不到船长对话、密钥，也没有合并或部署的许可。
-- 工人把证据交回船长。卡住或需要中途拍板时，也只回给船长，由船长写入 inbox（`blocked` / `needs_approval`）。人不要去打开工人会话。
+- 工人把证据交回本 lane 的 owner，由独立 verifier 核验。卡住或需要中途拍板时，owner 写入 inbox（`blocked` / `needs_approval`）。人不要去打开工人会话。
 - 工人不直接通知人。
 
 ## Dispatch log 派工记录
 
-只追加，不改冻结条款。状态变化时追加一行，同一 task id 以最后一行为准。
+派工和状态写入 `.agent-ship/events.jsonl`，不追加到已冻结的文件（整个合同内容受批准摘要保护）。下表只在草稿阶段填写规划；实时记录看事件流。
 
 | Slice id | Task id | Worker ref | Status | Dispatched at |
 | --- | --- | --- | --- | --- |

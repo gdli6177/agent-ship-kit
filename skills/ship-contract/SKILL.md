@@ -3,7 +3,7 @@ name: ship-contract
 description: >-
   Handle new feature, fix or change requests in an agent-ship-kit captain
   conversation, including 加一个功能、修一下这个问题、另开一个需求 and
-  按这个方案开始. Draft a proposal, then freeze only after explicit human
+  按这个方案开始、继续、接管、收口、上测试、上线、你来做、这个你处理. Draft a proposal, then freeze only after explicit human
   acceptance of its exact scope. Also supports /ship-contract and freeze.
 ---
 
@@ -17,6 +17,15 @@ Read `proposal-card.md` and `contract-card.md` from the installed kit at
 manual clone keeps the same files under `templates/`. Do not invent a second
 card format.
 
+## Parallel lanes and authority (v0.2)
+
+Read `$HOME/.agent-ship-kit/current/docs/owner-lanes.md` (or the actual kit clone). One human-facing captain routes a durable `intake add/list/claim` queue; temporary owners hold independent lanes and coordinate scouts/workers/verifiers. Keep one current proposal **per lane**. The captain delegates repository inspection/tests/Git work and returns a concise conclusion/tradeoff/evidence/recommendation/id list. External channels enqueue only.
+
+The trusted host binds actors, initializes human/captain authority, connects `scripts/host-pre-tool.mjs`, and starts each captain turn with heartbeat outside model-controlled tools. Never choose another actor or reset your own budget. Registered human channel alone freezes/decides/changes limits; captain alone executes notification. Owners/workers only return lane artifacts/inbox. These application guards require host authentication and sandbox enforcement; local env names alone are not authenticated identities.
+
+Use Lane/Owner headers, independent checkouts, optional slice role cards, and `--lane` for routed actions. `slice open` prepares worktree/hooks/admission/pending packet/check; its `spawn_required` means the adapter must still launch a real instance. A missing/malformed role blocks dispatch. Role forbiddens add to contract forbiddens, never widen scope. A frozen file is immutable; append state to events, not its dispatch-log table.
+
+
 ## When to use
 
 - Intake is concrete enough to name an outcome and a check.
@@ -29,10 +38,24 @@ card format.
 - A frozen contract already covers the slice and its text is not changing. Use `ship-dispatch`.
 - The ask is to merge, release, or deploy. Refuse. This kit does not do those.
 
+## Intake and guard
+
+收到执行类请求先运行 `agent-ship intake --text "<原文>"`，复用明确需求的 id。
+只读调查可以完善方案；不得改产品、运行长测试、触发 CI 或派工。优先在本轮
+展示范围与验收，不把调查无限延伸成执行。恢复时先 doctor，不借用旧需求授权。
+
+无匹配冻结合同时回复：已登记为 `<proposal_id>`，下面是范围与验收，确认后派工。
+执行前运行 guard；失败即停止修改类工具。CLI 和 Git hook 不能拦截全部工具调用，
+宿主需要更强管控时须在 pre-tool 边界调用 guard。
+
+只有人明确要求直接执行且范围完整，才可用 `intake --direct`，记录 allowed、
+forbidden、accepted-by、accepted-text。不得把“继续”当作直接执行授权。
+
 ## Discussion mode
 
-The human describes an outcome; you manage the procedure. Inspect the project
-to resolve technical details yourself, suggest acceptance checks and ask only
+The human describes an outcome; you manage the procedure. Ask the lane owner
+for a read-only scout card (conclusion, paths, acceptance commands, risks and evidence),
+then propose acceptance checks without inspecting repository source yourself. Ask only
 questions that materially affect the result. Show a concise goal, scope and
 acceptance summary, with details available on request. Generate and retain ids
 yourself; never require the human to copy them between skills.
@@ -48,7 +71,7 @@ accepted version cannot be recovered, ask one focused clarification. A bare
 While the card is `draft`, talk freely. Do not treat the conversation as a
 freeze, and do not spawn a worker.
 
-- Keep exactly one current proposal. Alternatives go in "Other options" on
+- Keep exactly one current proposal per lane. Alternatives go in "Other options" on
   that card. If an older draft exists, set it to `superseded` and stop
   showing it as a choice.
 - After every human turn that changes scope, acceptance, allowed paths,
@@ -62,7 +85,7 @@ freeze, and do not spawn a worker.
 
 ## 规范与经验准备
 
-形成方案前，用 `agent-ship team context --tag <task-topic> [--project <project-id>]`
+形成方案前，用 `agent-ship team context --auto --tag <task-topic> [--project <project-id>]`
 获取引用，读取适用的团队手册和项目规则。只加载与需求匹配的已验证经验摘要；
 没有匹配时可以为零，必读规则不能因为经验预算而省略。
 将适用规则和经验编号作为切片输入；不复制全部历史，不附上船长对话。
@@ -70,8 +93,8 @@ freeze, and do not spawn a worker.
 
 ## Procedure
 
-1. Copy `$HOME/.agent-ship-kit/current/templates/proposal-card.md` to `.agent-ship/proposals/<proposal_id>.md`
-   on the first drafting turn. Status stays `draft`. Fill Allowed paths and
+1. Run intake first, then fill its registered proposal using `$HOME/.agent-ship-kit/current/templates/proposal-card.md`
+   at `.agent-ship/proposals/<proposal_id>.md`; preserve Proposal id, Request and Created at. Status stays `draft`. Fill Allowed paths and
    Forbidden paths. Put merge and production deploy in the out-of-scope list
    even if the human did not mention them. Fill Human review budget:
    `human_reviews_expected` is how many human reviews this line still needs,
@@ -87,7 +110,7 @@ freeze, and do not spawn a worker.
    the captain deciding for itself, a worker or another agent cannot freeze.
 4. On freeze, copy the accepted text into
    `.agent-ship/contracts/<contract_id>.md` using `$HOME/.agent-ship-kit/current/templates/contract-card.md`.
-   Set status to `frozen`. Record the exact plan in `Accepted text`, the human
+   Prepare status `draft`. In managed authority mode the registered human channel runs `contract freeze` with the exact accepted text; do not self-sign by editing names. In legacy mode record the exact plan in `Accepted text`, the human
    in `Accepted by`, the time in `Accepted at`, and `Proposal id`. Also record
    who froze it and when, and copy Allowed paths, Forbidden paths, and the
    Human review budget (the same count, the same purpose list, and the same
@@ -101,7 +124,7 @@ freeze, and do not spawn a worker.
    higher than the global cap in `templates/workflow.md`).
 5. Split the work into slices. One slice is one worker. Each slice lists the
    inputs that worker may see and the acceptance lines it owns.
-6. Leave the dispatch log empty. `ship-dispatch` appends to it.
+6. Leave the dispatch log empty. Dispatch writes the event log; never append to a frozen contract.
 7. If the human also authorized starting, hand off directly to `ship-dispatch`.
    If they only froze, report that it is ready without claiming work started.
 
@@ -111,7 +134,7 @@ Do not edit a file whose status is `frozen`.
 
 1. Stop the slices the change affects. Leave finished slices that the new text does not touch; their branches and packets stay.
 2. Draft a new contract id. Set `Supersedes` to the old id. Do not spawn from the draft.
-3. The owner re-freezes the new contract. Until that freeze, the old contract still covers slices you did not stop.
+3. The human re-freezes the new contract. Until that freeze, the old contract still covers slices you did not stop.
 4. Dispatch only the stopped slices, against the new id, and only after the new freeze.
 
 ## Worker boundary, written into the contract
@@ -126,3 +149,10 @@ are not ready to freeze.
 When the human asks to start work, hand off to `ship-dispatch` with the
 contract path. Do not ask for a second command or repeat an already granted
 start approval. A freeze-only decision does not imply dispatch authorization.
+
+## 纠正与收尾
+
+纠正立即用 correction add 留痕，派工前也可用。event 仅记一次性事实；lesson /
+handbook 需 project 或显式 team，并填 when/action。保留历史风险，按纠正注记
+修订当前方案。收尾运行 learning extract 与 learning review，记录 none/candidate。
+经验仅由维护者审核激活，不自动改手册、合同范围或硬规则。

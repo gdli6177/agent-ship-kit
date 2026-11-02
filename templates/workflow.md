@@ -1,6 +1,6 @@
 # Delivery workflow 交付流程
 
-One person, one captain thread, from intake to ship. The captain routes and does not execute the slice, even when the edit looks small, and does not wait out a worker before taking the next request. Workers exist only as
+One person, one captain thread, from intake to ship. Independent requests have temporary owner lanes; see [owner-lanes](../docs/owner-lanes.md). The captain routes and does not execute the slice, even when the edit looks small, and does not wait out a worker before taking the next request. Workers exist only as
 adapter tasks spawned from a frozen contract. Nothing in this loop merges to
 main or deploys to production.
 
@@ -29,7 +29,7 @@ gitignored. `.agent-ship/.gitkeep` is the only committed marker.
 
 | Id | Where it comes from | Used as |
 | --- | --- | --- |
-| `proposal_<slug>` | captain, while drafting | the one current proposal |
+| `proposal_<slug>` | captain, while drafting | the one current proposal in its lane |
 | `contract_<slug>` | captain, at freeze | contract card; slices cite it |
 | `<slice_id>` | contract table | one worker |
 | task id | chosen before CLI admission, mapped by adapter `spawn` | `source_task_id`, packet filename |
@@ -41,7 +41,7 @@ Slugs are lowercase ascii, digits, and hyphens.
 
 | Word | Means |
 | --- | --- |
-| `draft` | The one current proposal. Not dispatchable. |
+| `draft` | The one current proposal per lane. Not dispatchable. |
 | `superseded` | An older proposal. Not a choice. |
 | `frozen` | Human has accepted this contract text. Dispatchable. Immutable. |
 | `queued` / `running` | Adapter states. Count toward both caps below. |
@@ -76,7 +76,7 @@ ask the human only for material intent, scope, permissions and decisions.
 
 ## Discussion and freeze
 
-While the proposal is `draft`, the captain talks freely and keeps that one
+While the proposal is `draft`, the captain talks freely and keeps that lane’s one
 card current. Each round appends a "What changed 本轮变更" note. Do not put a
 second proposal in front of the human. The proposal records a human review
 budget (`human_reviews_expected` plus what each review is for). The contract
@@ -109,7 +109,7 @@ Changing a frozen contract does not edit that file. The captain stops the slices
 
 ## Order of operations
 
-1. Intake stays in the captain thread. Keep one proposal card current.
+1. Intake stays in the captain thread. Keep one proposal card current per lane.
 2. Stop on open questions that change acceptance or the path lists.
 3. Human freezes. Write the contract card with status `frozen`.
 4. Dispatch only while both parallel caps allow it.

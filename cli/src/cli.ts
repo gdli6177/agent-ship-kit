@@ -1,4 +1,5 @@
-import { readFile } from "node:fs/promises";
+import { readFile, writeFile, mkdir, rename } from "node:fs/promises";
+import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import {
   addInboxItem,
@@ -25,9 +26,17 @@ import {
   repeatedNoteCount,
   type PromoteInput,
 } from "./hard-rules.js";
+import { addIntake, claimIntake, intakeEntries, transitionIntake, briefStatus, captainHeartbeat } from "./intake-queue.js";
+import { initializeAuthority, actorIdentity, readAuthority, freezeContract, setHumanLimits, assertCaptainNotification } from "./authority.js";
+import { listRoles, showRole } from "./roles.js";
+import { guardTool, type GuardedTool } from "./tool-guard.js";
+import { openSlice } from "./slice-open.js";
+import { readEvents } from "./storage.js";
+import { intake, guard, doctor, writeEvent } from "./intake.js";
+import { addCorrection, extractLearning, reviewLearning, proposeHandbook, recordLessonUse } from "./corrections.js";
 import { setupProject } from "./setup.js";
 import { addLesson, checkLearning, reviewLesson, showLesson, teamContext, pendingLearning } from "./learning.js";
-import { activeSlices, installWatchdogTimer, runWatchdog, startSlice, updateSlice, timerIsActive, uninstallWatchdogTimer } from "./watchdog.js";
+import { allSlices, activeSlices, installWatchdogTimer, runWatchdog, startSlice, updateSlice, watchdogStatus, watchdogDoctor, uninstallWatchdogTimer } from "./watchdog.js";
 import type { AttentionType, EventLinks, InboxRecord, Priority } from "./types.js";
 
 export interface Io {
@@ -47,8 +56,32 @@ const defaultIo: Io = {
 const USAGE = `agent-ship — local inbox, path check, and notify
 
 Usage:
+  agent-ship intake add --text TEXT --project ID [--id ID] [--by REF] [--channel chat|cli|im|agent|ci] [--root DIR]
+  agent-ship intake list [--state open|claimed|done|dropped|all] [--root DIR]
+  agent-ship intake claim ID --by OWNER [--lane ID] [--root DIR]
+  agent-ship intake update ID --state done|dropped [--root DIR]
+  agent-ship status [--brief] [--root DIR]
+  agent-ship status decisions [--root DIR]
+  agent-ship captain heartbeat [--busy-until ISO] [--root DIR]
+  agent-ship authority init --human REF --captain REF [--root DIR]
+  agent-ship authority status [--root DIR]
+  agent-ship contract freeze --contract ID --by HUMAN --accepted-text TEXT [--root DIR]
+  agent-ship limits set --global-max-parallel N --by HUMAN [--root DIR]
+  agent-ship role list|show [ID] [--root DIR]
+  agent-ship guard tool --input FILE [--repo DIR] [--root DIR]
+  agent-ship guard command --argv JSON [--root DIR]
+  agent-ship slice open (same arguments as slice start; --repo required; prepares checkout/packet but does not spawn)
+  agent-ship intake --text TEXT [--id ID] [--root DIR]
+  agent-ship intake --direct --text TEXT --allowed GLOB --forbidden GLOB --accepted-by HUMAN --accepted-text TEXT [--id ID] [--root DIR]
+  agent-ship guard [--contract ID] [--repo DIR] [--staged] [--root DIR]
+  agent-ship doctor [--repo DIR] [--root DIR]
+  agent-ship correction add --text TEXT --scope event|lesson|handbook --source proposal:ID|contract:ID|task:ID|session:ID --corrected-by HUMAN [--project ID|--team] [--when TEXT --action TEXT] [--tag TAG ...] [--root DIR]
+  agent-ship learning extract [--since ISO] [--project ID] [--dry-run] [--root DIR]
+  agent-ship learning review [--outcome none|candidate --reason TEXT] [--project ID] [--root DIR]
+  agent-ship handbook propose --from-lesson ID [--root DIR]
+  agent-ship watchdog status|doctor [--root DIR]
   agent-ship setup|init [--state-root DIR] [--shared] [--handbook FILE] [--lessons DIR] [--uninstall] [--purge] [--root DIR]
-  agent-ship team context [--tag TAG ...] [--project ID] [--repo DIR] [--root DIR]
+  agent-ship team context [--auto] [--tag TAG ...] [--project ID] [--repo DIR] [--root DIR]
   agent-ship lesson search [--tag TAG ...] [--project ID] [--root DIR]
   agent-ship lesson show --id ID [--root DIR]
   agent-ship lesson add --input FILE [--auto] [--demand TAG ...] [--root DIR]
@@ -64,7 +97,7 @@ Usage:
   agent-ship watchdog [--stale-minutes N] [--root DIR]
   agent-ship watchdog install|uninstall [--dry-run] [--root DIR]
   agent-ship slice start --contract ID --slice ID --source-task-id ID
-                       --title TEXT --summary TEXT [--repo DIR] [--base REF] [--replace] [--worker REF] [--proposal ID] [--tag TAG ...] [--project ID] [--root DIR]
+                       --title TEXT --summary TEXT [--repo DIR] [--base REF] [--replace] [--allow-untimed] [--worker REF] [--proposal ID] [--tag TAG ...] [--project ID] [--root DIR]
   agent-ship slice update --source-task-id ID --status STATUS [--summary TEXT] [--root DIR]
   agent-ship status --stale [--stale-minutes N] [--root DIR]
   agent-ship inbox add --title TEXT --summary TEXT --source-task-id ID
@@ -102,6 +135,8 @@ Exit 0 when they match; non-zero on regression. Use it when changing ship-* skil
 `;
 
 const VALUE_OPTIONS = new Set([
+  "lane", "owner", "by", "channel", "state", "human", "captain", "busy-until", "global-max-parallel", "role", "argv",
+  "text", "scope", "when", "corrected-by", "since", "from-lesson", "accepted-by", "accepted-text", "allowed", "forbidden",
   "title",
   "summary",
   "priority",
@@ -136,8 +171,8 @@ const VALUE_OPTIONS = new Set([
   "handbook", "lessons", "tag", "project", "proposal", "input", "reviewed-by", "review-after", "outcome", "candidate-id", "trigger", "demand", "fixture",
   "kind", "message", "source", "command-hint", "promote", "glob", "inbox",
 ]);
-const REPEATABLE = new Set(["evidence", "tag", "candidate-id", "trigger", "glob", "demand"]);
-const BOOL_FLAGS = new Set(["json", "latest", "help", "all", "shared", "uninstall", "purge", "staged", "stale", "dry-run", "replace", "hard-rules", "auto"]);
+const REPEATABLE = new Set(["evidence", "tag", "candidate-id", "trigger", "glob", "demand", "allowed", "forbidden"]);
+const BOOL_FLAGS = new Set(["json", "latest", "help", "all", "shared", "uninstall", "purge", "staged", "stale", "dry-run", "replace", "hard-rules", "auto", "direct", "team", "allow-untimed", "brief"]);
 
 interface ParsedArgs {
   positionals: string[];
@@ -254,6 +289,14 @@ async function inboxAdd(parsed: ParsedArgs, io: Io): Promise<number> {
   const evidence = parsed.values.get("evidence") ?? [];
   const typeText = one(parsed.values, "type");
   const type: AttentionType | undefined = typeText === undefined ? undefined : assertAttentionType(typeText);
+  let applicable_lessons: Awaited<ReturnType<typeof teamContext>>["lessons"] = [];
+  if ((type ?? "needs_review") === "needs_review") {
+    const dispatch = (await readEvents(root)).filter(record => record.type === "worker_dispatched" && record.source_task_id === requireOne(parsed.values, "source-task-id")).at(-1);
+    const project = one(parsed.values, "project") ?? (typeof dispatch?.project_id === "string" ? dispatch.project_id : undefined);
+    const context = await teamContext(root, { auto: true, project, tags: parsed.values.get("tag") ?? (Array.isArray(dispatch?.context_tags) ? dispatch.context_tags.map(String) : undefined) });
+    applicable_lessons = context.lessons;
+
+  }
   const event = await addInboxItem(root, {
     type,
     title: requireOne(parsed.values, "title"),
@@ -273,11 +316,14 @@ async function inboxAdd(parsed: ParsedArgs, io: Io): Promise<number> {
     },
     reason: one(parsed.values, "reason") ? assertBlockReason(one(parsed.values, "reason") as string) : undefined,
     id: one(parsed.values, "id"),
+    laneId: one(parsed.values, "lane"),
+    ownerRef: one(parsed.values, "owner"),
   });
   if (event.type === "needs_review" && event.priority === "high" && event.evidence_urls.length === 0) {
     io.stderr("warning: high priority needs_review has no evidence URLs and will not be paged\n");
   }
-  io.stdout(`${JSON.stringify(event, null, 2)}\n`);
+  await recordLessonUse(root, applicable_lessons.map(l => l.id), "needs_review", event.source_task_id, one(parsed.values, "project"));
+  io.stdout(`${JSON.stringify(applicable_lessons.length ? { ...event, applicable_lessons } : event, null, 2)}\n`);
   return 0;
 }
 
@@ -290,6 +336,7 @@ async function inboxList(parsed: ParsedArgs, io: Io): Promise<number> {
   const items = await listInbox(root, {
     priority,
     type,
+    lane: one(parsed.values, "lane"),
     openOnly: !parsed.flags.has("all"),
   });
   await warnIfTimerInactive(root, io);
@@ -342,6 +389,11 @@ async function inboxDecide(parsed: ParsedArgs, io: Io): Promise<number> {
     throw new Error("usage: inbox decide <id> accept|changes_requested|reject");
   }
   const decision = assertDecision(decisionText);
+  const selectedLane = one(parsed.values, "lane");
+  if (selectedLane) {
+    const item = (await readInbox(one(parsed.values, "root") ?? process.cwd())).find(item => item.id === subjectId);
+    if ((item?.lane_id ?? "default") !== selectedLane) throw new Error("review item belongs to a different lane");
+  }
   if (parsed.values.has("kind")) {
     throw new Error("--kind is for promote; inbox decide uses --promote hook|contract|verify");
   }
@@ -374,6 +426,7 @@ async function inboxDecide(parsed: ParsedArgs, io: Io): Promise<number> {
       for (const line of promotionSuggestions(counts, noteCount)) io.stderr(`${line}\n`);
     }
   }
+  if (decision === "changes_requested" && note) await extractLearning(root, { project: one(parsed.values, "project") });
   return 0;
 }
 
@@ -428,6 +481,7 @@ async function notifyCommand(parsed: ParsedArgs, io: Io, execute: boolean): Prom
     return 1;
   }
 
+  await assertCaptainNotification(one(parsed.values, "root") ?? process.cwd());
   const exitCode = await executeArgv(plan.argv, io);
   const result = {
     ...plan,
@@ -460,7 +514,8 @@ async function runSliceStart(parsed: ParsedArgs, io: Io): Promise<number> {
   const root = one(parsed.values, "root") ?? process.cwd();
   const contractId = requireOne(parsed.values, "contract");
   const sliceId = requireOne(parsed.values, "slice");
-  const started = await startSlice(root, {
+  const prepare = parsed.positionals[1] === "open" ? openSlice : startSlice;
+  const started = await prepare(root, {
     title: requireOne(parsed.values, "title"),
     summary: requireOne(parsed.values, "summary"),
     sourceTaskId: requireOne(parsed.values, "source-task-id"),
@@ -474,6 +529,8 @@ async function runSliceStart(parsed: ParsedArgs, io: Io): Promise<number> {
     tags: parsed.values.get("tag"),
     project: one(parsed.values, "project"),
     proposalId: one(parsed.values, "proposal"),
+    allowUntimed: parsed.flags.has("allow-untimed"),
+    lane: one(parsed.values, "lane"),
     threadRefs: {
       pr: one(parsed.values, "thread-pr"),
       issue: one(parsed.values, "thread-issue"),
@@ -481,6 +538,7 @@ async function runSliceStart(parsed: ParsedArgs, io: Io): Promise<number> {
     },
   });
   io.stdout(`${JSON.stringify(started, null, 2)}\n`);
+  if (!started.monitored) io.stderr("warning: slice admitted with explicit manual supervision; watchdog is not healthy/registered\n");
   return 0;
 }
 
@@ -491,7 +549,24 @@ async function runWatchdogCommand(parsed: ParsedArgs, io: Io): Promise<number> {
   if (staleMinutes !== undefined && (!Number.isFinite(staleMinutes) || staleMinutes <= 0)) {
     throw new Error("--stale-minutes must be a positive number");
   }
-  const report = await runWatchdog(root, { staleMinutes });
+  const at = new Date().toISOString();
+  const healthPath = join(root, ".agent-ship/watchdog-health.json");
+  let lastSuccess: string | undefined;
+  try { const prior = JSON.parse(await readFile(healthPath, "utf8")) as { last_success_at?: string }; lastSuccess = prior.last_success_at; } catch { /* First run or damaged health record: replace with this result. */ }
+  async function recordHealth(code: number) {
+    const temporary = `${healthPath}.${process.pid}.tmp`;
+    await writeFile(temporary, JSON.stringify({ last_run_at: at, last_success_at: code === 0 ? at : lastSuccess ?? null, last_exit_code: code }), { mode: 0o600 });
+    await rename(temporary, healthPath);
+  }
+  let report;
+  await mkdir(join(root, ".agent-ship"), { recursive: true });
+  try {
+    report = await runWatchdog(root, { staleMinutes });
+    await recordHealth(0);
+  } catch (error) {
+    await recordHealth(1);
+    throw error;
+  }
   if (!report.noop) await warnIfTimerInactive(root, io);
   io.stdout(`${JSON.stringify(report, null, 2)}\n`);
   return 0;
@@ -500,8 +575,9 @@ async function runWatchdogCommand(parsed: ParsedArgs, io: Io): Promise<number> {
 async function warnIfTimerInactive(root: string, io: Io): Promise<void> {
   const slices = await activeSlices(root);
   if (slices.length === 0) return;
-  if (await timerIsActive(root)) return;
-  io.stderr("warning: slices are active but the watchdog timer is not registered. Run: agent-ship watchdog install\n");
+  const status = await watchdogStatus(root);
+  if (status.registered && status.healthy !== false) return;
+  io.stderr(`warning: active slices are not reliably monitored: ${status.warning ?? "timer inactive"}. Run: agent-ship watchdog doctor\n`);
 }
 
 function printTimer(result: { warning?: string }, io: Io): void {
@@ -533,8 +609,29 @@ async function runCheck(parsed: ParsedArgs, io: Io): Promise<number> {
   for (const warning of result.human_review_warnings ?? []) {
     io.stderr(`warning: ${warning}\n`);
   }
-  io.stdout(`${JSON.stringify(result, null, 2)}\n`);
+  const dispatch = (await readEvents(root)).filter(event => event.type === "worker_dispatched" && event.contract_id === contract && (!one(parsed.values, "slice") || event.slice_id === one(parsed.values, "slice"))).at(-1);
+  const project = one(parsed.values, "project") ?? (typeof dispatch?.project_id === "string" ? dispatch.project_id : undefined);
+  const task = typeof dispatch?.source_task_id === "string" ? dispatch.source_task_id : contract ?? "check";
+  const context = await teamContext(root, { auto: true, project, tags: parsed.values.get("tag") ?? (Array.isArray(dispatch?.context_tags) ? dispatch.context_tags.map(String) : undefined), repo: options.repoRoot });
+  const applicable_lessons = context.lessons;
+  await recordLessonUse(root, applicable_lessons.map(l => l.id), "check", task, project);
+  if (!result.ok) {
+    await writeEvent(root, { type: "scope_discovered", title: "Contract check failed", summary: "Check recorded scope and acceptance before editing or resuming.", source_task_id: task, ...(contract ? { contract_id: contract } : {}), ...(project ? { project } : {}), tags: ["scope"], when: "When a contract check fails.", action: "Inspect the failing paths and revise scope with the human before proceeding." });
+    await extractLearning(root);
+  }
+  io.stdout(`${JSON.stringify({ ...result, applicable_lessons }, null, 2)}\n`);
   return result.ok ? 0 : 1;
+}
+
+async function readGuardInput(path: string): Promise<string> {
+  if (path !== "-") return readFile(path, "utf8");
+  const chunks: Buffer[] = []; let size = 0;
+  for await (const chunk of process.stdin) {
+    const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+    size += buffer.length; if (size > 65536) throw new Error("host tool event exceeds 64 KB");
+    chunks.push(buffer);
+  }
+  return Buffer.concat(chunks).toString("utf8");
 }
 
 export async function main(argv: string[], io: Io = defaultIo): Promise<number> {
@@ -557,11 +654,76 @@ export async function main(argv: string[], io: Io = defaultIo): Promise<number> 
     const root = one(parsed.values, "root") ?? process.cwd();
     if (parsed.flags.has("handbook-queue") && !(group === "lesson" && sub === "pending")) throw new Error("--handbook requires a value");
     if (group === "lesson" && sub === "pending" && one(parsed.values, "handbook") !== undefined) throw new Error("--handbook does not take a value on lesson pending");
-    if (parsed.flags.has("auto") && !(group === "lesson" && sub === "add")) throw new Error("--auto is only valid with lesson add");
+    if (parsed.flags.has("auto") && !(group === "lesson" && sub === "add") && !(group === "team" && sub === "context")) throw new Error("--auto is only valid with lesson add or team context");
     if ((parsed.values.get("demand")?.length ?? 0) > 0 && !(group === "lesson" && sub === "add" && parsed.flags.has("auto"))) throw new Error("--demand is only valid with lesson add --auto");
     if ((group === "team" && sub === "context") || (group === "lesson" && sub === "search")) {
-      const context = await teamContext(root, { tags: parsed.values.get("tag"), project: one(parsed.values, "project"), repo: one(parsed.values, "repo") });
+      const context = await teamContext(root, { tags: parsed.values.get("tag"), project: one(parsed.values, "project"), repo: one(parsed.values, "repo"), role: one(parsed.values, "role"), auto: parsed.flags.has("auto") });
+      if (parsed.flags.has("auto")) await recordLessonUse(root, context.lessons.map(l => l.id), "team_context", one(parsed.values, "source-task-id"), one(parsed.values, "project"));
       io.stdout(`${JSON.stringify(context, null, 2)}\n`); return 0;
+    }
+    if (group === "intake" && sub) {
+      let result;
+      if (sub === "add") result = await addIntake(root, { text: requireOne(parsed.values, "text"), project: requireOne(parsed.values, "project"), id: one(parsed.values, "id"), by: one(parsed.values, "by"), channel: one(parsed.values, "channel") });
+      else if (sub === "list") result = await intakeEntries(root, one(parsed.values, "state") ?? "open");
+      else if (sub === "claim") result = await claimIntake(root, parsed.positionals[2] ?? "", requireOne(parsed.values, "by"), one(parsed.values, "lane"));
+      else if (sub === "update") result = await transitionIntake(root, parsed.positionals[2] ?? "", requireOne(parsed.values, "state"));
+      else throw new Error("unknown intake command");
+      io.stdout(`${JSON.stringify(result, null, 2)}\n`); return 0;
+    }
+    if (group === "authority") {
+      const result = sub === "init" ? await initializeAuthority(root, requireOne(parsed.values, "human"), requireOne(parsed.values, "captain")) : sub === "status" ? { configured: !!await readAuthority(root), actor: await actorIdentity(root) } : null;
+      if (!result) throw new Error("unknown authority command");
+      io.stdout(`${JSON.stringify(result, null, 2)}\n`); return 0;
+    }
+    if (group === "contract" && sub === "freeze") {
+      io.stdout(`${JSON.stringify(await freezeContract(root, requireOne(parsed.values, "contract"), requireOne(parsed.values, "by"), requireOne(parsed.values, "accepted-text")), null, 2)}\n`); return 0;
+    }
+    if (group === "limits" && sub === "set") {
+      io.stdout(`${JSON.stringify(await setHumanLimits(root, requireOne(parsed.values, "by"), Number(requireOne(parsed.values, "global-max-parallel"))), null, 2)}\n`); return 0;
+    }
+    if (group === "role") {
+      const result = sub === "list" ? await listRoles(root) : sub === "show" ? await showRole(root, parsed.positionals[2] ?? requireOne(parsed.values, "id")) : null;
+      if (!result) throw new Error("unknown role command");
+      io.stdout(`${JSON.stringify(result, null, 2)}\n`); return 0;
+    }
+    if (group === "captain" && sub === "heartbeat") {
+      io.stdout(`${JSON.stringify(await captainHeartbeat(root, one(parsed.values, "busy-until")), null, 2)}\n`); return 0;
+    }
+    if (group === "status" && !parsed.flags.has("stale")) {
+      const result = await briefStatus(root);
+      io.stdout(`${JSON.stringify(sub === "decisions" ? { decision_list: result.decision_list, omitted: result.decisions_omitted } : result, null, 2)}\n`); return 0;
+    }
+    if (group === "guard" && (sub === "tool" || sub === "command")) {
+      const input = sub === "command" ? { tool: "shell", argv: JSON.parse(requireOne(parsed.values, "argv")) } : JSON.parse(await readGuardInput(requireOne(parsed.values, "input")));
+      const result = await guardTool(root, input as GuardedTool, one(parsed.values, "repo"));
+      io.stdout(`${JSON.stringify(result, null, 2)}\n`); return result.allowed ? 0 : 2;
+    }
+    if (group === "intake" && !sub) {
+      const result = await intake(root, { text: requireOne(parsed.values, "text"), id: one(parsed.values, "id"), direct: parsed.flags.has("direct"), allowed: parsed.values.get("allowed"), forbidden: parsed.values.get("forbidden"), acceptedBy: one(parsed.values, "accepted-by"), acceptedText: one(parsed.values, "accepted-text"), lane: one(parsed.values, "lane"), owner: one(parsed.values, "owner") });
+      io.stdout(`${JSON.stringify(result, null, 2)}\n`); return 0;
+    }
+    if (group === "guard" && !sub) {
+      const result = await guard(root, { contract: one(parsed.values, "contract"), repo: one(parsed.values, "repo"), staged: parsed.flags.has("staged"), lane: one(parsed.values, "lane") });
+      io.stdout(`${JSON.stringify(result, null, 2)}\n`); return result.ok ? 0 : 1;
+    }
+    if (group === "doctor" && !sub) {
+      const setup = await doctor(root, one(parsed.values, "repo") ?? root);
+      const watchdog = await watchdogDoctor(root);
+      const active = await activeSlices(root);
+      const result = { ...setup, ok: setup.ok && (!active.length || watchdog.ok), execution_ready: setup.execution.ok, watchdog, learning: await reviewLearning(root) };
+      io.stdout(`${JSON.stringify(result, null, 2)}\n`); return result.ok ? 0 : 1;
+    }
+    if (group === "correction" && sub === "add") {
+      const result = await addCorrection(root, { text: requireOne(parsed.values, "text"), scope: requireOne(parsed.values, "scope"), source: requireOne(parsed.values, "source"), correctedBy: requireOne(parsed.values, "corrected-by"), project: one(parsed.values, "project"), team: parsed.flags.has("team"), when: one(parsed.values, "when"), action: one(parsed.values, "action"), tags: parsed.values.get("tag"), evidence: parsed.values.get("evidence") });
+      io.stdout(`${JSON.stringify(result, null, 2)}\n`); return 0;
+    }
+    if (group === "learning") {
+      const result = sub === "extract" ? await extractLearning(root, { since: one(parsed.values, "since"), project: one(parsed.values, "project"), dryRun: parsed.flags.has("dry-run") }) : sub === "review" ? await reviewLearning(root, one(parsed.values, "outcome"), one(parsed.values, "reason"), one(parsed.values, "project")) : null;
+      if (!result) throw new Error("unknown learning command");
+      io.stdout(`${JSON.stringify(result, null, 2)}\n`); return "ok" in result && !result.ok ? 1 : 0;
+    }
+    if (group === "handbook" && sub === "propose") {
+      io.stdout(`${JSON.stringify(await proposeHandbook(root, requireOne(parsed.values, "from-lesson")), null, 2)}\n`); return 0;
     }
     if (group === "lesson") {
       let result: unknown;
@@ -577,6 +739,11 @@ export async function main(argv: string[], io: Io = defaultIo): Promise<number> 
     if (group === "check" && sub === undefined) return await runCheck(parsed, io);
     if (group === "eval" && sub === undefined) return await runEval(parsed, io);
     if (group === "promote" && sub === undefined) return await runPromote(parsed, io);
+    if (group === "watchdog" && (sub === "status" || sub === "doctor")) {
+      const result = sub === "status" ? await watchdogStatus(root) : await watchdogDoctor(root);
+      io.stdout(`${JSON.stringify(result, null, 2)}\n`);
+      return "ok" in result ? result.ok ? 0 : 1 : result.registered && result.healthy !== false ? 0 : 1;
+    }
     if (group === "watchdog" && sub === "install") {
       const root = one(parsed.values, "root") ?? process.cwd();
       const result = await installWatchdogTimer(root, { dryRun: parsed.flags.has("dry-run") });
@@ -592,9 +759,13 @@ export async function main(argv: string[], io: Io = defaultIo): Promise<number> 
       return result.warning ? 1 : 0;
     }
     if (group === "watchdog" && sub === undefined) return await runWatchdogCommand(parsed, io);
-    if (group === "slice" && sub === "start") return await runSliceStart(parsed, io);
+    if (group === "slice" && (sub === "start" || sub === "open")) return await runSliceStart(parsed, io);
     if (group === "slice" && sub === "update") {
-      const result = await updateSlice(one(parsed.values, "root") ?? process.cwd(), requireOne(parsed.values, "source-task-id"), requireOne(parsed.values, "status"), one(parsed.values, "summary"), one(parsed.values, "worker"));
+      if (one(parsed.values, "lane")) {
+        const task = (await allSlices(root)).find(task => task.source_task_id === one(parsed.values, "source-task-id"));
+        if ((task?.lane_id ?? "default") !== one(parsed.values, "lane")) throw new Error("task belongs to a different lane");
+      }
+      const result = await updateSlice(one(parsed.values, "root") ?? process.cwd(), requireOne(parsed.values, "source-task-id"), requireOne(parsed.values, "status"), one(parsed.values, "summary"), one(parsed.values, "worker"), parsed.flags.has("allow-untimed"));
       io.stdout(`${JSON.stringify(result, null, 2)}\n`);
       return 0;
     }

@@ -15,6 +15,8 @@ export const ATTENTION_TYPES = ["needs_review", "blocked", "needs_approval"] as 
 export type AttentionType = (typeof ATTENTION_TYPES)[number];
 
 export const EVENT_TYPES = [
+  "intake_claimed",
+  "limits_approved",
   "proposal_ready",
   "contract_frozen",
   "worker_dispatched",
@@ -25,6 +27,11 @@ export const EVENT_TYPES = [
   "review_decided",
   "notify_planned",
   "learning_checked",
+  "correction",
+  "lesson_used",
+  "learning_reviewed",
+  "learning_extracted",
+  "scope_discovered",
 ] as const;
 export type EventType = (typeof EVENT_TYPES)[number];
 
@@ -43,6 +50,8 @@ export interface ThreadRefs {
 
 /** Open inbox line. Field names match events/schema.json. */
 export interface AttentionEvent {
+  lane_id?: string;
+  owner_ref?: string;
   sequence?: number;
   id: string;
   type: AttentionType;
@@ -62,6 +71,8 @@ export interface AttentionEvent {
 }
 
 export interface ReviewDecidedEvent {
+  lane_id?: string;
+  owner_ref?: string;
   sequence?: number;
   id: string;
   type: "review_decided";
@@ -77,6 +88,8 @@ export interface ReviewDecidedEvent {
 export type InboxRecord = AttentionEvent | ReviewDecidedEvent;
 
 export interface InboxAddInput {
+  laneId?: string;
+  ownerRef?: string;
   type?: AttentionType;
   title: string;
   summary: string;
@@ -95,6 +108,7 @@ export interface InboxAddInput {
 }
 
 export interface ListInboxOptions {
+  lane?: string;
   priority?: Priority;
   type?: AttentionType | "review_decided";
   /** When true, hide items that already have a review_decided row. */

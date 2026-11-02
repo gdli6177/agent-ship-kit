@@ -1,6 +1,6 @@
 {
   "name": "agent-ship-kit",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Local inbox and notify dry-run for the agent-ship-kit captain. Never merges, deploys, or starts a shell.",
   "license": "MIT",
   "type": "module",

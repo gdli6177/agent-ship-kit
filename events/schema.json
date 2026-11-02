@@ -7,6 +7,27 @@
   "additionalProperties": false,
   "required": ["id", "type", "title", "summary", "created_at", "source_task_id"],
   "properties": {
+    "lane_id": {"type": "string", "minLength": 1},
+    "owner_ref": {"type": "string", "minLength": 1},
+    "role_id": {"type": "string", "minLength": 1},
+    "approved_by": {"type": "string", "minLength": 1},
+    "role_refs": {"type": "array", "items": {"type": "object", "additionalProperties": false, "required": ["id", "source", "digest"], "properties": {"id": {"type": "string"}, "source": {"type": "string"}, "digest": {"type": "string"}}}},
+    "project": {"type": ["string", "null"]},
+    "scope": {"enum": ["event", "lesson", "handbook"]},
+    "trigger": {"enum": ["user_correction", "verifier_return", "recurrence", "scope_discovery"]},
+    "tags": {"type": "array", "maxItems": 12, "items": {"type": "string"}},
+    "through_sequence": {"type": "integer", "minimum": 0},
+    "monitored": {"type": "boolean"},
+    "allow_untimed": {"type": "boolean"},
+    "monitoring_status": {"enum": ["manual", "registered_unverified", "healthy"]},
+    "request": {"type": "string"},
+    "source": {"type": "string"},
+    "corrected_by": {"type": "string"},
+    "when": {"type": "string"},
+    "action": {"type": "string"},
+    "signal_id": {"type": "string"},
+    "checkpoint": {"type": "string"},
+    "applicable_lessons": { "type": "array", "maxItems": 10, "items": { "type": "object", "additionalProperties": false, "required": ["id", "title", "summary", "when", "action", "source"], "properties": { "id": { "type": "string" }, "title": { "type": "string" }, "summary": { "type": "string" }, "when": { "type": "string" }, "action": { "type": "string" }, "source": { "type": "string" } } } },
     "learning_required": { "type": "boolean" },
     "context_refs": { "type": "array", "items": { "type": "string" } },
     "context_tags": { "type": "array", "maxItems": 12, "items": { "type": "string" } },
@@ -26,6 +47,8 @@
     "type": {
       "type": "string",
       "enum": [
+        "intake_claimed",
+        "limits_approved",
         "proposal_ready",
         "contract_frozen",
         "worker_dispatched",
@@ -35,7 +58,12 @@
         "needs_approval",
         "review_decided",
         "notify_planned",
-        "learning_checked"
+        "learning_checked",
+        "correction",
+        "lesson_used",
+        "learning_reviewed",
+        "learning_extracted",
+        "scope_discovered"
       ]
     },
     "title": {
@@ -121,6 +149,10 @@
     "note": { "type": "string" }
   },
   "allOf": [
+    {
+      "if": { "properties": { "type": { "const": "correction" } }, "required": ["type"] },
+      "then": { "required": ["source", "corrected_by", "scope", "project", "trigger"] }
+    },
     {
       "if": { "properties": { "type": { "const": "learning_checked" } }, "required": ["type"] },
       "then": { "required": ["outcome", "learning_reason", "reviewed_by", "lesson_ids", "triggers", "work_sequence"] }

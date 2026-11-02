@@ -35,7 +35,7 @@ Options:
   --ref <name>     Branch or tag to install (default: main, or AGENT_SHIP_REF).
                    Slashes are allowed, as in feature/foo. The directory name
                    uses __ in place of /.
-  --agent <name>   cursor, claude, codex, or all. Repeatable.
+  --agent <name>   cursor, claude, codex, qoder, kiro, omp, agents, or all. Repeatable.
   --target <dir>   Copy skills into this directory instead of detecting agents.
   --uninstall      Remove the shim, the skill directories this installer
                    recorded, and the whole ~/.agent-ship-kit directory
@@ -140,6 +140,10 @@ agent_skills_dir() {
   case "$1" in
     cursor) printf '%s\n' "$HOME/.cursor/skills" ;;
     claude) printf '%s\n' "$HOME/.claude/skills" ;;
+    qoder) printf '%s\n' "$HOME/.qoder/skills" ;;
+    kiro) printf '%s\n' "$HOME/.kiro/skills" ;;
+    omp) printf '%s\n' "$HOME/.omp/agent/skills" ;;
+    agents) printf '%s\n' "$HOME/.agents/skills" ;;
     codex) printf '%s\n' "$HOME/.codex/skills" ;;
     *) return 1 ;;
   esac
@@ -152,10 +156,10 @@ abs_dir() {
 
 detect_targets() {
   local home_dir name dir found=0
-  for name in cursor claude codex; do
+  for name in cursor claude codex qoder kiro omp agents; do
     home_dir="$HOME/.$name"
     if [[ -d "$home_dir" || -d "$home_dir/skills" ]]; then
-      dir="$(abs_dir "$home_dir/skills")"
+      dir="$(abs_dir "$(agent_skills_dir "$name")")"
       TARGETS+=("$dir")
       found=1
     fi
@@ -185,9 +189,9 @@ resolve_targets() {
   fi
   for agent in "${AGENTS[@]}"; do
     if [[ "$agent" == "all" ]]; then
-      requested+=(cursor claude codex)
+      requested+=(cursor claude codex qoder kiro omp agents)
     else
-      agent_skills_dir "$agent" >/dev/null || die "--agent must be cursor, claude, codex, or all"
+      agent_skills_dir "$agent" >/dev/null || die "--agent must be cursor, claude, codex, qoder, kiro, omp, agents, or all"
       requested+=("$agent")
     fi
   done
@@ -492,7 +496,7 @@ while [[ $# -gt 0 ]]; do
       shift 2
       ;;
     --agent)
-      [[ $# -ge 2 ]] || die "--agent needs cursor, claude, codex, or all"
+      [[ $# -ge 2 ]] || die "--agent needs cursor, claude, codex, qoder, kiro, omp, agents, or all"
       AGENTS+=("$2")
       shift 2
       ;;

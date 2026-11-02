@@ -1,0 +1,8 @@
+#!/usr/bin/env bash
+set -euo pipefail
+cd "$(dirname "$0")/.."
+case "${1:-fast}" in
+  fast) pnpm --dir cli typecheck ;;
+  full) pnpm --dir cli typecheck; pnpm --dir cli test ;;
+  *) echo 'Usage: scripts/workspace-verify fast|full' >&2; exit 2 ;;
+esac

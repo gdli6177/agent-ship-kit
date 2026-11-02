@@ -1,3 +1,5 @@
+import { authorityViolations } from "./authority.js";
+import { contractRoles, roleWarnings } from "./roles.js";
 import { execFile } from "node:child_process";
 import { readFile } from "node:fs/promises";
 import { promisify } from "node:util";
@@ -13,6 +15,9 @@ const execFileAsync = promisify(execFile);
 
 export interface CheckResult {
   ok: boolean;
+  authority_violations?: string[];
+  role_ids?: string[];
+  role_warnings?: string[];
   contract_id: string | null;
   contract_path: string | null;
   repo_root: string;
@@ -111,8 +116,10 @@ export async function checkHardRules(
     head: options.head,
   });
   const hard = await applyHardRules(root, diff.changed, []);
+  const authority = await authorityViolations(root);
   return {
-    ok: hard.violations.length === 0,
+    ok: hard.violations.length === 0 && authority.length === 0,
+    ...(authority.length ? { authority_violations: authority } : {}),
     contract_id: null,
     contract_path: null,
     repo_root: repo,
@@ -170,11 +177,17 @@ export async function checkContract(
     base: options.base ?? (typeof target?.base_ref === "string" ? target.base_ref : undefined),
     head: options.head ?? (!options.staged ? branches[0] : undefined),
   });
-  const hard = await applyHardRules(root, diff.changed, checkPaths(diff.changed, paths));
+  const roles = await contractRoles(root, markdown, options.sliceId ?? (typeof target?.slice_id === "string" ? target.slice_id : undefined));
+  const effective = { allowed: paths.allowed, forbidden: [...new Set([...paths.forbidden, ...roles.flatMap(role => role.card.forbidden_paths)])] };
+  const hard = await applyHardRules(root, diff.changed, checkPaths(diff.changed, effective));
+  const authority = await authorityViolations(root, { id: contractId, markdown });
   const featureViolations = await featureViolationsInContract(root, markdown);
   const review = await assessHumanReview(root, contractId, markdown);
   return {
-    ok: hard.violations.length === 0 && featureViolations.length === 0 && review.violations.length === 0,
+    ok: hard.violations.length === 0 && featureViolations.length === 0 && review.violations.length === 0 && authority.length === 0,
+    role_ids: roles.map(role => role.card.id),
+    role_warnings: roleWarnings(roles, paths.allowed),
+    ...(authority.length ? { authority_violations: authority } : {}),
     contract_id: contractId,
     contract_path: file,
     repo_root: repo,
@@ -183,7 +196,7 @@ export async function checkContract(
     mode: diff.mode,
     changed: diff.changed,
     allowed: paths.allowed,
-    forbidden: paths.forbidden,
+    forbidden: effective.forbidden,
     violations: hard.violations,
     ...(featureViolations.length > 0 ? { feature_violations: featureViolations } : {}),
     hard_rule_ids: hard.hard_rule_ids,

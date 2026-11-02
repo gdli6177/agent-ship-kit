@@ -15,7 +15,9 @@
       "expect": {
         "ok": true,
         "mode": "branch",
-        "changed": ["src/app.ts"],
+        "changed": [
+          "src/app.ts"
+        ],
         "violations": []
       }
     },
@@ -35,10 +37,22 @@
       "expect": {
         "ok": false,
         "mode": "branch",
-        "changed": [".env", "docs/note.md", "src/app.ts"],
+        "changed": [
+          ".env",
+          "docs/note.md",
+          "src/app.ts"
+        ],
         "violations": [
-          { "path": ".env", "rule": "forbidden", "pattern": ".env*" },
-          { "path": "docs/note.md", "rule": "outside_allowed", "pattern": null }
+          {
+            "path": ".env",
+            "rule": "forbidden",
+            "pattern": ".env*"
+          },
+          {
+            "path": "docs/note.md",
+            "rule": "outside_allowed",
+            "pattern": null
+          }
         ]
       }
     },
@@ -57,9 +71,15 @@
       "expect": {
         "ok": false,
         "mode": "staged",
-        "changed": ["notes.txt"],
+        "changed": [
+          "notes.txt"
+        ],
         "violations": [
-          { "path": "notes.txt", "rule": "outside_allowed", "pattern": null }
+          {
+            "path": "notes.txt",
+            "rule": "outside_allowed",
+            "pattern": null
+          }
         ]
       }
     },
@@ -97,7 +117,9 @@
           "Do not put the storageState path in `evidence_urls`.",
           "This skill does not merge, deploy, or collect passwords."
         ],
-        "excludes": ["paste a production password into the repo"]
+        "excludes": [
+          "paste a production password into the repo"
+        ]
       }
     },
     {
@@ -155,6 +177,34 @@
             "storage_state": ".agent-ship/e2e/A.production.storage-state.json",
             "smoke_includes": "readonly"
           }
+        ]
+      }
+    },
+    {
+      "id": "skill.owner-lanes",
+      "kind": "skill_text",
+      "file": "skills/ship-contract/SKILL.md",
+      "expect": {
+        "includes": [
+          "one current proposal **per lane**",
+          "temporary owners",
+          "Registered human channel alone freezes/decides/changes limits",
+          "never append to a frozen contract"
+        ],
+        "excludes": [
+          "Keep exactly one current proposal."
+        ]
+      }
+    },
+    {
+      "id": "skill.captain-boundary",
+      "kind": "skill_text",
+      "file": "skills/ship-setup/SKILL.md",
+      "expect": {
+        "includes": [
+          "scripts/host-pre-tool.mjs",
+          "Never choose another actor or reset your own budget",
+          "captain alone executes notification"
         ]
       }
     }

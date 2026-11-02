@@ -1,5 +1,8 @@
 # Architecture
 
+
+v0.2: [reliability changes and trial](reliability-v0.2.md).
+
 多仓库与 worktree 的执行位置、共享状态、原子派工门禁和状态闭环以
 [工作空间接入说明](workspace-parallel.md) 为准。`repo_root` 是执行 checkout，
 `base_ref` 是派工时固定的提交，`sequence` 用于同毫秒事件排序；旧事件仍兼容。
@@ -13,13 +16,13 @@ notification plan. It does not run models, merge to main, or deploy.
 
 ## Captain is a router
 
-The captain talks to the owner, drafts contracts, dispatches, routes events, and records decisions. It does not edit product code and it does not run the long task, including work that looks small. It also does not block on a worker: the next owner request is accepted while slices run.
+The captain talks to the human, routes queued demands to temporary lane owners, compresses decisions, and records routing. Owners coordinate scouts, contract drafts, workers and verifiers. It does not edit product code and it does not run the long task, including work that looks small. It also does not block on a worker: the next human request is accepted while slices run.
 
 Prompt-only delegation is unreliable. A sentence that says "stay the coordinator" sits in the same context that will be asked to implement the next edit, so the boundary dissolves. The frozen contract file is the handoff. Workers execute. The captain returns to the owner.
 
 Follow-up events on a subscribed thread (`thread_refs`: PR, issue, chat) go to the owning worker. The captain handles new or unowned events and coordination across slices.
 
-`worker_progress` in `.agent-ship/events.jsonl` is a heartbeat. `agent-ship watchdog` is a deterministic check, not a model call. It reads that heartbeat, the last commit on the slice's own branch (`slice start --branch`, default `ship/<contract>/<slice>`), and `agent-ship check`. A commit on another branch does not count. It files a `blocked` item (`reason` `stalled` or `drift`) only when one of those is wrong. With no queued or running slice it exits immediately and removes its timer. `slice start` registers that timer when the first slice opens: a marked user crontab line on Linux/WSL, or `launchctl bootstrap` of a plist in `~/Library/LaunchAgents` on macOS. Copies under `~/.config/agent-ship/` are not the activation and are never committed. If registration fails, install prints a warning, and later `watchdog` / `inbox list` runs warn while slices are active and the timer is not. The captain sees only the inbox item.
+`worker_progress` in `.agent-ship/events.jsonl` is a heartbeat. `agent-ship watchdog` is a deterministic check, not a model call. It reads that heartbeat, the last commit on the slice's own branch (`slice start --branch`, default `ship/<contract>/<slice>`), and `agent-ship check`. A commit on another branch does not count. It files a `blocked` item (`reason` `stalled` or `drift`) only when one of those is wrong. With no queued or running slice it exits immediately and retains its timer until explicit uninstall. `slice start` registers that timer when the first slice opens: a marked user crontab line on Linux/WSL, or `launchctl bootstrap` of a plist in `~/Library/LaunchAgents` on macOS. Copies under `~/.config/agent-ship/` are not the activation and are never committed. If registration fails, slice start refuses admission unless --allow-untimed explicitly chooses manual supervision; later `watchdog` / `inbox list` runs warn while slices are active and the timer is not. The captain sees only the inbox item.
 
 Inbox summaries are at most 280 characters and carry the recall chain: contract, slice, worker or branch, PR, evidence. `/ship-inbox` shows that card first. The packet is the spill, opened on request.
 
@@ -166,7 +169,7 @@ This does not need GitHub, GitLab, or CI. An optional extra, on any host, is to 
 
 ## Verifier
 
-After a worker reports done, the captain spawns a second agent with `templates/verifier-prompt.md`. That agent sees the frozen contract and the branch, not the worker chat. It re-runs acceptance commands, `agent-ship check`, and the relevant E2E smoke. Disagreement goes back to the worker. Agreement is what allows `needs_review`.
+After a worker reports done, its owner arranges a second agent with `templates/verifier-prompt.md`. That agent sees the frozen contract and the branch, not the worker chat. It re-runs acceptance commands, `agent-ship check`, and the relevant E2E smoke. Disagreement goes back to the worker. Agreement is what allows `needs_review`.
 
 `agent-ship eval --fixture <dir>` (sample `cli/test/eval-fixtures/verifier-gates`) is the before/after check when changing `ship-*` skills or these gates; a non-zero exit is a regression.
 
@@ -265,12 +268,16 @@ Environment variables are not expanded, so a secret cannot be pulled into the pl
 
 ## Invariants
 
-1. The human has one captain conversation from intake through ship.
+1. One human and one shared state root have one human-facing captain conversation and N independent owner lanes from intake through ship.
 2. Workers are spawned per frozen contract slice. No standing roster is required.
 3. The human freezes contracts, reviews packets, and is the one who merges or ships.
 4. Notify never starts a shell. `notify run` starts only an allowlisted argv, with `shell: false`, and refuses a high-priority page that has no evidence.
 5. No secrets in the repo, the cards, the events, or the policy files.
 6. Adapters are replaceable. The event and the contract card are not.
+7. One current proposal per owner lane; a new lane never supersedes another lane's proposal or approval. Registered human approval and approved global limits bind every named-lane dispatch and resume.
+8. Only the captain executes notifications. Role cards are stable, runtime-free templates; owner/worker instances remain temporary.
+
+The executable v0.2 queue, role and actor contract is specified in [owner-lanes.md](owner-lanes.md). It supersedes single-slot examples below for parallel demands. `active-lane` in each checkout selects `active-contract.<lane>`; the default lane preserves the original unsuffixed files. The host must authenticate actors and connect the generic pre-tool hook; the CLI does not supply an OS isolation boundary.
 
 ## What v0 leaves out
 

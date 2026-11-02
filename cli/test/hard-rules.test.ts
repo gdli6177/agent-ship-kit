@@ -479,8 +479,10 @@ test("a stored secret fails closed and pre-commit enforces hook rules without a 
     await git(root, ["reset", "HEAD"]);
     await writeFile(join(root, "README.md"), "base\nstill fine\n");
     await git(root, ["add", "README.md"]);
+    const authorization = capture();
+    assert.equal(await main(["intake", "--direct", "--text", "Update README only.", "--allowed", "README.md", "--forbidden", "drop/**", "--accepted-by", "Test human", "--accepted-text", "Direct README update.", "--root", root], authorization.io), 0);
     const allowed = spawnSync(hook, [], { cwd: root, encoding: "utf8" });
-    assert.equal(allowed.status, 0);
+    assert.equal(allowed.status, 0, allowed.stdout + allowed.stderr);
     assert.match(allowed.stdout, /"ok": true/);
   } finally {
     await rm(root, { recursive: true, force: true });

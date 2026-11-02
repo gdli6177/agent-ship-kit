@@ -9,7 +9,24 @@ description: >-
 
 # ship-setup
 
+v0.2：检查 setup JSON 的 rules_auto_loaded 和 warnings。tracked AGENTS.md 的
+本地模式明确返回“不会自动加载”；必须在当前会话显式读取
+`.agent-ship/AGENTS.local.md`，并说明下一会话需要宿主桥接或获授权后的 shared setup。
+不能仅凭 ok:true 宣称宿主已接通。安装器认识 Claude/Cursor/Codex/Qoder/Kiro/OMP
+及共享 .agents；OMP 路径为 ~/.omp/agent/skills。其他目录使用 --target。
+新 setup 的提交 guard 会拒绝无冻结合同的提交，初始化文件也需要明确范围授权。
+开始会话运行 doctor、team context --auto --project ID，并实际读取必读正文。
+
 `/ship-setup` is the captain command. It runs `agent-ship setup` (alias `agent-ship init`) inside the project the human has open. It is idempotent: a second run updates the rules block and the hooks in place and does not duplicate them.
+
+## Parallel lanes and authority (v0.2)
+
+Read `$HOME/.agent-ship-kit/current/docs/owner-lanes.md` (or the actual kit clone). One human-facing captain routes a durable `intake add/list/claim` queue; temporary owners hold independent lanes and coordinate scouts/workers/verifiers. Keep one current proposal **per lane**. The captain delegates repository inspection/tests/Git work and returns a concise conclusion/tradeoff/evidence/recommendation/id list. External channels enqueue only.
+
+The trusted host binds actors, initializes human/captain authority, connects `scripts/host-pre-tool.mjs`, and starts each captain turn with heartbeat outside model-controlled tools. Never choose another actor or reset your own budget. Registered human channel alone freezes/decides/changes limits; captain alone executes notification. Owners/workers only return lane artifacts/inbox. These application guards require host authentication and sandbox enforcement; local env names alone are not authenticated identities.
+
+Use Lane/Owner headers, independent checkouts, optional slice role cards, and `--lane` for routed actions. `slice open` prepares worktree/hooks/admission/pending packet/check; its `spawn_required` means the adapter must still launch a real instance. A missing/malformed role blocks dispatch. Role forbiddens add to contract forbiddens, never widen scope. A frozen file is immutable; append state to events, not its dispatch-log table.
+
 
 ## Conversational onboarding
 

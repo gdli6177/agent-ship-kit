@@ -1,7 +1,9 @@
 import { randomBytes } from "node:crypto";
 import { appendFile, mkdir, readFile } from "node:fs/promises";
 import { join } from "node:path";
-import { nextSequence, withLock } from "./storage.js";
+import { actorIdentity, assertInboxActor, readAuthority } from "./authority.js";
+import { laneId } from "./records.js";
+import { nextSequence, readEvents, withLock } from "./storage.js";
 import { assertLearningChecked } from "./learning.js";
 import {
   ATTENTION_TYPES,
@@ -143,6 +145,7 @@ export async function listInbox(root: string, options: ListInboxOptions = {}): P
       if (item.type === "review_decided") return false;
       if (decided.has(item.id)) return false;
     }
+    if (options.lane && (item.lane_id ?? "default") !== laneId(options.lane)) return false;
     if (options.type && item.type !== options.type) return false;
     if (options.priority) {
       if (item.type === "review_decided" || item.priority !== options.priority) return false;
@@ -157,11 +160,26 @@ async function appendRecord(root: string, record: InboxRecord): Promise<void> {
   await appendFile(file, `${JSON.stringify(record)}\n`, "utf8");
 }
 
-export async function addInboxItem(root: string, input: InboxAddInput): Promise<AttentionEvent> {
+export async function addInboxItem(root: string, input: InboxAddInput, internalWatchdog = false): Promise<AttentionEvent> {
   return withLock(join(root, ".agent-ship"), async () => {
     const title = requiredText(input.title, "title");
     const summary = assertSummary(input.summary);
     const sourceTaskId = requiredText(input.sourceTaskId, "source_task_id");
+    const events = await readEvents(root);
+    const dispatch = events.filter(event => event.type === "worker_dispatched" && event.source_task_id === sourceTaskId).at(-1);
+    const actor = await actorIdentity(root);
+    const recordedLane = typeof dispatch?.lane_id === "string" ? dispatch.lane_id : undefined;
+    if (input.laneId && recordedLane && input.laneId !== recordedLane) throw new Error("inbox lane does not match its dispatched task");
+    const lane = input.laneId ?? recordedLane ?? actor.lane ?? undefined;
+    const claim = events.filter(event => event.type === "intake_claimed" && event.lane_id === lane).at(-1);
+    const recordedOwner = typeof dispatch?.owner_ref === "string" ? dispatch.owner_ref : typeof claim?.owner_ref === "string" ? claim.owner_ref : undefined;
+    if (input.ownerRef && recordedOwner && input.ownerRef !== recordedOwner) throw new Error("inbox owner does not match its lane");
+    if (await readAuthority(root) && lane && lane !== "default" && !claim) throw new Error("inbox lane has no intake claim");
+    const owner = recordedOwner ?? input.ownerRef;
+    if (!internalWatchdog) {
+      await assertInboxActor(root, lane);
+      if (actor.role === "worker" && dispatch?.worker_ref !== actor.ref) throw new Error("worker may only report its own dispatched task");
+    }
     if ((input.type ?? "needs_review") === "needs_review") await assertLearningChecked(root, sourceTaskId);
     const evidence = (input.evidenceUrls ?? []).map((url) => {
       const trimmed = requiredText(url, "evidence url");
@@ -195,6 +213,8 @@ export async function addInboxItem(root: string, input: InboxAddInput): Promise<
       created_at: input.createdAt ?? new Date().toISOString(),
       source_task_id: sourceTaskId,
       links,
+      ...(lane ? { lane_id: laneId(lane) } : {}),
+      ...(owner ? { owner_ref: owner } : {}),
     };
     const contractId = optionalLink(input.contractId, "contract_id");
     const sliceId = optionalLink(input.sliceId, "slice_id");
@@ -229,6 +249,7 @@ export async function decideInboxItem(
   note?: string,
 ): Promise<ReviewDecidedEvent> {
   return withLock(join(root, ".agent-ship"), async () => {
+    await assertInboxActor(root, undefined, true);
     const id = requiredText(subjectId, "id");
     const all = await readInbox(root);
     const subject = all.find((item) => item.id === id);
@@ -249,6 +270,8 @@ export async function decideInboxItem(
       source_task_id: subject.source_task_id,
       decision,
       subject_id: subject.id,
+      ...(subject.lane_id ? { lane_id: subject.lane_id } : {}),
+      ...(subject.owner_ref ? { owner_ref: subject.owner_ref } : {}),
     };
     if (cleanedNote) event.note = cleanedNote;
 
