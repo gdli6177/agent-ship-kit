@@ -42,7 +42,7 @@ interface CheckExpect {
   ok: boolean;
   mode?: "branch" | "staged";
   changed: string[];
-  violations: Array<{ path: string; rule: "forbidden" | "outside_allowed"; pattern: string | null }>;
+  violations: Array<{ path: string; rule: PathViolation["rule"]; pattern: string | null }>;
 }
 
 interface CheckCase {
@@ -193,8 +193,8 @@ function parseViolations(value: unknown, label: string): CheckExpect["violations
   return value.map((item, index) => {
     const row = asObject(item, `${label}[${index}]`);
     const rule = asString(row.rule, `${label}[${index}].rule`);
-    if (rule !== "forbidden" && rule !== "outside_allowed") {
-      throw new Error(`${label}[${index}].rule must be forbidden or outside_allowed`);
+    if (rule !== "forbidden" && rule !== "outside_allowed" && rule !== "hard_rule") {
+      throw new Error(`${label}[${index}].rule must be forbidden, outside_allowed, or hard_rule`);
     }
     const pattern = row.pattern;
     if (pattern !== null && typeof pattern !== "string") throw new Error(`${label}[${index}].pattern must be a string or null`);
