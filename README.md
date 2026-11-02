@@ -1,5 +1,8 @@
 **English** | [简体中文](README.zh-CN.md)
 
+
+v0.2: [reliability changes and trial](docs/reliability-v0.2.md).
+
 # agent-ship-kit
 
 Start with [Quick Start](#quick-start). Configuration details: [team handbooks and bounded learning](docs/team-and-learning.md); execution isolation: [multiple repositories and worktrees](docs/workspace-parallel.md).
@@ -89,7 +92,7 @@ The product definition in Chinese is [docs/PRODUCT.md](docs/PRODUCT.md). Event, 
 
 ## Install
 
-One command. It does not clone the repo, does not use sudo, and does not modify any project. It downloads the kit into `~/.agent-ship-kit/<ref>` (default `main`) and points the `~/.agent-ship-kit/current` symlink at that directory. It installs the `agent-ship` command in `~/.local/bin`, and copies the seven skills into each agent skill directory it finds (`~/.cursor/skills`, `~/.claude/skills`, `~/.codex/skills`). Skills and the shim use `current`, so a later `--ref` does not change those paths.
+One command. It does not clone the repo, does not use sudo, and does not modify any project. It downloads the kit into `~/.agent-ship-kit/<ref>` (default `main`) and points the `~/.agent-ship-kit/current` symlink at that directory. It installs the `agent-ship` command in `~/.local/bin`, and copies the seven skills into each agent skill directory it finds (`~/.cursor/skills`, `~/.claude/skills`, `~/.codex/skills`, `~/.qoder/skills`, `~/.kiro/skills`, `~/.omp/agent/skills`, `~/.agents/skills`). Skills and the shim use `current`, so a later `--ref` does not change those paths.
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/gdli6177/agent-ship-kit/main/install.sh | bash
@@ -101,7 +104,7 @@ Node.js 20 or newer. No API keys. If `~/.local/bin` is not on `PATH`, the instal
 curl -fsSL https://raw.githubusercontent.com/gdli6177/agent-ship-kit/main/install.sh | bash -s -- --ref v0.1.0
 ```
 
-`--agent cursor|claude|codex|all` chooses skill directories. `--target <dir>` copies skills only there. A branch name may contain slashes (`feature/foo`); the directory is `feature__foo`. Installing a different ref removes the previous ref directory. `--uninstall` removes the shim, the skill directories this installer copied, and the whole `~/.agent-ship-kit` directory:
+`--agent cursor|claude|codex|qoder|kiro|omp|agents|all` chooses skill directories. `--target <dir>` copies skills only there. A branch name may contain slashes (`feature/foo`); the directory is `feature__foo`. Installing a different ref removes the previous ref directory. `--uninstall` removes the shim, the skill directories this installer copied, and the whole `~/.agent-ship-kit` directory:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/gdli6177/agent-ship-kit/main/install.sh | bash -s -- --uninstall
@@ -118,7 +121,7 @@ If you cannot use the installer, clone and copy the skills yourself:
 ```bash
 git clone https://github.com/gdli6177/agent-ship-kit.git
 cd agent-ship-kit
-npm install
+pnpm install
 mkdir -p ~/.cursor/skills
 cp -R skills/ship-setup skills/ship-watchdog skills/ship-contract skills/ship-dispatch skills/ship-inbox skills/ship-notify skills/ship-e2e ~/.cursor/skills/
 ```
@@ -138,7 +141,7 @@ These names are for the captain thread. They do not depend on a forge.
 | `/ship-inbox <id>` | Jump straight to that item. Notify messages use this deep link. The first view is a compact card (summary ≤ 280 characters plus the recall chain). |
 | `/ship-notify` | Dry-run or send an allowlisted notification. |
 | `/ship-e2e` | Shared login and smoke tests. Production stays read-only. |
-| `/ship-watchdog` | Not the captain. `watchdog install` registers a user timer: Linux/WSL writes a marked crontab line; macOS writes `~/Library/LaunchAgents` and runs `launchctl bootstrap`. The check reads heartbeats, commits on the slice branch only, and `check`. It files `blocked` only when something is wrong. With no running slice it exits and removes that timer. |
+| `/ship-watchdog` | Not the captain. `watchdog install` registers a user timer: Linux/WSL writes a marked crontab line; macOS writes `~/Library/LaunchAgents` and runs `launchctl bootstrap`. The check reads heartbeats, commits on the slice branch only, and `check`. It files `blocked` only when something is wrong. With no running slice it exits with noop and retains the timer until explicit uninstall. |
 
 ## How a slash command runs
 
@@ -217,8 +220,8 @@ To do the same loop with a captain and no CLI, follow [templates/workflow.md](te
 
 ```bash
 cd cli
-npm test
-npm run typecheck
+pnpm test
+pnpm typecheck
 ```
 
 ## Layout

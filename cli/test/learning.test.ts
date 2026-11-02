@@ -11,7 +11,7 @@ import { activeSlices } from "../src/watchdog.js";
 const exec = promisify(execFile);
 async function call(root: string, ...args: string[]) {
   let stdout = "", stderr = "";
-  const code = await main([...args, "--root", root], { stdout: (s) => { stdout += s; }, stderr: (s) => { stderr += s; } });
+  const code = await main([...args, ...(args[0] === "slice" ? ["--allow-untimed"] : []), "--root", root], { stdout: (s) => { stdout += s; }, stderr: (s) => { stderr += s; } });
   return { code, stdout, stderr };
 }
 async function fixture(body: (root: string) => Promise<void>) {

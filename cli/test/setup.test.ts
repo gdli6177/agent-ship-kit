@@ -79,7 +79,11 @@ test("setup is local, idempotent, chains hooks, and uninstalls cleanly", async (
 
     const trace = join(root, "hook-trace.txt");
     const noContract = spawnSync(join(root, ".git", "hooks", "pre-commit"), [], { cwd: root, encoding: "utf8" });
-    assert.equal(noContract.status, 0);
+    assert.notEqual(noContract.status, 0);
+    await assert.rejects(readFile(trace, "utf8"));
+    assert.equal(await main(["intake", "--direct", "--id", "hook_test", "--text", "Allow the hook chaining test.", "--allowed", "src/**", "--forbidden", ".env*", "--accepted-by", "Test human", "--accepted-text", "Direct execution for the hook test.", "--root", root], capture().io), 0);
+    const authorized = spawnSync(join(root, ".git", "hooks", "pre-commit"), [], { cwd: root, encoding: "utf8" });
+    assert.equal(authorized.status, 0, authorized.stdout + authorized.stderr);
     assert.match(await readFile(trace, "utf8"), /foreign-hook/);
 
     await writeFile(
@@ -183,7 +187,7 @@ test("local setup does not edit a tracked AGENTS.md", async () => {
   try {
     assert.equal(await main(["setup", "--root", root], capture().io), 0);
     assert.equal(await readFile(join(root, "AGENTS.md"), "utf8"), "# Team rules\n\nKeep this shared.\n");
-    assert.match(await readFile(join(root, ".agent-ship", "AGENTS.local.md"), "utf8"), /You are a router, not an executor/);
+    assert.match(await readFile(join(root, ".agent-ship", "AGENTS.local.md"), "utf8"), /captain conversation you are a router, not an executor/);
     const status = await git(root, ["status", "--short"]);
     assert.equal(status.includes("AGENTS.md"), false);
   } finally {

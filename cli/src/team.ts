@@ -107,7 +107,7 @@ export async function initializeTeam(root: string, options: { shared: boolean; k
     actions.push(await createOnce(root, handbook, await readFile(join(options.kit, "templates/team-handbook.md"), "utf8")));
   }
   const learning_required = options.shared ? true : (existing?.learning_required ?? false);
-  const config: TeamConfig = { version: 1, handbook, rules: existing?.rules ?? [], lessons: options.lessons ?? existing?.lessons ?? DEFAULT_LESSONS, learning_required, max_lessons: existing?.max_lessons ?? 3, summary_chars: existing?.summary_chars ?? 1200 };
+  const config: TeamConfig = { version: 1, handbook, rules: existing?.rules ?? [], lessons: options.lessons ?? (options.shared && existing?.lessons === ".agent-ship/lessons" ? DEFAULT_LESSONS : existing?.lessons) ?? (options.shared ? DEFAULT_LESSONS : ".agent-ship/lessons"), learning_required, max_lessons: existing?.max_lessons ?? 3, summary_chars: existing?.summary_chars ?? 1200 };
   parseConfig(config);
   if (options.shared && config.lessons === DEFAULT_LESSONS) actions.push(await createOnce(root, `${DEFAULT_LESSONS}/README.md`, await readFile(join(options.kit, "templates/lesson-index.md"), "utf8")));
   const destination = options.shared ? TEAM_CONFIG : ".agent-ship/team.json";
@@ -130,6 +130,7 @@ export async function requiredSources(root: string, repo = root): Promise<string
       sources.add(path);
     }
     if (await optionalText(join(location, "AGENTS.md")) !== null) sources.add(await realpath(join(location, "AGENTS.md")));
+    if (await optionalText(join(location, ".agent-ship/AGENTS.local.md")) !== null) sources.add(await realpath(join(location, ".agent-ship/AGENTS.local.md")));
   }
   return [...sources];
 }

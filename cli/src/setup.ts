@@ -29,15 +29,19 @@ export const RULES_BLOCK = `${RULES_START}
 
 These rules stay in force for every agent in this checkout. \`/ship-setup\` rewrites this block in place; it does not append a second copy. Default setup is local to this clone and does not change a shared ignore file.
 
-- You are a router, not an executor. Talk to the human, draft contracts, dispatch, route, and record. Do not edit product code or run long tasks, even small ones.
+- In the captain conversation you are a router, not an executor. Talk to the human, draft contracts, dispatch, route, and record. The captain does not edit product code or run long tasks. A worker explicitly assigned a frozen slice executes only that slice; a verifier remains read-only.
 - Do not block waiting on a worker. Keep accepting new requests while workers run.
 - Follow-ups on a subscribed thread go to the owning worker. You handle new or unowned events and cross-slice coordination.
+- Every execution request, including 继续、接管、收口、上测试、上线、你来做, starts with \`agent-ship intake --text "<request>"\`. Read-only investigation may clarify a plan; no product edits, long tests, CI execution or dispatch before acceptance. Present the proposal promptly; do not stretch investigation into execution.
+- Before execution run \`agent-ship guard\`. No frozen contract means STOP: show the registered proposal and ask for acceptance. \`intake --direct\` requires the human's explicit direct-execution instruction, allowed/forbidden scope and acceptance; never infer it from "continue". It does not modify hard rules.
 - Do not spawn a worker until the human freezes the contract.
 - Edit only Allowed paths on the frozen contract. Never touch Forbidden paths. Workers do the edits.
 - Read \`.agent-ship/hard-rules.json\` before dispatch or review. \`hook\` and \`contract_forbidden\` rules fail the local check with their rule id. Promote a repeated review note only after the human agrees. Never copy a secret into a rule.
 - At most 3 workers may be queued or running across all contracts.
 - A separate read-only verifier must agree before a \`needs_review\` inbox item is filed. The verifier does not see the worker chat.
-- Read the configured team handbook and project rules via \`agent-ship team context\`. Search only relevant lesson summaries with explicit tags; do not load the entire history. Existing owner rules remain authoritative.
+- On session start run \`agent-ship doctor\` and \`agent-ship team context --auto --project <project-id>\`. Read every required source body; paths and digests are a receipt, not proof of reading. Active lessons are bounded soft guidance; owner rules remain authoritative.
+- Capture human corrections immediately with \`correction add\`, even before dispatch: one-time facts use event, reusable behavior uses lesson, definitions use handbook. Supply explicit project/team scope, evidence and when/action. Do not copy credentials. Reusable signals only create candidates; a maintainer must activate them. At wrap-up run \`learning extract\` and \`learning review\`, record none/candidate with a reason. Never edit handbook or hard rules automatically.
+- Check \`watchdog status\` and \`watchdog doctor\` after dispatch. Reject failed registration/runtime; \`--allow-untimed\` is only for explicitly chosen manual supervision. A registered job is not proof that a worker is healthy.
 - After independent verification, the captain records \`agent-ship lesson check\` with none/candidate, a reason and the verifier reference. Routine work may produce none. Candidates require evidence, scope, reuse value and deduplication before activation.
 - Only the human merges or ships. Do not merge to main or master and do not deploy to production.
 - Never read, write, or repeat passwords, cookies, or storageState contents.
@@ -77,6 +81,8 @@ export interface SetupReport {
   uninstalled: boolean;
   actions: SetupAction[];
   checks: SetupCheck[];
+  rules_auto_loaded?: boolean;
+  warnings?: string[];
 }
 
 export interface SetupOptions {
@@ -201,6 +207,11 @@ if [ -f "$root/.agent-ship/state-root" ]; then
   if [ -z "$state" ]; then
     state="$root"
   fi
+fi
+if [ -f "$root/.agent-ship/guard-required" ]; then
+  kit=$(tr -d '\\r\\n' < "$root/.agent-ship/kit-root") || exit 1
+  nodebin=$(tr -d '\\r\\n' < "$root/.agent-ship/node-bin") || exit 1
+  (cd "$kit/cli" && "$nodebin" --import tsx src/cli.ts guard --staged --root "$state" --repo "$root") || exit $?
 fi
 rules="$state/.agent-ship/hard-rules.json"
 if [ -n "$contract" ] || [ -f "$rules" ]; then
@@ -374,6 +385,15 @@ async function applyRules(root: string, shared: boolean): Promise<SetupAction[]>
     });
     return actions;
   }
+  if (shared) {
+    const localPath = join(root, ".agent-ship/AGENTS.local.md");
+    const local = await readOptional(localPath);
+    if (local?.includes(RULES_START)) {
+      const retained = removeMarked(local, RULES_START, RULES_END).text;
+      if (retained.trim()) { await writeText(localPath, retained, local); actions.push({ path: ".agent-ship/AGENTS.local.md", action: "updated" }); }
+      else { await rm(localPath); actions.push({ path: ".agent-ship/AGENTS.local.md", action: "removed" }); }
+    }
+  }
   const previous = await readOptional(agentsPath);
   const merged = mergeAgents(previous);
   const action = await writeText(agentsPath, merged.text, previous);
@@ -399,7 +419,7 @@ async function applySharedIgnore(root: string): Promise<SetupAction> {
   return { path: ".gitignore", action: previous === null ? "created" : action };
 }
 
-async function selfCheck(root: string, shared: boolean, rulesInAgents: boolean): Promise<SetupCheck[]> {
+async function selfCheck(root: string, shared: boolean, rulesInAgents: boolean, gitignoreBefore: string | null): Promise<SetupCheck[]> {
   const checks: SetupCheck[] = [];
   const rulesFile = rulesInAgents ? join(root, "AGENTS.md") : join(root, ".agent-ship", "AGENTS.local.md");
   const rules = (await readOptional(rulesFile)) ?? "";
@@ -418,7 +438,7 @@ async function selfCheck(root: string, shared: boolean, rulesInAgents: boolean):
     });
   } else {
     const exclude = (await readOptional(await excludeFile(root))) ?? "";
-    const patterns = [...LOCAL_PATTERNS, ...(rulesInAgents ? ["AGENTS.md"] : [])];
+    const patterns = [...LOCAL_PATTERNS, ...(rulesInAgents && !(await isTracked(root, "AGENTS.md")) ? ["AGENTS.md"] : [])];
     checks.push({
       name: "local-exclude",
       ok: exclude.includes(EXCLUDE_START) && patterns.every((line) => exclude.includes(line)),
@@ -427,8 +447,8 @@ async function selfCheck(root: string, shared: boolean, rulesInAgents: boolean):
     const gitignore = (await readOptional(join(root, ".gitignore"))) ?? "";
     checks.push({
       name: "gitignore-not-used",
-      ok: !gitignore.includes(GITIGNORE_START),
-      detail: "local setup does not write a shared ignore block",
+      ok: gitignore === (gitignoreBefore ?? ""),
+      detail: "local setup preserves the existing shared ignore file, including inherited blocks",
     });
   }
   const indexOk = (await readOptional(join(root, ".agent-ship", "e2e", "index.md"))) !== null;
@@ -474,6 +494,7 @@ export async function setupProject(root: string, options: SetupOptions = {}): Pr
     return { ok: false, root, shared, uninstalled: false, actions: [], checks: [{ name: "hooks-path", ok: false, detail: "core.hooksPath is set; compose agent-ship with the owner hook before setup (no files changed)" }] };
   }
   if (options.uninstall || options.purge) return uninstallProject(root, options.purge === true);
+  const gitignoreBefore = await readOptional(join(root, ".gitignore"));
   const stateRoot = options.stateRoot ? await repositoryRoot(resolve(options.stateRoot), true) : root;
 
   actions.push(...await initializeTeam(root, { shared, kit, handbook: options.handbook, lessons: options.lessons }));
@@ -516,10 +537,11 @@ export async function setupProject(root: string, options: SetupOptions = {}): Pr
   actions.push({ path: ".agent-ship/kit-root", action: "updated" });
   actions.push({ path: ".agent-ship/node-bin", action: "updated" });
 
+  await writeFile(join(root, ".agent-ship/guard-required"), "1\n");
   actions.push(...(await manageHooks(root, false)).actions);
 
   const inAgents = ((await readOptional(join(root, "AGENTS.md"))) ?? "").includes(RULES_START);
-  const checks = await selfCheck(root, shared, inAgents);
+  const checks = await selfCheck(root, shared, inAgents, gitignoreBefore);
   return {
     ok: checks.every((check) => check.ok),
     root,
@@ -527,6 +549,8 @@ export async function setupProject(root: string, options: SetupOptions = {}): Pr
     uninstalled: false,
     actions,
     checks,
+    rules_auto_loaded: inAgents,
+    warnings: inAgents ? [] : ["Rules are in .agent-ship/AGENTS.local.md and are not automatically loaded by the host. Read it explicitly in this session; use setup --shared only with shared-adoption authorization, or configure the host bridge yourself."],
   };
 }
 
@@ -618,6 +642,7 @@ async function uninstallProject(root: string, purge: boolean): Promise<SetupRepo
     await rm(join(root, ".agent-ship", "node-bin"), { force: true });
     await rm(join(root, ".agent-ship", "state-root"), { force: true });
     await rm(join(root, ".agent-ship", "active-contract"), { force: true });
+    await rm(join(root, ".agent-ship", "guard-required"), { force: true });
   }
 
   const hooksPath = await hooksPathConfigured(root);

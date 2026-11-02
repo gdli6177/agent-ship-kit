@@ -9,6 +9,14 @@ description: >-
 
 # ship-setup
 
+v0.2：检查 setup JSON 的 rules_auto_loaded 和 warnings。tracked AGENTS.md 的
+本地模式明确返回“不会自动加载”；必须在当前会话显式读取
+`.agent-ship/AGENTS.local.md`，并说明下一会话需要宿主桥接或获授权后的 shared setup。
+不能仅凭 ok:true 宣称宿主已接通。安装器认识 Claude/Cursor/Codex/Qoder/Kiro/OMP
+及共享 .agents；OMP 路径为 ~/.omp/agent/skills。其他目录使用 --target。
+新 setup 的提交 guard 会拒绝无冻结合同的提交，初始化文件也需要明确范围授权。
+开始会话运行 doctor、team context --auto --project ID，并实际读取必读正文。
+
 `/ship-setup` is the captain command. It runs `agent-ship setup` (alias `agent-ship init`) inside the project the human has open. It is idempotent: a second run updates the rules block and the hooks in place and does not duplicate them.
 
 ## Conversational onboarding

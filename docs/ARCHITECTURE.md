@@ -1,5 +1,8 @@
 # Architecture
 
+
+v0.2: [reliability changes and trial](reliability-v0.2.md).
+
 多仓库与 worktree 的执行位置、共享状态、原子派工门禁和状态闭环以
 [工作空间接入说明](workspace-parallel.md) 为准。`repo_root` 是执行 checkout，
 `base_ref` 是派工时固定的提交，`sequence` 用于同毫秒事件排序；旧事件仍兼容。
@@ -19,7 +22,7 @@ Prompt-only delegation is unreliable. A sentence that says "stay the coordinator
 
 Follow-up events on a subscribed thread (`thread_refs`: PR, issue, chat) go to the owning worker. The captain handles new or unowned events and coordination across slices.
 
-`worker_progress` in `.agent-ship/events.jsonl` is a heartbeat. `agent-ship watchdog` is a deterministic check, not a model call. It reads that heartbeat, the last commit on the slice's own branch (`slice start --branch`, default `ship/<contract>/<slice>`), and `agent-ship check`. A commit on another branch does not count. It files a `blocked` item (`reason` `stalled` or `drift`) only when one of those is wrong. With no queued or running slice it exits immediately and removes its timer. `slice start` registers that timer when the first slice opens: a marked user crontab line on Linux/WSL, or `launchctl bootstrap` of a plist in `~/Library/LaunchAgents` on macOS. Copies under `~/.config/agent-ship/` are not the activation and are never committed. If registration fails, install prints a warning, and later `watchdog` / `inbox list` runs warn while slices are active and the timer is not. The captain sees only the inbox item.
+`worker_progress` in `.agent-ship/events.jsonl` is a heartbeat. `agent-ship watchdog` is a deterministic check, not a model call. It reads that heartbeat, the last commit on the slice's own branch (`slice start --branch`, default `ship/<contract>/<slice>`), and `agent-ship check`. A commit on another branch does not count. It files a `blocked` item (`reason` `stalled` or `drift`) only when one of those is wrong. With no queued or running slice it exits immediately and retains its timer until explicit uninstall. `slice start` registers that timer when the first slice opens: a marked user crontab line on Linux/WSL, or `launchctl bootstrap` of a plist in `~/Library/LaunchAgents` on macOS. Copies under `~/.config/agent-ship/` are not the activation and are never committed. If registration fails, slice start refuses admission unless --allow-untimed explicitly chooses manual supervision; later `watchdog` / `inbox list` runs warn while slices are active and the timer is not. The captain sees only the inbox item.
 
 Inbox summaries are at most 280 characters and carry the recall chain: contract, slice, worker or branch, PR, evidence. `/ship-inbox` shows that card first. The packet is the spill, opened on request.
 

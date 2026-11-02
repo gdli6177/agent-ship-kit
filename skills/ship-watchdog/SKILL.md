@@ -26,13 +26,13 @@ item because something is wrong. `limits.example.json` is
    `~/Library/LaunchAgents` and runs `launchctl bootstrap gui/$UID`.
    `watchdog uninstall` removes only that entry (`bootout` on macOS).
    `--dry-run` prints the entry and does not register it. A copy of the cron
-   line and plist is also saved under `~/.config/agent-ship/` (or
-   `AGENT_SHIP_TIMER_HOME`) and is never committed. If registration fails, or
-   the platform is neither Linux nor macOS, the command prints a warning.
+   line and plist is saved only after registration succeeds, under `~/.config/agent-ship/` (or
+   `AGENT_SHIP_TIMER_HOME`), and is never committed. If registration fails,
+   slice start refuses admission unless --allow-untimed explicitly selects manual supervision.
    An orchestrator scheduler or the owner's assistant routine can run the
    same CLI instead of the timer.
 3. Each run reads `.agent-ship/events.jsonl` first. If no slice is `queued` or
-   `running`, it removes the timer and exits. It does not call `check` and it
+   `running`, it retains an installed timer and exits; explicit uninstall removes it. It does not call `check` and it
    does not file an inbox item.
 4. Otherwise it compares the latest `worker_progress` heartbeat and the last
    git commit time on the slice branch with `stale_minutes`, and it runs
@@ -52,7 +52,7 @@ The registered cron line looks like:
 
 ```cron
 # agent-ship-watchdog-begin <slug>
-*/5 * * * * cd <kit>/cli && <node> --import tsx src/cli.ts watchdog --root <project>
+*/5 * * * * <node> <kit>/cli/bin/agent-ship.js watchdog --root <project>
 # agent-ship-watchdog-end <slug>
 ```
 
@@ -66,6 +66,16 @@ missing, the window is 30 minutes. Shape:
 ```
 
 See `templates/limits.example.json`.
+
+## 注册与运行健康
+
+`watchdog status` 分别返回 registered、healthy（true/false/null）、runs、
+last_exit_code、last_run_at、last_success_at 与 warning。launchd 读取真实 job
+运行结果；cron 无回执时必须保持 unknown，不能把标记行存在说成执行成功。
+`watchdog doctor` 检查 node、tsx、CLI 与 plist 一致性。超过 15 分钟没有完成
+记录也会提示。slice start / resume 在注册失败或已知运行失败时拒绝执行；只有
+显式选择 `--allow-untimed` 才可人工监督。备份仅在注册成功后写入，不作注册证据。
+空闲时保留定时器，离开项目显式 uninstall。
 
 ## What it reads
 

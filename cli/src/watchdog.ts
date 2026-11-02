@@ -1,8 +1,9 @@
 import { execFile, spawn } from "node:child_process";
 import { createHash } from "node:crypto";
-import { appendFile, mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { access, appendFile, chmod, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
+import { createRequire } from "node:module";
 import { promisify } from "node:util";
 import { checkContract, contractFile } from "./check.js";
 import { addInboxItem, assertSummary, listInbox, newEventId, readInbox } from "./inbox.js";
@@ -108,7 +109,7 @@ function watchdogCommand(root: string): { nodeBin: string; cli: string; workdir:
   const kit = kitRoot();
   return {
     nodeBin: process.execPath,
-    cli: join(kit, "cli", "src", "cli.ts"),
+    cli: join(kit, "cli", "bin", "agent-ship.js"),
     workdir: join(kit, "cli"),
   };
 }
@@ -116,7 +117,7 @@ function watchdogCommand(root: string): { nodeBin: string; cli: string; workdir:
 export function cronMarker(root: string): { begin: string; end: string; line: string } {
   const slug = projectSlug(root);
   const command = watchdogCommand(root);
-  const line = `*/5 * * * * cd ${shellQuote(command.workdir)} && ${shellQuote(command.nodeBin)} --import tsx src/cli.ts watchdog --root ${shellQuote(root)}`;
+  const line = `*/5 * * * * ${shellQuote(command.nodeBin)} ${shellQuote(command.cli)} watchdog --root ${shellQuote(root)}`;
   return {
     begin: `# agent-ship-watchdog-begin ${slug}`,
     end: `# agent-ship-watchdog-end ${slug}`,
@@ -128,6 +129,8 @@ function cronText(root: string): string {
   const marked = cronMarker(root);
   return `${marked.begin}\n${marked.line}\n${marked.end}\n`;
 }
+
+function xml(value: string): string { return value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;"); }
 
 function launchdText(root: string): string {
   const command = watchdogCommand(root);
@@ -141,16 +144,14 @@ function launchdText(root: string): string {
   <key>StartInterval</key>
   <integer>300</integer>
   <key>WorkingDirectory</key>
-  <string>${command.workdir}</string>
+  <string>${xml(command.workdir)}</string>
   <key>ProgramArguments</key>
   <array>
-    <string>${command.nodeBin}</string>
-    <string>--import</string>
-    <string>tsx</string>
-    <string>${command.cli}</string>
+    <string>${xml(command.nodeBin)}</string>
+    <string>${xml(command.cli)}</string>
     <string>watchdog</string>
     <string>--root</string>
-    <string>${root}</string>
+    <string>${xml(root)}</string>
   </array>
 </dict>
 </plist>
@@ -266,13 +267,13 @@ function installedPlistPath(root: string): string {
   return join(launchAgentsDir(), `${plistLabel(root)}.plist`);
 }
 
-async function launchctl(args: string[]): Promise<{ code: number; stderr: string }> {
+async function launchctl(args: string[]): Promise<{ code: number; stdout: string; stderr: string }> {
   const bin = process.env.AGENT_SHIP_LAUNCHCTL_CMD ?? "launchctl";
   try {
     const result = await runCommand(bin, args);
-    return { code: result.code, stderr: result.stderr };
+    return result;
   } catch (error) {
-    return { code: 1, stderr: error instanceof Error ? error.message : String(error) };
+    return { code: 1, stdout: "", stderr: error instanceof Error ? error.message : String(error) };
   }
 }
 
@@ -283,8 +284,10 @@ async function registerLaunchd(root: string, dryRun: boolean): Promise<{ registe
   const domain = `gui/${userId()}`;
   const label = plistLabel(root);
   if (dryRun) return { registered: false, action: previous === body ? "unchanged" : "created" };
-  await mkdir(launchAgentsDir(), { recursive: true });
-  if (previous !== body) await writeFile(dest, body);
+  if (previous === body && (await launchctl(["print", `${domain}/${label}`])).code === 0) return { registered: true, action: "unchanged" };
+  await mkdir(launchAgentsDir(), { recursive: true, mode: 0o700 });
+  if (previous !== body) await writeFile(dest, body, { mode: 0o600 });
+  await chmod(dest, 0o600);
   await launchctl(["bootout", `${domain}/${label}`]);
   const boot = await launchctl(["bootstrap", domain, dest]);
   if (boot.code !== 0) {
@@ -309,17 +312,64 @@ async function unregisterLaunchd(root: string, dryRun: boolean): Promise<{ remov
   return { removed: had || boot.code === 0 };
 }
 
-export async function timerIsActive(root: string): Promise<boolean> {
+export interface WatchdogStatus {
+  registered: boolean;
+  platform: "cron" | "launchd" | "unsupported";
+  healthy: boolean | null;
+  runs: number | null;
+  last_exit_code: number | null;
+  last_run_at: string | null;
+  last_success_at: string | null;
+  warning: string | null;
+}
+export async function watchdogStatus(root: string): Promise<WatchdogStatus> {
   const platform = timerPlatform();
-  if (platform === "cron") {
-    const listed = await crontabList();
-    return listed.ok && listed.text.includes(cronMarker(root).begin);
-  }
+  const result: WatchdogStatus = { registered: false, platform, healthy: null, runs: null, last_exit_code: null, last_run_at: null, last_success_at: null, warning: null };
+  let runtime: Record<string, unknown> = {};
+  const raw = await readOptionalText(join(root, ".agent-ship/watchdog-health.json"));
+  if (raw) { try { runtime = JSON.parse(raw) as Record<string, unknown>; } catch { result.warning = "watchdog health record is invalid"; } }
+  if (typeof runtime.last_run_at === "string") result.last_run_at = runtime.last_run_at;
+  if (typeof runtime.last_success_at === "string") result.last_success_at = runtime.last_success_at;
   if (platform === "launchd") {
-    const print = await launchctl(["print", `gui/${userId()}/${plistLabel(root)}`]);
-    return print.code === 0;
+    const printed = await launchctl(["print", `gui/${userId()}/${plistLabel(root)}`]);
+    result.registered = printed.code === 0;
+    result.runs = Number(/\bruns = (\d+)/.exec(printed.stdout)?.[1] ?? 0);
+    const exit = /last exit code = (-?\d+)/.exec(printed.stdout)?.[1];
+    if (exit !== undefined) result.last_exit_code = Number(exit);
+    if (!result.registered) result.warning = "launchd job is not registered";
+    const installed = await readOptionalText(installedPlistPath(root));
+    if (result.registered && installed !== launchdText(root)) { result.healthy = false; result.warning = "Registered plist differs from this kit/runtime; explicitly reinstall the timer."; }
+  } else if (platform === "cron") {
+    const listed = await crontabList();
+    const marker = cronMarker(root);
+    result.registered = listed.ok && listed.text.includes(`${marker.begin}\n${marker.line}\n${marker.end}`);
+    if (!result.registered) result.warning = listed.warning ?? "Expected crontab entry is not registered";
+    if (typeof runtime.last_exit_code === "number") result.last_exit_code = runtime.last_exit_code;
+  } else result.warning = "Unsupported timer platform; explicitly use --allow-untimed for manual supervision.";
+  if (result.registered && result.healthy !== false) {
+    if (result.last_exit_code !== null) result.healthy = result.last_exit_code === 0;
+    if (result.last_run_at && Date.now() - Date.parse(result.last_run_at) > 15 * 60000) { result.healthy = false; result.warning = "No watchdog completion in the last 15 minutes"; }
+    if (result.healthy === false && !result.warning) result.warning = `watchdog last exited ${result.last_exit_code}`;
+    if (result.healthy === null && !result.warning) result.warning = "Registered, but no successful timer run has been observed yet";
   }
-  return false;
+  return result;
+}
+export async function watchdogDoctor(root: string) {
+  const status = await watchdogStatus(root);
+  const command = watchdogCommand(root);
+  const checks = [];
+  for (const [name, path] of [["node", command.nodeBin], ["cli", command.cli]] as const) {
+    let ok = true; try { await access(path); } catch { ok = false; }
+    checks.push({ name, path, ok });
+  }
+  let tsx = true;
+  try { createRequire(join(kitRoot(), "cli/bin/agent-ship.js")).resolve("tsx/cli"); } catch { tsx = false; }
+  checks.push({ name: "tsx", path: kitRoot(), ok: tsx });
+  return { ok: checks.every(c => c.ok) && status.registered && status.healthy !== false, status, checks, templates_are_registration_evidence: false };
+}
+export async function timerIsActive(root: string): Promise<boolean> {
+  const status = await watchdogStatus(root);
+  return status.registered && status.healthy !== false;
 }
 
 export async function installWatchdogTimer(root: string, options: { dryRun?: boolean } = {}): Promise<TimerInstall> {
@@ -328,12 +378,6 @@ export async function installWatchdogTimer(root: string, options: { dryRun?: boo
   const cronPath = cronFile(root);
   const plistPath = launchdFile(root);
   const entry = cronMarker(root).line;
-  if (!dryRun) {
-    await mkdir(join(cronPath, ".."), { recursive: true });
-    await mkdir(join(plistPath, ".."), { recursive: true });
-    await writeFile(cronPath, cronText(root));
-    await writeFile(plistPath, launchdText(root));
-  }
   if (platform === "unsupported") {
     return {
       action: "unchanged",
@@ -348,6 +392,12 @@ export async function installWatchdogTimer(root: string, options: { dryRun?: boo
     };
   }
   const result = platform === "cron" ? await registerCron(root, dryRun) : await registerLaunchd(root, dryRun);
+  if (!dryRun && result.registered) {
+    await mkdir(join(cronPath, ".."), { recursive: true });
+    await mkdir(join(plistPath, ".."), { recursive: true });
+    await writeFile(cronPath, cronText(root));
+    await writeFile(plistPath, launchdText(root));
+  }
   return {
     action: result.action,
     registered: result.registered,
@@ -582,13 +632,13 @@ export async function runWatchdog(
 ): Promise<WatchdogReport> {
   const slices = await activeSlices(root);
   if (slices.length === 0) {
-    const timer = await uninstallWatchdogTimer(root);
+    const registered = await timerIsActive(root);
     return {
       noop: true,
       stale_minutes: options.staleMinutes ?? DEFAULT_STALE_MINUTES,
       checked: 0,
       flagged: [],
-      timer: timer.action,
+      timer: registered ? "unchanged" : "absent",
     };
   }
 
@@ -674,6 +724,7 @@ export interface SliceStartInput {
   tags?: string[];
   project?: string;
   proposalId?: string;
+  allowUntimed?: boolean;
 }
 
 function contractField(markdown: string, label: string): string {
@@ -742,7 +793,7 @@ export async function startSlice(root: string, input: SliceStartInput) {
     if (active.length >= limits.global_max_parallel) throw new Error("global_max_parallel reached");
     if (active.filter((slice) => slice.contract_id === input.contractId).length >= cap) throw new Error("contract max_parallel reached");
     const repo = await repositoryRoot(input.repoRoot ?? root, true);
-    const context = await teamContext(root, { tags: input.tags, project: input.project, repo });
+    const context = await teamContext(root, { tags: input.tags, project: input.project, repo, auto: true });
     const consent = context.learning_required ? await assertDispatchConsent(root, input.contractId, input.proposalId) : undefined;
     if (context.learning_required && !input.workerRef?.trim()) throw new Error("managed tasks require --worker");
     await assertSingleRepository(repo, paths.allowed);
@@ -759,6 +810,9 @@ export async function startSlice(root: string, input: SliceStartInput) {
     if (input.threadRefs?.pr) threadRefs.pr = input.threadRefs.pr;
     if (input.threadRefs?.issue) threadRefs.issue = input.threadRefs.issue;
     if (input.threadRefs?.chat) threadRefs.chat = input.threadRefs.chat;
+    const timer = await installWatchdogTimer(root);
+    const health = await watchdogStatus(root);
+    if ((!timer.registered || health.healthy === false) && !input.allowUntimed) throw new Error(`watchdog admission failed: ${timer.warning ?? health.warning ?? "timer not registered"}; no slice was dispatched. Repair the timer or explicitly pass --allow-untimed for manual supervision.`);
     const event = {
       id: newEventId(),
       type: "worker_dispatched",
@@ -773,6 +827,9 @@ export async function startSlice(root: string, input: SliceStartInput) {
       branch,
       repo_root: repo,
       base_ref: base,
+      monitored: timer.registered && health.healthy !== false,
+      monitoring_status: !timer.registered || health.healthy === false ? "manual" : health.healthy === null ? "registered_unverified" : "healthy",
+      allow_untimed: input.allowUntimed === true,
       learning_required: context.learning_required,
       ...(consent ? { proposal_id: consent.proposalId, accepted_text: consent.acceptedText, accepted_by: consent.acceptedBy, accepted_at: consent.acceptedAt } : {}),
       context_refs: context.required_sources,
@@ -784,13 +841,16 @@ export async function startSlice(root: string, input: SliceStartInput) {
     };
     await mkdir(join(root, ".agent-ship"), { recursive: true });
     await appendFile(eventsFile(root), `${JSON.stringify(event)}\n`, "utf8");
+    if (context.lessons.length) await appendFile(eventsFile(root), `${JSON.stringify({ id: newEventId(), type: "lesson_used", title: "Dispatch guidance", summary: "Reviewed soft guidance supplied.", source_task_id: input.sourceTaskId, project: input.project ?? null, lesson_ids: context.lessons.map(l => l.id), checkpoint: "slice_start", sequence: await nextSequence(root), created_at: new Date().toISOString() })}\n`);
     const count = (await activeSlices(root)).length;
-    const timer = count > 0 ? await installWatchdogTimer(root) : await uninstallWatchdogTimer(root);
-    return { timer, active: count, context };
+    await mkdir(join(repo, ".agent-ship"), { recursive: true });
+    await writeFile(join(repo, ".agent-ship/active-contract"), `${input.contractId}\n`);
+    await writeFile(join(repo, ".agent-ship/state-root"), `${root}\n`);
+    return { timer, monitored: event.monitored, monitoring_status: event.monitoring_status, active: count, context };
   });
 }
 
-export async function updateSlice(root: string, taskId: string, status: string, summary = "Worker status updated.", workerRef?: string): Promise<{ active: number; timer: TimerInstall }> {
+export async function updateSlice(root: string, taskId: string, status: string, summary = "Worker status updated.", workerRef?: string, allowUntimed = false): Promise<{ active: number; timer: TimerInstall }> {
   if (!["running", "queued", "needs_review", "blocked", "needs_approval", "failed", "cancelled"].includes(status)) throw new Error("invalid slice status");
   return withLock(join(root, ".agent-ship"), async () => {
     const slices = await allSlices(root);
@@ -806,8 +866,11 @@ export async function updateSlice(root: string, taskId: string, status: string, 
       const active = slices.filter((slice) => slice.source_task_id !== taskId && (slice.status === "running" || slice.status === "queued"));
       if (active.length >= (await readLimits(root)).global_max_parallel || active.filter((slice) => slice.contract_id === current.contract_id).length >= cap) throw new Error("parallel limit reached; cannot resume");
     }
+    const resume = status === "running" || status === "queued";
+    const timer = resume ? await installWatchdogTimer(root) : { action: "unchanged" as const, registered: await timerIsActive(root), platform: timerPlatform(), dry_run: false, entry: cronMarker(root).line, cron_file: cronFile(root), launchd_file: launchdFile(root), project_root: root };
+    if (resume && (!timer.registered || !(await timerIsActive(root))) && !allowUntimed) throw new Error("watchdog registration/runtime unhealthy; resume rejected (or explicitly pass --allow-untimed)");
     await appendFile(eventsFile(root), `${JSON.stringify({ id: newEventId(), type: "worker_progress", title: current.title, summary: assertSummary(summary), source_task_id: taskId, contract_id: current.contract_id, slice_id: current.slice_id, created_at: new Date().toISOString(), sequence: await nextSequence(root), ...(workerRef ? { worker_ref: workerRef } : {}), status })}\n`);
     const active = (await activeSlices(root)).length;
-    return { active, timer: active ? await installWatchdogTimer(root) : await uninstallWatchdogTimer(root) };
+    return { active, timer };
   });
 }

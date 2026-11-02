@@ -59,7 +59,9 @@ agent-ship team context --tag git --tag parallel --project api-service
 ```
 
 输出必读规范的路径、相关 active 经验的短摘要、需要复核的编号和预算信息。
-它不展开手册正文或全部历史。标签由船长按任务选择；没有标签或没有可靠匹配时返回零条经验。
+它返回必读路径和 source_details（read_required、digest），并给出有行号的有界手册
+片段。必须实际读取必读正文。默认标签查询保持原行为；`team context --auto` 无标签
+也返回按项目匹配的 top-N active 经验，手册片段与经验共享 summary_chars 预算。
 带 project 的经验只匹配同一个项目标识，团队通用经验可以跨项目匹配。
 当前检索是确定性的标签匹配，不调用模型或外部检索服务。
 
@@ -177,6 +179,24 @@ agent-ship lesson review --id isolated-repositories --status active \
 
 CLI 能校验结构完整性、精确重复、预算和状态，不能证明证据真实、结论新颖或核验者身份。
 这些语义责任由独立核验与维护者评审承担。不要用勾选字段代替真实核验。
+
+## v0.2：纠正、提取与自动使用
+
+`correction add --text TEXT --scope event|lesson|handbook --source proposal:ID|contract:ID|task:ID|session:ID --corrected-by HUMAN`
+无需派工即可使用。lesson/handbook 需显式 project 或 team，并给 when/action；
+一次性事实仅留 event。proposal 追加 resolved_by_human 注记而保留历史，船长据此
+修订当前方案。单次定义纠正可以进入手册候选队列，工具不直接改手册。
+
+`learning extract [--since ISO] [--project ID] [--dry-run]` 从纠正、退回和范围失败
+提取候选，稳定键聚合，写入 auto/，不自动 active。项目未知时返回 deferred；
+疑似秘密拒绝写入。CLI 不调用模型或推测任意聊天含义，船长负责识别信号和提供
+when/action，确定性事件管线负责落盘与检索。
+
+`team context --auto`、slice start、check、待审输出检索已审核经验并记录 lesson_used。
+注入后复发可标 needs_review；最近使用时间参与排序，不自动删除或升级硬规则。
+`learning review` 列出未收尾纠正，用 outcome none/candidate 和 reason 记录审计。
+`handbook propose --from-lesson ID` 只给目标、插入位置和可审 diff，不写手册。
+普通 local setup 的新经验默认在 `.agent-ship/lessons`，共享 setup 使用团队经验目录。
 
 ## 复发时先修已有机制
 

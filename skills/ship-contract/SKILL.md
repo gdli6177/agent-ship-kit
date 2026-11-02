@@ -3,7 +3,7 @@ name: ship-contract
 description: >-
   Handle new feature, fix or change requests in an agent-ship-kit captain
   conversation, including 加一个功能、修一下这个问题、另开一个需求 and
-  按这个方案开始. Draft a proposal, then freeze only after explicit human
+  按这个方案开始、继续、接管、收口、上测试、上线、你来做、这个你处理. Draft a proposal, then freeze only after explicit human
   acceptance of its exact scope. Also supports /ship-contract and freeze.
 ---
 
@@ -28,6 +28,19 @@ card format.
 - The human is reviewing evidence. Use `ship-inbox`.
 - A frozen contract already covers the slice and its text is not changing. Use `ship-dispatch`.
 - The ask is to merge, release, or deploy. Refuse. This kit does not do those.
+
+## Intake and guard
+
+收到执行类请求先运行 `agent-ship intake --text "<原文>"`，复用明确需求的 id。
+只读调查可以完善方案；不得改产品、运行长测试、触发 CI 或派工。优先在本轮
+展示范围与验收，不把调查无限延伸成执行。恢复时先 doctor，不借用旧需求授权。
+
+无匹配冻结合同时回复：已登记为 `<proposal_id>`，下面是范围与验收，确认后派工。
+执行前运行 guard；失败即停止修改类工具。CLI 和 Git hook 不能拦截全部工具调用，
+宿主需要更强管控时须在 pre-tool 边界调用 guard。
+
+只有人明确要求直接执行且范围完整，才可用 `intake --direct`，记录 allowed、
+forbidden、accepted-by、accepted-text。不得把“继续”当作直接执行授权。
 
 ## Discussion mode
 
@@ -62,7 +75,7 @@ freeze, and do not spawn a worker.
 
 ## 规范与经验准备
 
-形成方案前，用 `agent-ship team context --tag <task-topic> [--project <project-id>]`
+形成方案前，用 `agent-ship team context --auto --tag <task-topic> [--project <project-id>]`
 获取引用，读取适用的团队手册和项目规则。只加载与需求匹配的已验证经验摘要；
 没有匹配时可以为零，必读规则不能因为经验预算而省略。
 将适用规则和经验编号作为切片输入；不复制全部历史，不附上船长对话。
@@ -70,8 +83,8 @@ freeze, and do not spawn a worker.
 
 ## Procedure
 
-1. Copy `$HOME/.agent-ship-kit/current/templates/proposal-card.md` to `.agent-ship/proposals/<proposal_id>.md`
-   on the first drafting turn. Status stays `draft`. Fill Allowed paths and
+1. Run intake first, then fill its registered proposal using `$HOME/.agent-ship-kit/current/templates/proposal-card.md`
+   at `.agent-ship/proposals/<proposal_id>.md`; preserve Proposal id, Request and Created at. Status stays `draft`. Fill Allowed paths and
    Forbidden paths. Put merge and production deploy in the out-of-scope list
    even if the human did not mention them. Fill Human review budget:
    `human_reviews_expected` is how many human reviews this line still needs,
@@ -126,3 +139,10 @@ are not ready to freeze.
 When the human asks to start work, hand off to `ship-dispatch` with the
 contract path. Do not ask for a second command or repeat an already granted
 start approval. A freeze-only decision does not imply dispatch authorization.
+
+## 纠正与收尾
+
+纠正立即用 correction add 留痕，派工前也可用。event 仅记一次性事实；lesson /
+handbook 需 project 或显式 team，并填 when/action。保留历史风险，按纠正注记
+修订当前方案。收尾运行 learning extract 与 learning review，记录 none/candidate。
+经验仅由维护者审核激活，不自动改手册、合同范围或硬规则。

@@ -16,7 +16,7 @@ async function git(root: string, ...args: string[]): Promise<string> {
 async function call(root: string, ...args: string[]) {
   let stdout = "";
   let stderr = "";
-  const code = await main([...args, "--root", root], {
+  const code = await main([...args, ...(args[0] === "slice" ? ["--allow-untimed"] : []), "--root", root], {
     stdout: (text) => { stdout += text; }, stderr: (text) => { stderr += text; },
   });
   return { code, stdout, stderr };
@@ -246,7 +246,7 @@ test("dispatch caps serialize actual CLI processes, not only in-process calls", 
   await repo(root); await contract(root);
   await writeFile(join(root, ".agent-ship", "limits.json"), '{"global_max_parallel":1}');
   const cli = fileURLToPath(new URL("../src/cli.ts", import.meta.url));
-  const processes = ["a", "b"].map((slice) => exec(process.execPath, ["--import", "tsx", cli, "slice", "start", "--root", root, "--contract", "c", "--slice", slice, "--source-task-id", slice, "--branch", "main", "--title", slice, "--summary", "Process admission."], { cwd: fileURLToPath(new URL("..", import.meta.url)) }));
+  const processes = ["a", "b"].map((slice) => exec(process.execPath, ["--import", "tsx", cli, "slice", "start", "--allow-untimed", "--root", root, "--contract", "c", "--slice", slice, "--source-task-id", slice, "--branch", "main", "--title", slice, "--summary", "Process admission."], { cwd: fileURLToPath(new URL("..", import.meta.url)) }));
   const results = await Promise.allSettled(processes);
   assert.equal(results.filter((result) => result.status === "fulfilled").length, 1);
   assert.equal((await activeSlices(root)).length, 1);

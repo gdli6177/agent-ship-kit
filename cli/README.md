@@ -1,5 +1,8 @@
 # agent-ship CLI
 
+
+v0.2: [reliability changes and trial](../docs/reliability-v0.2.md).
+
 第一次使用先看 [Quick Start（中文）](../README.zh-CN.md#quick-start) 或 [English](../README.md#quick-start)：一次接入后直接提需求，由船长管理流程，命令是可选快捷方式。
 
 `setup --shared` 初始化或引用团队手册；普通 setup 只建立本地引用。
@@ -30,7 +33,7 @@ deploy.
 
 ```bash
 cd cli
-npm install
+pnpm install
 ```
 
 ## Setup
@@ -52,7 +55,7 @@ agent-ship watchdog
 agent-ship status --stale
 ```
 
-Deterministic. No model. Reads heartbeats in `.agent-ship/events.jsonl`, the last commit time on the slice branch, and `check`. Files a `blocked` item only when a slice is stalled or drifting. If nothing is `queued` or `running`, it exits immediately and deletes the local timer.
+Deterministic. No model. Reads heartbeats in `.agent-ship/events.jsonl`, the last commit time on the slice branch, and `check`. Files a `blocked` item only when a slice is stalled or drifting. If nothing is `queued` or `running`, it exits immediately and retains the local timer until explicit uninstall.
 
 ```bash
 agent-ship slice start --contract contract_auth --slice auth \
@@ -61,7 +64,7 @@ agent-ship watchdog install
 agent-ship watchdog uninstall
 ```
 
-`slice start` records `worker_dispatched` on branch `ship/<contract>/<slice>` unless `--branch` is set, and registers the timer when a slice is open. On Linux and WSL, `watchdog install` adds a marked block to the user crontab. On macOS it writes `~/Library/LaunchAgents` and runs `launchctl bootstrap`. `--dry-run` does not register. Tests can point `AGENT_SHIP_CRONTAB_CMD` at a fake `crontab` and `AGENT_SHIP_TIMER_HOME` at a throwaway directory. If registration fails, the command prints a warning. `watchdog` and `inbox list` also warn when slices are running and the timer is not active. An orchestrator scheduler or an assistant routine can run `watchdog` instead of the timer. Staleness uses heartbeats and commits on the slice branch only.
+`slice start` records `worker_dispatched` on branch `ship/<contract>/<slice>` unless `--branch` is set, and registers the timer when a slice is open. On Linux and WSL, `watchdog install` adds a marked block to the user crontab. On macOS it writes `~/Library/LaunchAgents` and runs `launchctl bootstrap`. `--dry-run` does not register. Tests can point `AGENT_SHIP_CRONTAB_CMD` at a fake `crontab` and `AGENT_SHIP_TIMER_HOME` at a throwaway directory. Failed registration or known runtime failure rejects slice start before recording dispatch; --allow-untimed explicitly selects manual supervision. `watchdog` and `inbox list` also warn when slices are running and the timer is not active. An orchestrator scheduler or an assistant routine can run `watchdog` instead of the timer. Staleness uses heartbeats and commits on the slice branch only.
 
 ## Check
 
@@ -141,10 +144,10 @@ Pass `--event file.json` instead of `--latest` to plan a specific event.
 
 ```bash
 cd cli
-npm test
-npm run typecheck
+pnpm test
+pnpm typecheck
 ```
 
-`npm test` uses `node:test` via `tsx`. The tests cover the open inbox,
+`pnpm test` uses `node:test` via `tsx`. The tests cover the open inbox,
 `inbox decide`, the pull-by-default policy, the empty-evidence refusal, and
 `notify run` against an allowlisted argv (no shell).

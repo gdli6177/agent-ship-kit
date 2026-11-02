@@ -1,6 +1,6 @@
 {
   "name": "agent-ship-kit",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Acceptance and attention layer for parallel AI coding-agent delivery. The agent-ship command is the local CLI.",
   "license": "MIT",
   "type": "module",
@@ -18,7 +18,9 @@
     "tsx": "^4.20.6"
   },
   "scripts": {
-    "test": "npm test --prefix cli",
-    "typecheck": "npm run typecheck --prefix cli"
-  }
+    "test": "pnpm --dir cli test",
+    "typecheck": "pnpm --dir cli typecheck",
+    "test:dogfood": "node scripts/dogfood.mjs"
+  },
+  "packageManager": "pnpm@10.4.1"
 }
