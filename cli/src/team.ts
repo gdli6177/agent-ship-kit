@@ -12,6 +12,7 @@ export interface TeamConfig {
   learning_required: boolean;
   max_lessons: number;
   summary_chars: number;
+  roles?: string;
 }
 export interface TeamProfile { config: TeamConfig; source: string }
 
@@ -33,10 +34,11 @@ export function parseJson(raw: string, label: string): unknown {
 function parseConfig(value: unknown): TeamConfig {
   if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("team config must be an object");
   const c = value as Record<string, unknown>;
-  const keys = ["version", "handbook", "rules", "lessons", "learning_required", "max_lessons", "summary_chars"];
+  const keys = ["version", "handbook", "rules", "lessons", "learning_required", "max_lessons", "summary_chars", "roles"];
   if (Object.keys(c).some((key) => !keys.includes(key)) || c.version !== 1 || (c.handbook !== null && typeof c.handbook !== "string") || !Array.isArray(c.rules) || !c.rules.every((item) => typeof item === "string") || typeof c.lessons !== "string" || typeof c.learning_required !== "boolean") throw new Error("invalid team config");
   if (typeof c.max_lessons !== "number" || !Number.isInteger(c.max_lessons) || c.max_lessons < 0 || c.max_lessons > 10 || typeof c.summary_chars !== "number" || !Number.isInteger(c.summary_chars) || c.summary_chars < 0 || c.summary_chars > 20000) throw new Error("invalid lesson retrieval budget");
-  for (const path of [c.handbook, ...c.rules, c.lessons]) if (typeof path === "string") assertReference(path);
+  if (c.roles !== undefined && typeof c.roles !== "string") throw new Error("invalid role directory");
+  for (const path of [c.roles, c.handbook, ...c.rules, c.lessons]) if (typeof path === "string") assertReference(path);
   return c as unknown as TeamConfig;
 }
 export async function readTeam(root: string): Promise<TeamProfile | undefined> {

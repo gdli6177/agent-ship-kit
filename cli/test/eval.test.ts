@@ -35,7 +35,7 @@ test("eval fixture matches the check, notify, e2e, and skill baselines", async (
   assert.match(text.stdout(), /baseline=missing_evidence {2}after=missing_evidence/);
   assert.match(text.stdout(), /PASS {2}skill\.ship-e2e {2}skill_text/);
   assert.match(text.stdout(), /PASS {2}e2e\.index {2}e2e_index/);
-  assert.match(text.stdout(), /10 passed, 0 failed/);
+  assert.match(text.stdout(), /12 passed, 0 failed/);
 
   const json = capture();
   assert.equal(await main(["eval", "--fixture", sample, "--json"], json.io), 0);
@@ -48,7 +48,7 @@ test("eval fixture matches the check, notify, e2e, and skill baselines", async (
   };
   assert.equal(report.ok, true);
   assert.equal(report.name, "verifier-gates");
-  assert.equal(report.passed, 10);
+  assert.equal(report.passed, 12);
   assert.equal(report.failed, 0);
   const forbidden = report.cases.find((item) => item.id === "check.forbidden");
   assert.ok(forbidden);
@@ -80,7 +80,7 @@ test("eval exits non-zero and prints before/after when a checkpoint regresses", 
     assert.match(captured.stdout(), /FAIL {2}e2e\.index/);
     assert.match(captured.stdout(), /after=auth~scripted production login/);
     assert.match(captured.stdout(), /PASS {2}notify\.high-evidence/);
-    assert.match(captured.stdout(), /8 passed, 2 failed/);
+    assert.match(captured.stdout(), /10 passed, 2 failed/);
   } finally {
     await rm(root, { recursive: true, force: true });
   }

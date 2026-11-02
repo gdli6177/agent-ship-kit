@@ -240,9 +240,11 @@ export async function showLesson(root: string, id: string) {
   return { lesson: card.lesson, source: card.source };
 }
 
-export async function teamContext(root: string, options: { tags?: string[]; project?: string; repo?: string; auto?: boolean } = {}) {
+export async function teamContext(root: string, options: { tags?: string[]; project?: string; repo?: string; auto?: boolean; role?: string } = {}) {
   const profile = await readTeam(root);
   const required_sources = await requiredSources(root, options.repo);
+  const role = options.role ? await (await import("./roles.js")).showRole(root, options.role) : undefined;
+  if (role) required_sources.push(role.source);
   if ((options.tags?.length ?? 0) > 12) throw new Error("at most 12 retrieval tags");
   const project = options.project === undefined ? undefined : text(options.project, "project", 120);
   const tags = new Set((options.tags ?? []).map((tag) => text(tag, "tag", 120).toLowerCase()));
@@ -280,7 +282,7 @@ export async function teamContext(root: string, options: { tags?: string[]; proj
     lessons.push(summary); chars += size;
   }
   const executionProfile = options.repo && options.repo !== root ? await readTeam(options.repo) : undefined;
-  return { handbook, source_details, applied_to: { project: project ?? null, repo: options.repo ?? root }, profile: profile?.source ?? executionProfile?.source ?? null, required_sources, lessons, review_required, review_required_count: reviewCount, omitted_count: omitted, summary_chars: chars, budget: { max_lessons: max, summary_chars: budget }, query: { tags: [...tags], project: project ?? null }, learning_required: profile?.config.learning_required ?? executionProfile?.config.learning_required ?? false };
+  return { ...(role ? { role: { ...role.card, source: role.source, markdown: role.markdown } } : {}), handbook, source_details, applied_to: { project: project ?? null, repo: options.repo ?? root }, profile: profile?.source ?? executionProfile?.source ?? null, required_sources, lessons, review_required, review_required_count: reviewCount, omitted_count: omitted, summary_chars: chars, budget: { max_lessons: max, summary_chars: budget }, query: { tags: [...tags], project: project ?? null }, learning_required: profile?.config.learning_required ?? executionProfile?.config.learning_required ?? false };
 }
 
 async function inboxRecords(root: string): Promise<Record<string, unknown>[]> {

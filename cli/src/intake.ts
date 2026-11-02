@@ -3,21 +3,13 @@ import { appendFile, mkdir, readFile, readdir, writeFile } from "node:fs/promise
 import { join } from "node:path";
 import { checkContract, checkHardRules, contractFile } from "./check.js";
 import { checkPaths, parseContractPaths } from "./paths.js";
-import { containsSecret } from "./hard-rules.js";
 import { gitOutput, gitPath, repositoryRoot } from "./repository.js";
-import { nextSequence, withLock } from "./storage.js";
+import { nextSequence, readEvents, withLock } from "./storage.js";
+import { authorityViolations, readAuthority, requireActor } from "./authority.js";
 import { optionalText } from "./team.js";
 
-export function safeText(value: string, name: string, max = 1000): string {
-  const result = value.trim();
-  if (!result || result.length > max || /[\r\n\0]/.test(result)) throw new Error(`invalid ${name}: use single-line text up to ${max} characters`);
-  if (containsSecret(result)) throw new Error(`${name} looks like a secret; refusing to store it`);
-  return result;
-}
-export function safeId(id: string): string {
-  if (!/^[A-Za-z0-9][A-Za-z0-9_-]{0,79}$/.test(id)) throw new Error("invalid id");
-  return id;
-}
+export { safeText, safeId } from "./records.js";
+import { safeText, safeId, field, laneId, pointer } from "./records.js";
 export async function writeEvent(root: string, payload: Record<string, unknown>) {
   return withLock(join(root, ".agent-ship"), async () => {
     const sequence = await nextSequence(root);
@@ -33,12 +25,21 @@ function pathList(paths: string[]): string[] {
     return path;
   });
 }
-export async function intake(root: string, input: { text: string; id?: string; direct?: boolean; allowed?: string[]; forbidden?: string[]; acceptedBy?: string; acceptedText?: string }) {
+export async function intake(root: string, input: { text: string; id?: string; direct?: boolean; allowed?: string[]; forbidden?: string[]; acceptedBy?: string; acceptedText?: string; lane?: string; owner?: string }) {
   root = await repositoryRoot(root);
   const request = safeText(input.text, "request");
+  const lane = laneId(input.lane);
+  const owner = input.owner ? safeText(input.owner, "owner", 120) : undefined;
+  if (input.direct && await readAuthority(root)) throw new Error("managed authority uses a draft contract and human contract freeze; --direct cannot self-sign an approval");
   const id = safeId(input.id ?? `proposal_${createHash("sha256").update(request).digest("hex").slice(0, 12)}`);
   const directory = join(root, ".agent-ship/proposals");
   const file = join(directory, `${id}.md`);
+  if (lane !== "default") {
+    if (!owner) throw new Error("a named lane requires its claimed owner");
+    const claim = (await readEvents(root)).filter(event => event.type === "intake_claimed" && event.lane_id === lane).at(-1);
+    if (!claim || claim.owner_ref !== owner) throw new Error("named proposal must match an intake lane/owner claim");
+    if (await readAuthority(root)) await requireActor(root, ["human", "captain", "owner"], undefined, lane);
+  }
   const allowed = pathList(input.allowed ?? []), forbidden = pathList(input.forbidden ?? []);
   if (input.direct && (!allowed.length || !forbidden.length || !input.acceptedBy || !input.acceptedText)) throw new Error("--direct requires --allowed, --forbidden, --accepted-by and --accepted-text recording explicit human authorization");
   const acceptedBy = input.direct ? safeText(input.acceptedBy!, "accepted-by", 120) : "";
@@ -46,8 +47,10 @@ export async function intake(root: string, input: { text: string; id?: string; d
   return withLock(join(root, ".agent-ship"), async () => {
     await mkdir(directory, { recursive: true });
     const previous = await optionalText(file);
+    if (previous && field(previous, "Status") === "superseded") throw new Error("superseded proposals cannot become current again; use a new id");
+    if (previous && laneId(field(previous, "Lane")) !== lane) throw new Error("proposal already belongs to another lane");
     if (previous && !previous.includes(`Request: ${request}\n`)) throw new Error("proposal id already has a different request; use a new id");
-    if (!previous) await writeFile(file, `# Proposal\nProposal id: ${id}\nStatus: draft\nCreated at: ${new Date().toISOString()}\nRequest: ${request}\n\n## Allowed paths\n${allowed.map(p => `- ${p}`).join("\n")}\n\n## Forbidden paths\n${forbidden.map(p => `- ${p}`).join("\n")}\n\n## Acceptance\n- Describe observable completion before freezing.\n\n## Risks / Open questions\n- Resolve consequential questions with the human.\n`, { flag: "wx" });
+    if (!previous) await writeFile(file, `# Proposal\nProposal id: ${id}\nLane: ${lane}\n${owner ? `Owner: ${owner}\n` : ""}Status: draft\nCreated at: ${new Date().toISOString()}\nRequest: ${request}\n\n## Allowed paths\n${allowed.map(p => `- ${p}`).join("\n")}\n\n## Forbidden paths\n${forbidden.map(p => `- ${p}`).join("\n")}\n\n## Acceptance\n- Describe observable completion before freezing.\n\n## Risks / Open questions\n- Resolve consequential questions with the human.\n`, { flag: "wx" });
     let contract: string | null = null;
     if (input.direct) {
       contract = `direct_${id}`;
@@ -61,22 +64,31 @@ export async function intake(root: string, input: { text: string; id?: string; d
         await mkdir(join(root, ".agent-ship/contracts"), { recursive: true });
         await writeFile(contractPath, `# Explicit direct contract\nStatus: frozen\nFrozen by: ${acceptedBy}\nFrozen at: ${at}\nProposal id: ${id}\nAccepted by: ${acceptedBy}\nAccepted at: ${at}\nAccepted text: ${acceptedText}\n## Allowed paths\n${allowed.map(p => `- ${p}`).join("\n")}\n## Forbidden paths\n${forbidden.map(p => `- ${p}`).join("\n")}\n## Acceptance\n- ${request}\n## Slices\n| direct | Explicit human scope | Acceptance passes |\n`, { flag: "wx" });
       }
-      await writeFile(join(root, ".agent-ship/active-contract"), `${contract}\n`);
+      await writeFile(join(root, pointer("active-contract", lane)), `${contract}\n`);
     }
-    await writeFile(join(root, ".agent-ship/active-proposal"), `${id}\n`);
+    const previousCurrent = (await optionalText(join(root, pointer("active-proposal", lane))))?.trim();
+    if (previousCurrent && previousCurrent !== id) {
+      safeId(previousCurrent);
+      const oldPath = join(directory, `${previousCurrent}.md`);
+      const old = await optionalText(oldPath);
+      if (old && field(old, "Status") === "draft") await writeFile(oldPath, old.replace(/^Status: draft$/m, "Status: superseded"));
+    }
+    await writeFile(join(root, pointer("active-proposal", lane)), `${id}\n`);
     if (!previous) {
       const sequence = await nextSequence(root);
-      await appendFile(join(root, ".agent-ship/events.jsonl"), `${JSON.stringify({ id: `evt_intake_${sequence}`, sequence, type: "proposal_ready", title: "Request registered", summary: request.slice(0, 280), request, proposal_id: id, source_task_id: id, created_at: new Date().toISOString() })}\n`);
+      await appendFile(join(root, ".agent-ship/events.jsonl"), `${JSON.stringify({ id: `evt_intake_${sequence}`, sequence, type: "proposal_ready", lane_id: lane, ...(owner ? { owner_ref: owner } : {}), title: "Request registered", summary: request.slice(0, 280), request, proposal_id: id, source_task_id: id, created_at: new Date().toISOString() })}\n`);
     }
-    return { proposal_id: id, path: file, status: input.direct ? "frozen" : "draft", contract_id: contract, unchanged: previous !== null, next: input.direct ? "Explicit direct scope recorded; run guard before execution." : "Read-only investigation only; present the plan and wait for explicit acceptance." };
+    return { lane_id: lane, owner_ref: owner ?? null, proposal_id: id, path: file, status: input.direct ? "frozen" : "draft", contract_id: contract, unchanged: previous !== null, next: input.direct ? "Explicit direct scope recorded; run guard before execution." : "Read-only investigation only; present the plan and wait for explicit acceptance." };
   });
 }
 
-export async function guard(root: string, options: { repo?: string; contract?: string; staged?: boolean } = {}) {
+export async function guard(root: string, options: { repo?: string; contract?: string; staged?: boolean; lane?: string } = {}) {
   root = await repositoryRoot(root);
   const repo = await repositoryRoot(options.repo ?? root);
-  const id = options.contract ?? (await optionalText(join(repo, ".agent-ship/active-contract")))?.trim();
-  const proposal = (await optionalText(join(repo, ".agent-ship/active-proposal")))?.trim() ?? null;
+  let lane = laneId(options.lane ?? (await optionalText(join(repo, ".agent-ship/active-lane")))?.trim());
+  if (options.contract && !options.lane) lane = laneId(field(await readFile(contractFile(root, options.contract), "utf8"), "Lane"));
+  const id = options.contract ?? (await optionalText(join(repo, pointer("active-contract", lane))))?.trim();
+  const proposal = (await optionalText(join(root, pointer("active-proposal", lane))))?.trim() ?? (await optionalText(join(repo, pointer("active-proposal", lane))))?.trim() ?? null;
   const problems: string[] = [];
   let changed: string[] = [];
   if (options.staged) changed = (await gitOutput(repo, ["diff", "--cached", "--name-only", "-z"])).split("\0").filter(Boolean);
@@ -97,17 +109,19 @@ export async function guard(root: string, options: { repo?: string; contract?: s
   if (!id) problems.push("No frozen contract. Run agent-ship intake, present a plan and record explicit human acceptance before execution.");
   else {
     const markdown = await readFile(contractFile(root, id), "utf8");
-    const field = (name: string) => new RegExp(`^${name}:[ \\t]*(.+)$`, "im").exec(markdown)?.[1]?.trim();
+    const contractField = (name: string) => field(markdown, name);
     const paths = parseContractPaths(markdown);
-    if (proposal && field("Proposal id") !== proposal) problems.push("The active proposal has no matching frozen contract; do not reuse an older authorization.");
-    if (field("Status") !== "frozen" || !field("Frozen by") || field("Frozen by")?.startsWith("<") || !Number.isFinite(Date.parse(field("Frozen at") ?? "")) || !paths.allowed.length || !paths.forbidden.length) problems.push("Contract must be frozen with human, time, allowed and forbidden paths.");
+    if (proposal && contractField("Proposal id") !== proposal) problems.push("The active proposal has no matching frozen contract; do not reuse an older authorization.");
+    if (contractField("Status") !== "frozen" || !contractField("Frozen by") || contractField("Frozen by")?.startsWith("<") || !Number.isFinite(Date.parse(contractField("Frozen at") ?? "")) || !paths.allowed.length || !paths.forbidden.length) problems.push("Contract must be frozen with human, time, allowed and forbidden paths.");
+    if (laneId(field(markdown, "Lane")) !== lane) problems.push("contract belongs to a different lane");
+    problems.push(...await authorityViolations(root, { id, markdown }));
     for (const violation of checkPaths(changed, paths)) problems.push(`${violation.path}: ${violation.rule}`);
     if (options.staged) {
       const result = await checkContract(root, id, { staged: true, repoRoot: repo });
       if (!result.ok) problems.push("Staged contract or hard-rule check failed.");
     }
   }
-  return { ok: problems.length === 0, contract_id: id ?? null, proposal_id: proposal, repo_root: repo, changed, problems };
+  return { ok: problems.length === 0, lane_id: lane, contract_id: id ?? null, proposal_id: proposal, repo_root: repo, changed, problems };
 }
 
 export async function doctor(root: string, repo = root) {

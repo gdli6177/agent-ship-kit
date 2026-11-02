@@ -31,7 +31,7 @@ required_sources 的正文和有界 active 经验；路径回执不能代替阅�
 
 ## Result
 
-Reply to the captain with:
+Reply to the lane owner (or the captain in legacy single-lane mode) with:
 
 - `agree` or `disagree`
 - the check JSON (`ok`, `violations`)

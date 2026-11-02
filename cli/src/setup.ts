@@ -30,9 +30,14 @@ export const RULES_BLOCK = `${RULES_START}
 These rules stay in force for every agent in this checkout. \`/ship-setup\` rewrites this block in place; it does not append a second copy. Default setup is local to this clone and does not change a shared ignore file.
 
 - In the captain conversation you are a router, not an executor. Talk to the human, draft contracts, dispatch, route, and record. The captain does not edit product code or run long tasks. A worker explicitly assigned a frozen slice executes only that slice; a verifier remains read-only.
-- Do not block waiting on a worker. Keep accepting new requests while workers run.
+- One human-facing captain; each independent demand has a temporary owner and lane. Read the installed kit's docs/owner-lanes.md before managing parallel demands. Owners coordinate scouts/workers/verifiers and return artifacts; they never become another captain.
+- Do not block waiting on a worker. Keep accepting new requests while workers run. The captain consumes scout summaries and decision lists; delegate repository inspection, tests, builds and Git work.
+- For multiple demands use \`intake add --text "<request>" --project <id>\`, then \`intake claim <id> --by <owner-ref> --lane <lane>\`. Keep exactly one current proposal per lane, never one global proposal across all demands. Resolve ambiguous short instructions to the intended lane before acting.
+- The trusted host binds authenticated actors, registers human/captain with \`authority init\`, installs the normalized pre-tool adapter and resets captain heartbeat once per human-facing turn. Never select another actor, rewrite authority/limits, reset your own turn budget, or bypass the hook. CLI receipts are application guards; the host must protect identity and filesystem policy.
+- Only the registered human channel may \`contract freeze\`, \`inbox decide\` or \`limits set\`. Only the captain may execute \`notify run\`. Owners/workers return inbox/artifacts; roles/templates are portable, live instances are temporary.
+- Before dispatch request a scout card (conclusion, affected paths, acceptance commands, risks, evidence). Select each slice's role; missing/malformed role cards block dispatch. Role forbidden paths add to contract forbidden paths and never widen allowed scope.
 - Follow-ups on a subscribed thread go to the owning worker. You handle new or unowned events and cross-slice coordination.
-- Every execution request, including 继续、接管、收口、上测试、上线、你来做, starts with \`agent-ship intake --text "<request>"\`. Read-only investigation may clarify a plan; no product edits, long tests, CI execution or dispatch before acceptance. Present the proposal promptly; do not stretch investigation into execution.
+- Legacy single-lane execution requests, including 继续、接管、收口、上测试、上线、你来做, start with \`agent-ship intake --text "<request>"\`. Read-only investigation may clarify a plan; no product edits, long tests, CI execution or dispatch before acceptance. Present the proposal promptly; do not stretch investigation into execution.
 - Before execution run \`agent-ship guard\`. No frozen contract means STOP: show the registered proposal and ask for acceptance. \`intake --direct\` requires the human's explicit direct-execution instruction, allowed/forbidden scope and acceptance; never infer it from "continue". It does not modify hard rules.
 - Do not spawn a worker until the human freezes the contract.
 - Edit only Allowed paths on the frozen contract. Never touch Forbidden paths. Workers do the edits.
@@ -45,7 +50,7 @@ These rules stay in force for every agent in this checkout. \`/ship-setup\` rewr
 - After independent verification, the captain records \`agent-ship lesson check\` with none/candidate, a reason and the verifier reference. Routine work may produce none. Candidates require evidence, scope, reuse value and deduplication before activation.
 - Only the human merges or ships. Do not merge to main or master and do not deploy to production.
 - Never read, write, or repeat passwords, cookies, or storageState contents.
-- Manage the workflow for the human: new requests → ship-contract; explicit acceptance of the just-presented plan plus “start” → freeze, then ship-dispatch; progress questions → real adapter status and inbox; result review/decisions → ship-inbox. Resolve ids and next steps yourself. Ask only about material ambiguity, scope, permissions or human decisions, not routine mechanics. Never treat silence or casual acknowledgement as approval.
+- Manage the workflow for the human: new requests → ship-contract; explicit acceptance of the just-presented plan plus “start” → trusted human freeze, then ship-dispatch; progress questions → real adapter status and inbox; result review/decisions → ship-inbox. Resolve ids and next steps yourself. Ask only about material ambiguity, scope, permissions or human decisions, not routine mechanics. Never treat silence or casual acknowledgement as approval.
 - A clear “按这个方案开始 / Start with this plan” may freeze and authorize dispatch only when the exact presented proposal is unambiguous. Record its id, accepted text, human and time first. No repeated dispatch command is needed; freeze-only approval does not authorize starting.
 - Restore existing contracts, inbox and actual worker status on a new conversation; do not duplicate dispatch. A setup report or task record does not prove worker execution is available.
 - Each \`/ship-*\` command is an optional shortcut to the skill without the slash. Prefer natural language; do not make the human remember the sequence. Resolve skill files below under the installed kit at \`$HOME/.agent-ship-kit/current/\` (or the actual manual clone), not relative to this project. Deterministic steps call the \`agent-ship\` CLI.
@@ -198,6 +203,14 @@ ${HOOK_START}
 root=$(git rev-parse --show-toplevel) || exit 1
 contract=""
 id_file="$root/.agent-ship/active-contract"
+if [ -f "$root/.agent-ship/active-lane" ]; then
+  lane=$(tr -d '\\r\\n' < "$root/.agent-ship/active-lane") || exit 1
+  case "$lane" in
+    ""|default) ;;
+    *[!A-Za-z0-9_-]*) echo "agent-ship: invalid active lane" >&2; exit 1 ;;
+    *) id_file="$root/.agent-ship/active-contract.$lane" ;;
+  esac
+fi
 if [ -f "$id_file" ]; then
   contract=$(tr -d ' \\t\\r\\n' < "$id_file")
 fi

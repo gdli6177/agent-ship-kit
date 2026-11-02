@@ -38,7 +38,7 @@ An installed CLI does not supply a worker runtime. The captain should discover e
 Add an “unfinished only” filter to the task list. Keep other behavior unchanged.
 ```
 
-The captain inspects the implementation, reads applicable rules and bounded lessons, and proposes acceptance checks. It shows one short plan: what changes, what is affected and how completion will be judged. It resolves technical details itself and asks only questions that need your decision.
+The captain requests a concise scout investigation, reads applicable rules and bounded lessons, and proposes acceptance checks. It shows one short plan: what changes, what is affected and how completion will be judged. It resolves technical details itself and asks only questions that need your decision.
 
 Revise the request if necessary. To approve the exact plan just shown and authorize work, reply:
 
@@ -89,6 +89,12 @@ Ordinary reviews are pull by default: ask for progress or results when you retur
 | [cli/](cli/) | `setup`, `check`, inbox, `notify dry-run`, `notify run` |
 
 The product definition in Chinese is [docs/PRODUCT.md](docs/PRODUCT.md). Event, adapter, and notify behavior is [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
+
+## Parallel demands in v0.2
+
+Keep one human-facing captain and a temporary owner per demand lane. `intake add/list/claim` is a durable queue; current proposals and active contracts are lane-scoped, so request B cannot invalidate A. `status --brief` reports availability, per-lane stage/owner/idle time and the exact pending-human counters. Portable owner/scout/worker/verifier cards define capabilities, while runtime instances are created only when needed.
+
+[Owner lanes and host integration](docs/owner-lanes.md) covers authenticated actor binding, human freeze receipts, approved limits, captain-only notifications, the executable pre-tool guard, turn budgets, role cards and `slice open`. A generic hook must be connected by the host; installing skills alone does not enforce tool access or authenticate a human. Legacy default-lane workflows remain available; actual notification execution now requires registered captain authority.
 
 ## Install
 

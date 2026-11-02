@@ -1,14 +1,16 @@
 # Proposal card 方案卡
 
 Status: draft
+Lane: `<lane_id; default for legacy single lane>`
+Owner: `<temporary owner ref>`
 Proposal id: `<proposal_id>`
 Opened: `<YYYY-MM-DD>`
 
 这不是合同。工人不会从这张卡开工。船长维护它；人冻结，或者退回。
 This card is not a contract. Workers are not spawned from it.
 
-讨论模式：同一时间只摆这一张当前方案。每轮改完，更新下面的「本轮变更」。
-Discussion mode: one current proposal. After each round, fill "What changed".
+讨论模式：每个 lane 同一时间只摆一张当前方案。每轮改完，更新下面的「本轮变更」。
+Discussion mode: one current proposal per lane. After each round, fill "What changed".
 
 ## Ask 需求
 

@@ -26,12 +26,17 @@ import {
   repeatedNoteCount,
   type PromoteInput,
 } from "./hard-rules.js";
+import { addIntake, claimIntake, intakeEntries, transitionIntake, briefStatus, captainHeartbeat } from "./intake-queue.js";
+import { initializeAuthority, actorIdentity, readAuthority, freezeContract, setHumanLimits, assertCaptainNotification } from "./authority.js";
+import { listRoles, showRole } from "./roles.js";
+import { guardTool, type GuardedTool } from "./tool-guard.js";
+import { openSlice } from "./slice-open.js";
 import { readEvents } from "./storage.js";
 import { intake, guard, doctor, writeEvent } from "./intake.js";
 import { addCorrection, extractLearning, reviewLearning, proposeHandbook, recordLessonUse } from "./corrections.js";
 import { setupProject } from "./setup.js";
 import { addLesson, checkLearning, reviewLesson, showLesson, teamContext, pendingLearning } from "./learning.js";
-import { activeSlices, installWatchdogTimer, runWatchdog, startSlice, updateSlice, watchdogStatus, watchdogDoctor, uninstallWatchdogTimer } from "./watchdog.js";
+import { allSlices, activeSlices, installWatchdogTimer, runWatchdog, startSlice, updateSlice, watchdogStatus, watchdogDoctor, uninstallWatchdogTimer } from "./watchdog.js";
 import type { AttentionType, EventLinks, InboxRecord, Priority } from "./types.js";
 
 export interface Io {
@@ -51,6 +56,21 @@ const defaultIo: Io = {
 const USAGE = `agent-ship — local inbox, path check, and notify
 
 Usage:
+  agent-ship intake add --text TEXT --project ID [--id ID] [--by REF] [--channel chat|cli|im|agent|ci] [--root DIR]
+  agent-ship intake list [--state open|claimed|done|dropped|all] [--root DIR]
+  agent-ship intake claim ID --by OWNER [--lane ID] [--root DIR]
+  agent-ship intake update ID --state done|dropped [--root DIR]
+  agent-ship status [--brief] [--root DIR]
+  agent-ship status decisions [--root DIR]
+  agent-ship captain heartbeat [--busy-until ISO] [--root DIR]
+  agent-ship authority init --human REF --captain REF [--root DIR]
+  agent-ship authority status [--root DIR]
+  agent-ship contract freeze --contract ID --by HUMAN --accepted-text TEXT [--root DIR]
+  agent-ship limits set --global-max-parallel N --by HUMAN [--root DIR]
+  agent-ship role list|show [ID] [--root DIR]
+  agent-ship guard tool --input FILE [--repo DIR] [--root DIR]
+  agent-ship guard command --argv JSON [--root DIR]
+  agent-ship slice open (same arguments as slice start; --repo required; prepares checkout/packet but does not spawn)
   agent-ship intake --text TEXT [--id ID] [--root DIR]
   agent-ship intake --direct --text TEXT --allowed GLOB --forbidden GLOB --accepted-by HUMAN --accepted-text TEXT [--id ID] [--root DIR]
   agent-ship guard [--contract ID] [--repo DIR] [--staged] [--root DIR]
@@ -115,6 +135,7 @@ Exit 0 when they match; non-zero on regression. Use it when changing ship-* skil
 `;
 
 const VALUE_OPTIONS = new Set([
+  "lane", "owner", "by", "channel", "state", "human", "captain", "busy-until", "global-max-parallel", "role", "argv",
   "text", "scope", "when", "corrected-by", "since", "from-lesson", "accepted-by", "accepted-text", "allowed", "forbidden",
   "title",
   "summary",
@@ -151,7 +172,7 @@ const VALUE_OPTIONS = new Set([
   "kind", "message", "source", "command-hint", "promote", "glob", "inbox",
 ]);
 const REPEATABLE = new Set(["evidence", "tag", "candidate-id", "trigger", "glob", "demand", "allowed", "forbidden"]);
-const BOOL_FLAGS = new Set(["json", "latest", "help", "all", "shared", "uninstall", "purge", "staged", "stale", "dry-run", "replace", "hard-rules", "auto", "direct", "team", "allow-untimed"]);
+const BOOL_FLAGS = new Set(["json", "latest", "help", "all", "shared", "uninstall", "purge", "staged", "stale", "dry-run", "replace", "hard-rules", "auto", "direct", "team", "allow-untimed", "brief"]);
 
 interface ParsedArgs {
   positionals: string[];
@@ -295,6 +316,8 @@ async function inboxAdd(parsed: ParsedArgs, io: Io): Promise<number> {
     },
     reason: one(parsed.values, "reason") ? assertBlockReason(one(parsed.values, "reason") as string) : undefined,
     id: one(parsed.values, "id"),
+    laneId: one(parsed.values, "lane"),
+    ownerRef: one(parsed.values, "owner"),
   });
   if (event.type === "needs_review" && event.priority === "high" && event.evidence_urls.length === 0) {
     io.stderr("warning: high priority needs_review has no evidence URLs and will not be paged\n");
@@ -313,6 +336,7 @@ async function inboxList(parsed: ParsedArgs, io: Io): Promise<number> {
   const items = await listInbox(root, {
     priority,
     type,
+    lane: one(parsed.values, "lane"),
     openOnly: !parsed.flags.has("all"),
   });
   await warnIfTimerInactive(root, io);
@@ -365,6 +389,11 @@ async function inboxDecide(parsed: ParsedArgs, io: Io): Promise<number> {
     throw new Error("usage: inbox decide <id> accept|changes_requested|reject");
   }
   const decision = assertDecision(decisionText);
+  const selectedLane = one(parsed.values, "lane");
+  if (selectedLane) {
+    const item = (await readInbox(one(parsed.values, "root") ?? process.cwd())).find(item => item.id === subjectId);
+    if ((item?.lane_id ?? "default") !== selectedLane) throw new Error("review item belongs to a different lane");
+  }
   if (parsed.values.has("kind")) {
     throw new Error("--kind is for promote; inbox decide uses --promote hook|contract|verify");
   }
@@ -452,6 +481,7 @@ async function notifyCommand(parsed: ParsedArgs, io: Io, execute: boolean): Prom
     return 1;
   }
 
+  await assertCaptainNotification(one(parsed.values, "root") ?? process.cwd());
   const exitCode = await executeArgv(plan.argv, io);
   const result = {
     ...plan,
@@ -484,7 +514,8 @@ async function runSliceStart(parsed: ParsedArgs, io: Io): Promise<number> {
   const root = one(parsed.values, "root") ?? process.cwd();
   const contractId = requireOne(parsed.values, "contract");
   const sliceId = requireOne(parsed.values, "slice");
-  const started = await startSlice(root, {
+  const prepare = parsed.positionals[1] === "open" ? openSlice : startSlice;
+  const started = await prepare(root, {
     title: requireOne(parsed.values, "title"),
     summary: requireOne(parsed.values, "summary"),
     sourceTaskId: requireOne(parsed.values, "source-task-id"),
@@ -499,6 +530,7 @@ async function runSliceStart(parsed: ParsedArgs, io: Io): Promise<number> {
     project: one(parsed.values, "project"),
     proposalId: one(parsed.values, "proposal"),
     allowUntimed: parsed.flags.has("allow-untimed"),
+    lane: one(parsed.values, "lane"),
     threadRefs: {
       pr: one(parsed.values, "thread-pr"),
       issue: one(parsed.values, "thread-issue"),
@@ -591,6 +623,17 @@ async function runCheck(parsed: ParsedArgs, io: Io): Promise<number> {
   return result.ok ? 0 : 1;
 }
 
+async function readGuardInput(path: string): Promise<string> {
+  if (path !== "-") return readFile(path, "utf8");
+  const chunks: Buffer[] = []; let size = 0;
+  for await (const chunk of process.stdin) {
+    const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+    size += buffer.length; if (size > 65536) throw new Error("host tool event exceeds 64 KB");
+    chunks.push(buffer);
+  }
+  return Buffer.concat(chunks).toString("utf8");
+}
+
 export async function main(argv: string[], io: Io = defaultIo): Promise<number> {
   let parsed: ParsedArgs;
   try {
@@ -614,16 +657,53 @@ export async function main(argv: string[], io: Io = defaultIo): Promise<number> 
     if (parsed.flags.has("auto") && !(group === "lesson" && sub === "add") && !(group === "team" && sub === "context")) throw new Error("--auto is only valid with lesson add or team context");
     if ((parsed.values.get("demand")?.length ?? 0) > 0 && !(group === "lesson" && sub === "add" && parsed.flags.has("auto"))) throw new Error("--demand is only valid with lesson add --auto");
     if ((group === "team" && sub === "context") || (group === "lesson" && sub === "search")) {
-      const context = await teamContext(root, { tags: parsed.values.get("tag"), project: one(parsed.values, "project"), repo: one(parsed.values, "repo"), auto: parsed.flags.has("auto") });
+      const context = await teamContext(root, { tags: parsed.values.get("tag"), project: one(parsed.values, "project"), repo: one(parsed.values, "repo"), role: one(parsed.values, "role"), auto: parsed.flags.has("auto") });
       if (parsed.flags.has("auto")) await recordLessonUse(root, context.lessons.map(l => l.id), "team_context", one(parsed.values, "source-task-id"), one(parsed.values, "project"));
       io.stdout(`${JSON.stringify(context, null, 2)}\n`); return 0;
     }
+    if (group === "intake" && sub) {
+      let result;
+      if (sub === "add") result = await addIntake(root, { text: requireOne(parsed.values, "text"), project: requireOne(parsed.values, "project"), id: one(parsed.values, "id"), by: one(parsed.values, "by"), channel: one(parsed.values, "channel") });
+      else if (sub === "list") result = await intakeEntries(root, one(parsed.values, "state") ?? "open");
+      else if (sub === "claim") result = await claimIntake(root, parsed.positionals[2] ?? "", requireOne(parsed.values, "by"), one(parsed.values, "lane"));
+      else if (sub === "update") result = await transitionIntake(root, parsed.positionals[2] ?? "", requireOne(parsed.values, "state"));
+      else throw new Error("unknown intake command");
+      io.stdout(`${JSON.stringify(result, null, 2)}\n`); return 0;
+    }
+    if (group === "authority") {
+      const result = sub === "init" ? await initializeAuthority(root, requireOne(parsed.values, "human"), requireOne(parsed.values, "captain")) : sub === "status" ? { configured: !!await readAuthority(root), actor: await actorIdentity(root) } : null;
+      if (!result) throw new Error("unknown authority command");
+      io.stdout(`${JSON.stringify(result, null, 2)}\n`); return 0;
+    }
+    if (group === "contract" && sub === "freeze") {
+      io.stdout(`${JSON.stringify(await freezeContract(root, requireOne(parsed.values, "contract"), requireOne(parsed.values, "by"), requireOne(parsed.values, "accepted-text")), null, 2)}\n`); return 0;
+    }
+    if (group === "limits" && sub === "set") {
+      io.stdout(`${JSON.stringify(await setHumanLimits(root, requireOne(parsed.values, "by"), Number(requireOne(parsed.values, "global-max-parallel"))), null, 2)}\n`); return 0;
+    }
+    if (group === "role") {
+      const result = sub === "list" ? await listRoles(root) : sub === "show" ? await showRole(root, parsed.positionals[2] ?? requireOne(parsed.values, "id")) : null;
+      if (!result) throw new Error("unknown role command");
+      io.stdout(`${JSON.stringify(result, null, 2)}\n`); return 0;
+    }
+    if (group === "captain" && sub === "heartbeat") {
+      io.stdout(`${JSON.stringify(await captainHeartbeat(root, one(parsed.values, "busy-until")), null, 2)}\n`); return 0;
+    }
+    if (group === "status" && !parsed.flags.has("stale")) {
+      const result = await briefStatus(root);
+      io.stdout(`${JSON.stringify(sub === "decisions" ? { decision_list: result.decision_list, omitted: result.decisions_omitted } : result, null, 2)}\n`); return 0;
+    }
+    if (group === "guard" && (sub === "tool" || sub === "command")) {
+      const input = sub === "command" ? { tool: "shell", argv: JSON.parse(requireOne(parsed.values, "argv")) } : JSON.parse(await readGuardInput(requireOne(parsed.values, "input")));
+      const result = await guardTool(root, input as GuardedTool, one(parsed.values, "repo"));
+      io.stdout(`${JSON.stringify(result, null, 2)}\n`); return result.allowed ? 0 : 2;
+    }
     if (group === "intake" && !sub) {
-      const result = await intake(root, { text: requireOne(parsed.values, "text"), id: one(parsed.values, "id"), direct: parsed.flags.has("direct"), allowed: parsed.values.get("allowed"), forbidden: parsed.values.get("forbidden"), acceptedBy: one(parsed.values, "accepted-by"), acceptedText: one(parsed.values, "accepted-text") });
+      const result = await intake(root, { text: requireOne(parsed.values, "text"), id: one(parsed.values, "id"), direct: parsed.flags.has("direct"), allowed: parsed.values.get("allowed"), forbidden: parsed.values.get("forbidden"), acceptedBy: one(parsed.values, "accepted-by"), acceptedText: one(parsed.values, "accepted-text"), lane: one(parsed.values, "lane"), owner: one(parsed.values, "owner") });
       io.stdout(`${JSON.stringify(result, null, 2)}\n`); return 0;
     }
     if (group === "guard" && !sub) {
-      const result = await guard(root, { contract: one(parsed.values, "contract"), repo: one(parsed.values, "repo"), staged: parsed.flags.has("staged") });
+      const result = await guard(root, { contract: one(parsed.values, "contract"), repo: one(parsed.values, "repo"), staged: parsed.flags.has("staged"), lane: one(parsed.values, "lane") });
       io.stdout(`${JSON.stringify(result, null, 2)}\n`); return result.ok ? 0 : 1;
     }
     if (group === "doctor" && !sub) {
@@ -679,8 +759,12 @@ export async function main(argv: string[], io: Io = defaultIo): Promise<number> 
       return result.warning ? 1 : 0;
     }
     if (group === "watchdog" && sub === undefined) return await runWatchdogCommand(parsed, io);
-    if (group === "slice" && sub === "start") return await runSliceStart(parsed, io);
+    if (group === "slice" && (sub === "start" || sub === "open")) return await runSliceStart(parsed, io);
     if (group === "slice" && sub === "update") {
+      if (one(parsed.values, "lane")) {
+        const task = (await allSlices(root)).find(task => task.source_task_id === one(parsed.values, "source-task-id"));
+        if ((task?.lane_id ?? "default") !== one(parsed.values, "lane")) throw new Error("task belongs to a different lane");
+      }
       const result = await updateSlice(one(parsed.values, "root") ?? process.cwd(), requireOne(parsed.values, "source-task-id"), requireOne(parsed.values, "status"), one(parsed.values, "summary"), one(parsed.values, "worker"), parsed.flags.has("allow-untimed"));
       io.stdout(`${JSON.stringify(result, null, 2)}\n`);
       return 0;

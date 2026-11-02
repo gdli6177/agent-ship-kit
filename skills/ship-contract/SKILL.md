@@ -17,6 +17,15 @@ Read `proposal-card.md` and `contract-card.md` from the installed kit at
 manual clone keeps the same files under `templates/`. Do not invent a second
 card format.
 
+## Parallel lanes and authority (v0.2)
+
+Read `$HOME/.agent-ship-kit/current/docs/owner-lanes.md` (or the actual kit clone). One human-facing captain routes a durable `intake add/list/claim` queue; temporary owners hold independent lanes and coordinate scouts/workers/verifiers. Keep one current proposal **per lane**. The captain delegates repository inspection/tests/Git work and returns a concise conclusion/tradeoff/evidence/recommendation/id list. External channels enqueue only.
+
+The trusted host binds actors, initializes human/captain authority, connects `scripts/host-pre-tool.mjs`, and starts each captain turn with heartbeat outside model-controlled tools. Never choose another actor or reset your own budget. Registered human channel alone freezes/decides/changes limits; captain alone executes notification. Owners/workers only return lane artifacts/inbox. These application guards require host authentication and sandbox enforcement; local env names alone are not authenticated identities.
+
+Use Lane/Owner headers, independent checkouts, optional slice role cards, and `--lane` for routed actions. `slice open` prepares worktree/hooks/admission/pending packet/check; its `spawn_required` means the adapter must still launch a real instance. A missing/malformed role blocks dispatch. Role forbiddens add to contract forbiddens, never widen scope. A frozen file is immutable; append state to events, not its dispatch-log table.
+
+
 ## When to use
 
 - Intake is concrete enough to name an outcome and a check.
@@ -44,8 +53,9 @@ forbidden、accepted-by、accepted-text。不得把“继续”当作直接执�
 
 ## Discussion mode
 
-The human describes an outcome; you manage the procedure. Inspect the project
-to resolve technical details yourself, suggest acceptance checks and ask only
+The human describes an outcome; you manage the procedure. Ask the lane owner
+for a read-only scout card (conclusion, paths, acceptance commands, risks and evidence),
+then propose acceptance checks without inspecting repository source yourself. Ask only
 questions that materially affect the result. Show a concise goal, scope and
 acceptance summary, with details available on request. Generate and retain ids
 yourself; never require the human to copy them between skills.
@@ -61,7 +71,7 @@ accepted version cannot be recovered, ask one focused clarification. A bare
 While the card is `draft`, talk freely. Do not treat the conversation as a
 freeze, and do not spawn a worker.
 
-- Keep exactly one current proposal. Alternatives go in "Other options" on
+- Keep exactly one current proposal per lane. Alternatives go in "Other options" on
   that card. If an older draft exists, set it to `superseded` and stop
   showing it as a choice.
 - After every human turn that changes scope, acceptance, allowed paths,
@@ -100,7 +110,7 @@ freeze, and do not spawn a worker.
    the captain deciding for itself, a worker or another agent cannot freeze.
 4. On freeze, copy the accepted text into
    `.agent-ship/contracts/<contract_id>.md` using `$HOME/.agent-ship-kit/current/templates/contract-card.md`.
-   Set status to `frozen`. Record the exact plan in `Accepted text`, the human
+   Prepare status `draft`. In managed authority mode the registered human channel runs `contract freeze` with the exact accepted text; do not self-sign by editing names. In legacy mode record the exact plan in `Accepted text`, the human
    in `Accepted by`, the time in `Accepted at`, and `Proposal id`. Also record
    who froze it and when, and copy Allowed paths, Forbidden paths, and the
    Human review budget (the same count, the same purpose list, and the same
@@ -114,7 +124,7 @@ freeze, and do not spawn a worker.
    higher than the global cap in `templates/workflow.md`).
 5. Split the work into slices. One slice is one worker. Each slice lists the
    inputs that worker may see and the acceptance lines it owns.
-6. Leave the dispatch log empty. `ship-dispatch` appends to it.
+6. Leave the dispatch log empty. Dispatch writes the event log; never append to a frozen contract.
 7. If the human also authorized starting, hand off directly to `ship-dispatch`.
    If they only froze, report that it is ready without claiming work started.
 
@@ -124,7 +134,7 @@ Do not edit a file whose status is `frozen`.
 
 1. Stop the slices the change affects. Leave finished slices that the new text does not touch; their branches and packets stay.
 2. Draft a new contract id. Set `Supersedes` to the old id. Do not spawn from the draft.
-3. The owner re-freezes the new contract. Until that freeze, the old contract still covers slices you did not stop.
+3. The human re-freezes the new contract. Until that freeze, the old contract still covers slices you did not stop.
 4. Dispatch only the stopped slices, against the new id, and only after the new freeze.
 
 ## Worker boundary, written into the contract

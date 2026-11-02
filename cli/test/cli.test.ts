@@ -225,6 +225,7 @@ test("cli decide hides the item and notify run refuses a high page without evide
 
 test("notify run executes an allowlisted argv and nothing else", async () => {
   const root = await mkdtemp(join(tmpdir(), "agent-ship-run-"));
+  const previousActor = process.env.AGENT_SHIP_ACTOR;
   const sentinel = join(root, "ran.txt");
   const script = join(root, "mark.js");
   await writeFile(script, "require('node:fs').writeFileSync(process.argv[2], 'ran');\n");
@@ -258,6 +259,9 @@ test("notify run executes an allowlisted argv and nothing else", async () => {
       ),
       0,
     );
+    delete process.env.AGENT_SHIP_ACTOR;
+    assert.equal(await main(["authority", "init", "--root", root, "--human", "fixture-human", "--captain", "fixture-captain"], capture().io), 0);
+    process.env.AGENT_SHIP_ACTOR = "fixture-captain";
     const ran = capture();
     const code = await main(
       ["notify", "run", "--root", root, "--latest", "--policy", policy, "--allowlist", allowlist],
@@ -291,6 +295,7 @@ test("notify run executes an allowlisted argv and nothing else", async () => {
     assert.equal(JSON.parse(denied.stdout()).allow, false);
     assert.equal(await readFile(sentinel, "utf8"), "ran");
   } finally {
+    if (previousActor === undefined) delete process.env.AGENT_SHIP_ACTOR; else process.env.AGENT_SHIP_ACTOR = previousActor;
     await rm(root, { recursive: true, force: true });
   }
 });

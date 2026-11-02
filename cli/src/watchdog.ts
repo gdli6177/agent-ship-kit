@@ -5,6 +5,9 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import { createRequire } from "node:module";
 import { promisify } from "node:util";
+import { authorityViolations, readAuthority, requireActor } from "./authority.js";
+import { contractRoles, roleWarnings } from "./roles.js";
+import { digest, field, laneId, pointer } from "./records.js";
 import { checkContract, contractFile } from "./check.js";
 import { addInboxItem, assertSummary, listInbox, newEventId, readInbox } from "./inbox.js";
 import { kitRoot } from "./setup.js";
@@ -57,6 +60,9 @@ export interface TimerInstall {
 }
 
 interface SliceState {
+  lane_id?: string;
+  owner_ref?: string;
+  role_id?: string;
   source_task_id: string;
   contract_id?: string;
   slice_id?: string;
@@ -457,6 +463,8 @@ export async function uninstallWatchdogTimer(root: string, options: { dryRun?: b
 }
 
 export async function readLimits(root: string): Promise<Limits> {
+  const violations = await authorityViolations(root);
+  if (violations.length) throw new Error(violations.join("; "));
   const limits: Limits = {
     stale_minutes: DEFAULT_STALE_MINUTES,
     speculative: false,
@@ -516,6 +524,9 @@ export function foldSlices(events: readonly Record<string, unknown>[]): SliceSta
       const current = slices.get(task);
       slices.set(task, {
         source_task_id: task,
+        lane_id: text(event.lane_id) ?? current?.lane_id,
+        owner_ref: text(event.owner_ref) ?? current?.owner_ref,
+        role_id: text(event.role_id) ?? current?.role_id,
         contract_id: text(event.contract_id) ?? current?.contract_id,
         slice_id: text(event.slice_id) ?? current?.slice_id,
         title: text(event.title) ?? current?.title ?? task,
@@ -693,7 +704,9 @@ export async function runWatchdog(
       branch: slice.branch,
       threadRefs: slice.thread_refs,
       reason,
-    });
+      laneId: slice.lane_id,
+      ownerRef: slice.owner_ref,
+    }, true);
     flagged.push({
       source_task_id: slice.source_task_id,
       contract_id: slice.contract_id ?? null,
@@ -725,6 +738,7 @@ export interface SliceStartInput {
   project?: string;
   proposalId?: string;
   allowUntimed?: boolean;
+  lane?: string;
 }
 
 function contractField(markdown: string, label: string): string {
@@ -776,24 +790,48 @@ async function dispatchTerms(root: string, contractId: string, sliceId: string) 
   return { cap, paths };
 }
 
+/** Read-only preflight. Dispatch repeats this under the state lock after checkout preparation. */
+export async function preflightSlice(root: string, input: SliceStartInput) {
+  const summary = assertSummary(input.summary);
+  for (const [name, value] of Object.entries({ title: input.title, sourceTaskId: input.sourceTaskId, sliceId: input.sliceId })) {
+    if (!value.trim() || /[\r\n\0]/.test(value)) throw new Error(`${name} must be non-empty single-line text`);
+  }
+  const { cap, paths } = await dispatchTerms(root, input.contractId, input.sliceId);
+  const markdown = await readFile(contractFile(root, input.contractId), "utf8");
+  const lane = laneId(field(markdown, "Lane"));
+  const owner = field(markdown, "Owner");
+  const currentProposal = (await readOptionalText(join(root, pointer("active-proposal", lane))))?.trim();
+  if (currentProposal && currentProposal !== field(markdown, "Proposal id")) throw new Error("lane has a newer current proposal; its frozen acceptance is required before dispatch");
+  if (input.lane && laneId(input.lane) !== lane) throw new Error("contract belongs to a different lane");
+  const authorityProblems = await authorityViolations(root, { id: input.contractId, markdown });
+  if (authorityProblems.length) throw new Error(authorityProblems.join("; "));
+  const authority = await readAuthority(root);
+  if (authority) {
+    await requireActor(root, ["human", "captain", "owner"], undefined, lane);
+    if (!input.workerRef?.trim()) throw new Error("managed tasks require --worker");
+    if (authority.humans.includes(input.workerRef) || authority.captain === input.workerRef) throw new Error("worker must be independent from human and captain");
+  }
+  const roles = await contractRoles(root, markdown, input.sliceId);
+  const role = roles[0]!;
+  if (owner && input.workerRef === owner) throw new Error("lane owner and slice worker must be independent identities");
+  const previous = await allSlices(root);
+  if (previous.some((slice) => slice.source_task_id === input.sourceTaskId)) throw new Error("source_task_id has already been dispatched");
+  const sameSlice = previous.filter((slice) => slice.contract_id === input.contractId && slice.slice_id === input.sliceId);
+  if (sameSlice.length && !(input.replace && sameSlice.every((slice) => slice.status === "failed" || slice.status === "cancelled"))) throw new Error("slice already dispatched; only failed/cancelled work may be replaced with --replace");
+  const active = previous.filter((slice) => slice.status === "running" || slice.status === "queued");
+  const limits = await readLimits(root);
+  if (active.length >= limits.global_max_parallel) throw new Error("global_max_parallel reached");
+  if (active.filter((slice) => slice.contract_id === input.contractId).length >= cap) throw new Error("contract max_parallel reached");
+  return { summary, cap, paths, markdown, lane, owner, roles, role, previous, active, limits };
+}
+
 /** Record a dispatched slice and install the local timer when work is open. */
 export async function startSlice(root: string, input: SliceStartInput) {
   return withLock(join(root, ".agent-ship"), async () => {
-    const summary = assertSummary(input.summary);
-    for (const [name, value] of Object.entries({ title: input.title, sourceTaskId: input.sourceTaskId, sliceId: input.sliceId })) {
-      if (!value.trim() || /[\r\n\0]/.test(value)) throw new Error(`${name} must be non-empty single-line text`);
-    }
-    const { cap, paths } = await dispatchTerms(root, input.contractId, input.sliceId);
-    const previous = await allSlices(root);
-    if (previous.some((slice) => slice.source_task_id === input.sourceTaskId)) throw new Error("source_task_id has already been dispatched");
-    const sameSlice = previous.filter((slice) => slice.contract_id === input.contractId && slice.slice_id === input.sliceId);
-    if (sameSlice.length && !(input.replace && sameSlice.every((slice) => slice.status === "failed" || slice.status === "cancelled"))) throw new Error("slice already dispatched; only failed/cancelled work may be replaced with --replace");
-    const active = previous.filter((slice) => slice.status === "running" || slice.status === "queued");
-    const limits = await readLimits(root);
-    if (active.length >= limits.global_max_parallel) throw new Error("global_max_parallel reached");
-    if (active.filter((slice) => slice.contract_id === input.contractId).length >= cap) throw new Error("contract max_parallel reached");
+    const { summary, paths, lane, owner, roles, role, active } = await preflightSlice(root, input);
     const repo = await repositoryRoot(input.repoRoot ?? root, true);
-    const context = await teamContext(root, { tags: input.tags, project: input.project, repo, auto: true });
+    if (lane !== "default" && active.some(slice => slice.repo_root === repo && slice.lane_id !== lane)) throw new Error("different lanes require independent execution checkouts");
+    const context = await teamContext(root, { tags: [...new Set([...(input.tags ?? []), ...role.card.lesson_tags])], project: input.project, repo, auto: true });
     const consent = context.learning_required ? await assertDispatchConsent(root, input.contractId, input.proposalId) : undefined;
     if (context.learning_required && !input.workerRef?.trim()) throw new Error("managed tasks require --worker");
     await assertSingleRepository(repo, paths.allowed);
@@ -816,6 +854,10 @@ export async function startSlice(root: string, input: SliceStartInput) {
     const event = {
       id: newEventId(),
       type: "worker_dispatched",
+      lane_id: lane,
+      ...(owner ? { owner_ref: owner } : {}),
+      role_id: role.card.id,
+      role_refs: roles.map(role => ({ id: role.card.id, source: role.source, digest: digest(role.markdown) })),
       title: input.title,
       summary,
       created_at: input.createdAt ?? new Date().toISOString(),
@@ -844,9 +886,10 @@ export async function startSlice(root: string, input: SliceStartInput) {
     if (context.lessons.length) await appendFile(eventsFile(root), `${JSON.stringify({ id: newEventId(), type: "lesson_used", title: "Dispatch guidance", summary: "Reviewed soft guidance supplied.", source_task_id: input.sourceTaskId, project: input.project ?? null, lesson_ids: context.lessons.map(l => l.id), checkpoint: "slice_start", sequence: await nextSequence(root), created_at: new Date().toISOString() })}\n`);
     const count = (await activeSlices(root)).length;
     await mkdir(join(repo, ".agent-ship"), { recursive: true });
-    await writeFile(join(repo, ".agent-ship/active-contract"), `${input.contractId}\n`);
+    await writeFile(join(repo, pointer("active-contract", lane)), `${input.contractId}\n`);
+    await writeFile(join(repo, ".agent-ship/active-lane"), `${lane}\n`);
     await writeFile(join(repo, ".agent-ship/state-root"), `${root}\n`);
-    return { timer, monitored: event.monitored, monitoring_status: event.monitoring_status, active: count, context };
+    return { timer, role_warnings: roleWarnings(roles, paths.allowed), lane_id: lane, owner_ref: owner || null, role: { ...role.card, source: role.source, markdown: role.markdown }, monitored: event.monitored, monitoring_status: event.monitoring_status, active: count, context };
   });
 }
 
@@ -856,6 +899,11 @@ export async function updateSlice(root: string, taskId: string, status: string, 
     const slices = await allSlices(root);
     const current = slices.find((slice) => slice.source_task_id === taskId);
     if (!current) throw new Error(`unknown task ${taskId}`);
+    if (await readAuthority(root)) {
+      const actor = await requireActor(root, ["human", "captain", "owner", "worker", "verifier"], undefined, current.lane_id);
+      if (["worker", "verifier"].includes(actor.role) && actor.ref !== current.worker_ref) throw new Error("worker cannot update another task");
+      if (workerRef && current.worker_ref !== workerRef) throw new Error("worker identity cannot change on progress updates");
+    }
     if (status === "needs_review") await assertLearningChecked(root, taskId);
     if (status === "running" || status === "queued") {
       const decisions = (await readInbox(root)).filter((event) => event.type === "review_decided" && event.source_task_id === taskId);
@@ -863,13 +911,17 @@ export async function updateSlice(root: string, taskId: string, status: string, 
       if ((current.status === "needs_review" && (latest?.type !== "review_decided" || latest.decision !== "changes_requested")) || current.status === "failed" || current.status === "cancelled") throw new Error("closed or unreviewed work cannot resume; use a new contract or explicitly replace failed/cancelled work");
       if ((await listInbox(root, { openOnly: true })).some((event) => event.type !== "review_decided" && event.source_task_id === taskId)) throw new Error("task has an open attention item; record the human decision before resuming");
       const { cap } = await dispatchTerms(root, current.contract_id ?? "", current.slice_id ?? "");
+      const markdown = await readFile(contractFile(root, current.contract_id!), "utf8");
+      const problems = await authorityViolations(root, { id: current.contract_id!, markdown });
+      if (problems.length) throw new Error(problems.join("; "));
+      await contractRoles(root, markdown, current.slice_id);
       const active = slices.filter((slice) => slice.source_task_id !== taskId && (slice.status === "running" || slice.status === "queued"));
       if (active.length >= (await readLimits(root)).global_max_parallel || active.filter((slice) => slice.contract_id === current.contract_id).length >= cap) throw new Error("parallel limit reached; cannot resume");
     }
     const resume = status === "running" || status === "queued";
     const timer = resume ? await installWatchdogTimer(root) : { action: "unchanged" as const, registered: await timerIsActive(root), platform: timerPlatform(), dry_run: false, entry: cronMarker(root).line, cron_file: cronFile(root), launchd_file: launchdFile(root), project_root: root };
     if (resume && (!timer.registered || !(await timerIsActive(root))) && !allowUntimed) throw new Error("watchdog registration/runtime unhealthy; resume rejected (or explicitly pass --allow-untimed)");
-    await appendFile(eventsFile(root), `${JSON.stringify({ id: newEventId(), type: "worker_progress", title: current.title, summary: assertSummary(summary), source_task_id: taskId, contract_id: current.contract_id, slice_id: current.slice_id, created_at: new Date().toISOString(), sequence: await nextSequence(root), ...(workerRef ? { worker_ref: workerRef } : {}), status })}\n`);
+    await appendFile(eventsFile(root), `${JSON.stringify({ id: newEventId(), type: "worker_progress", title: current.title, summary: assertSummary(summary), source_task_id: taskId, ...(current.lane_id ? { lane_id: current.lane_id } : {}), ...(current.owner_ref ? { owner_ref: current.owner_ref } : {}), contract_id: current.contract_id, slice_id: current.slice_id, created_at: new Date().toISOString(), sequence: await nextSequence(root), ...(workerRef ? { worker_ref: workerRef } : {}), status })}\n`);
     const active = (await activeSlices(root)).length;
     return { active, timer };
   });

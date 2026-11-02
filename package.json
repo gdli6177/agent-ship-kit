@@ -20,7 +20,8 @@
   "scripts": {
     "test": "pnpm --dir cli test",
     "typecheck": "pnpm --dir cli typecheck",
-    "test:dogfood": "node scripts/dogfood.mjs"
+    "test:dogfood": "node scripts/dogfood.mjs",
+    "test:dogfood:lanes": "node scripts/dogfood-lanes.mjs"
   },
   "packageManager": "pnpm@10.4.1"
 }

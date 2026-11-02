@@ -7,6 +7,11 @@
   "additionalProperties": false,
   "required": ["id", "type", "title", "summary", "created_at", "source_task_id"],
   "properties": {
+    "lane_id": {"type": "string", "minLength": 1},
+    "owner_ref": {"type": "string", "minLength": 1},
+    "role_id": {"type": "string", "minLength": 1},
+    "approved_by": {"type": "string", "minLength": 1},
+    "role_refs": {"type": "array", "items": {"type": "object", "additionalProperties": false, "required": ["id", "source", "digest"], "properties": {"id": {"type": "string"}, "source": {"type": "string"}, "digest": {"type": "string"}}}},
     "project": {"type": ["string", "null"]},
     "scope": {"enum": ["event", "lesson", "handbook"]},
     "trigger": {"enum": ["user_correction", "verifier_return", "recurrence", "scope_discovery"]},
@@ -42,6 +47,8 @@
     "type": {
       "type": "string",
       "enum": [
+        "intake_claimed",
+        "limits_approved",
         "proposal_ready",
         "contract_frozen",
         "worker_dispatched",
