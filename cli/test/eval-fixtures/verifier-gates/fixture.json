@@ -1,0 +1,162 @@
+{
+  "name": "verifier-gates",
+  "cases": [
+    {
+      "id": "check.clean",
+      "kind": "check",
+      "contract": "contract.md",
+      "contract_id": "contract_auth",
+      "base_files": {
+        "README.md": "base\n"
+      },
+      "head_files": {
+        "src/app.ts": "export const ok = true;\n"
+      },
+      "expect": {
+        "ok": true,
+        "mode": "branch",
+        "changed": ["src/app.ts"],
+        "violations": []
+      }
+    },
+    {
+      "id": "check.forbidden",
+      "kind": "check",
+      "contract": "contract.md",
+      "contract_id": "contract_auth",
+      "base_files": {
+        "README.md": "base\n"
+      },
+      "head_files": {
+        "src/app.ts": "export const ok = true;\n",
+        ".env": "TOKEN=nope\n",
+        "docs/note.md": "outside\n"
+      },
+      "expect": {
+        "ok": false,
+        "mode": "branch",
+        "changed": [".env", "docs/note.md", "src/app.ts"],
+        "violations": [
+          { "path": ".env", "rule": "forbidden", "pattern": ".env*" },
+          { "path": "docs/note.md", "rule": "outside_allowed", "pattern": null }
+        ]
+      }
+    },
+    {
+      "id": "check.staged-outside",
+      "kind": "check",
+      "contract": "contract.md",
+      "contract_id": "contract_auth",
+      "staged": true,
+      "base_files": {
+        "README.md": "base\n"
+      },
+      "head_files": {
+        "notes.txt": "outside\n"
+      },
+      "expect": {
+        "ok": false,
+        "mode": "staged",
+        "changed": ["notes.txt"],
+        "violations": [
+          { "path": "notes.txt", "rule": "outside_allowed", "pattern": null }
+        ]
+      }
+    },
+    {
+      "id": "notify.high-evidence",
+      "kind": "notify",
+      "event": "events/high-with-evidence.json",
+      "policy": "policy.md",
+      "allowlist": "allowlist.json",
+      "expect": {
+        "allow": true,
+        "reason": "allowlisted",
+        "matched_rule": "high priority page"
+      }
+    },
+    {
+      "id": "notify.high-empty",
+      "kind": "notify",
+      "event": "events/high-without-evidence.json",
+      "policy": "policy.md",
+      "allowlist": "allowlist.json",
+      "expect": {
+        "allow": false,
+        "reason": "missing_evidence",
+        "matched_rule": "high without proof"
+      }
+    },
+    {
+      "id": "skill.ship-e2e",
+      "kind": "skill_text",
+      "file": "skills/ship-e2e/SKILL.md",
+      "expect": {
+        "includes": [
+          "Production is read-only smoke.",
+          "Do not put the storageState path in `evidence_urls`.",
+          "This skill does not merge, deploy, or collect passwords."
+        ],
+        "excludes": ["paste a production password into the repo"]
+      }
+    },
+    {
+      "id": "skill.verifier",
+      "kind": "skill_text",
+      "file": "templates/verifier-prompt.md",
+      "expect": {
+        "includes": [
+          "You are a read-only verifier.",
+          "agent-ship check",
+          "Do not file `needs_review`."
+        ]
+      }
+    },
+    {
+      "id": "skill.ship-dispatch",
+      "kind": "skill_text",
+      "file": "skills/ship-dispatch/SKILL.md",
+      "expect": {
+        "includes": [
+          "Spawn a separate read-only verifier.",
+          "agent-ship check --contract",
+          "Do not tell the owner."
+        ]
+      }
+    },
+    {
+      "id": "skill.ship-inbox",
+      "kind": "skill_text",
+      "file": "skills/ship-inbox/SKILL.md",
+      "expect": {
+        "includes": [
+          "Do not file `needs_review` when the worker says it is done.",
+          "never at a storageState file."
+        ]
+      }
+    },
+    {
+      "id": "e2e.index",
+      "kind": "e2e_index",
+      "file": "e2e-index.md",
+      "expect": {
+        "rows": [
+          {
+            "project": "A",
+            "environment": "staging",
+            "auth_setup_includes": "auth.setup.ts",
+            "storage_state": ".agent-ship/e2e/A.staging.storage-state.json",
+            "smoke_includes": "app.smoke.spec.ts"
+          },
+          {
+            "project": "A",
+            "environment": "production",
+            "auth_setup_includes": "hand export",
+            "storage_state": ".agent-ship/e2e/A.production.storage-state.json",
+            "smoke_includes": "readonly"
+          }
+        ]
+      }
+    }
+  ]
+}
