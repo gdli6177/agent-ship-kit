@@ -567,6 +567,9 @@ async function driftProblem(root: string, slice: SliceState, checkDrift: boolean
     if (features.length > 0) {
       parts.push(`Feature id not in the e2e index: ${features.map((item) => item.id).join(", ")}.`);
     }
+    if ((result.human_review_violations ?? []).length > 0) {
+      parts.push("Human review budget failed the check.");
+    }
     return { drift: true, detail: parts.join(" ") || "Paths drifted outside the frozen contract." };
   } catch (error) {
     return { drift: true, error: error instanceof Error ? error.message : String(error) };

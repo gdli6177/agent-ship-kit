@@ -24,6 +24,22 @@ Next hop 下一跳: contract `<contract_id>` → slice `<slice_id>` → worker `
 
 `<what changed>`
 
+## Human review budget 人工审阅预算
+
+从冻结合同抄预算。`inbox_needs_review_count` 写该合同目前的 `needs_review` 条数（与 `agent-ship check` 的同名字段相同，含已决定的），让人对照 `human_reviews_expected`。`this_review_is_for` 写这一包对应预算里的哪一条。不合并。
+
+human_reviews_expected: `<count from the contract>`
+
+- `<purpose copied from the contract，例如 验收>`
+
+inbox_needs_review_count: `<needs_review rows for this contract>`
+
+this_review_is_for: `<which budget line this packet is，例如 验收>`
+
+must_human: `<optional，从合同抄；不需要就删掉这一行>`
+
+already_automated: `<optional，从合同抄；不需要就删掉这一行>`
+
 ## Evidence 证据
 
 上面每条主张都要有一行。没有指针的行，不能把优先级标成 `high`。

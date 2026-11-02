@@ -66,6 +66,20 @@ Discussion mode: one current proposal. After each round, fill "What changed".
 
 - `<question>`
 
+## Human review budget 人工审阅预算
+
+新方案必须有这一节。`human_reviews_expected` 是还要人看的次数，下面每一条写这次审阅看什么（例如 方案冻结、验收、合 PR）。条数必须等于次数。缺次数、占位符、或条数对不上，`agent-ship check` 失败。整节都没有的旧卡只警告，不因此失败。`must_human` 和 `already_automated` 可以不写；写了就不能留占位符。本工具不自动合并，也不代人点合并。
+
+human_reviews_expected: `<count>`
+
+- `<这次审阅看什么，例如 方案冻结>`
+- `<例如 验收>`
+- `<例如 合 PR>`
+
+must_human: `<仍要人做的事；不需要就删掉这一行>`
+
+already_automated: `<硬检查已经覆盖的事；不需要就删掉这一行>`
+
 ## What changed 本轮变更
 
 相对上一稿改了什么。第一稿写「初稿」。

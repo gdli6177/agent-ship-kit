@@ -530,6 +530,9 @@ async function runCheck(parsed: ParsedArgs, io: Io): Promise<number> {
   const result = contract
     ? await checkContract(root, contract, { ...options, sliceId: one(parsed.values, "slice") })
     : await checkHardRules(root, options);
+  for (const warning of result.human_review_warnings ?? []) {
+    io.stderr(`warning: ${warning}\n`);
+  }
   io.stdout(`${JSON.stringify(result, null, 2)}\n`);
   return result.ok ? 0 : 1;
 }

@@ -78,7 +78,10 @@ ask the human only for material intent, scope, permissions and decisions.
 
 While the proposal is `draft`, the captain talks freely and keeps that one
 card current. Each round appends a "What changed 本轮变更" note. Do not put a
-second proposal in front of the human.
+second proposal in front of the human. The proposal records a human review
+budget (`human_reviews_expected` plus what each review is for). The contract
+copies it. Acceptance compares that count with the contract's inbox
+`needs_review` rows. The kit does not merge.
 
 The contract file is written only after an explicit freeze:
 

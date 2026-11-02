@@ -32,6 +32,20 @@ Frozen at: `<ISO-8601>`
 - [ ] `<check>` — evidence 证据: `<url, command, or path>`
 - [ ] `feature:<id>` — evidence 证据: `<Playwright report path or CI URL>`
 
+## Human review budget 人工审阅预算
+
+从已接受的方案原样抄来，次数、审阅条目和可选备注都要一致。验收时用 `human_reviews_expected` 对照 `agent-ship check` 报告的 `inbox_needs_review_count`（该合同的 `needs_review` 条数，含已决定的）。对不上由人判断。本工具不自动合并，也不代人点合并。
+
+human_reviews_expected: `<count>`
+
+- `<这次审阅看什么，例如 方案冻结>`
+- `<例如 验收>`
+- `<例如 合 PR>`
+
+must_human: `<仍要人做的事；不需要就删掉这一行>`
+
+already_automated: `<硬检查已经覆盖的事；不需要就删掉这一行>`
+
 ## Allowed paths 允许改动的路径
 
 工人提示词必须原样带上这一节。不在列表里的路径不能改。

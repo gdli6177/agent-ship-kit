@@ -73,6 +73,7 @@ a report, never at a storageState file.
 Fill every section of `templates/review-packet.md`.
 
 - Summary: what changed, at most 280 characters in the inline card.
+- Human review budget: copy `human_reviews_expected` and the purpose list from the frozen contract. Set `inbox_needs_review_count` to the number of `needs_review` rows for this contract (the same count `agent-ship check` reports, including decided rows) and `this_review_is_for` to the budget line this packet covers, such as 验收. Copy `must_human` and `already_automated` when the contract has them. The human compares the budget with the inbox count. Do not merge.
 - Evidence table: one row per acceptance line this slice owns. Kind, pointer, result.
 - Commands with exit codes, in a fence. "Tests passed" without a command and a pointer does not count.
 - What was not run.

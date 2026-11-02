@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { featureViolationsInContract, type FeatureViolation } from "./features.js";
 import { loadHardRules, matchHardRules, type ChecklistHit } from "./hard-rules.js";
 import { checkPaths, parseContractPaths, type ContractPaths, type PathViolation } from "./paths.js";
+import { assessHumanReview, type HumanReviewAssessment } from "./review-budget.js";
 import { assertSingleRepository, repositoryRoot } from "./repository.js";
 import { readEvents } from "./storage.js";
 
@@ -26,6 +27,13 @@ export interface CheckResult {
   feature_violations?: FeatureViolation[];
   hard_rule_ids: string[];
   checklist: ChecklistHit[];
+  /** Set by contract checks. Null when no valid budget was found. */
+  human_review_budget?: HumanReviewAssessment["budget"];
+  human_review_warnings?: string[];
+  /** Present only when a new-style budget section is missing fields or malformed. */
+  human_review_violations?: HumanReviewAssessment["violations"];
+  /** `needs_review` rows for this contract, including ones already decided. */
+  inbox_needs_review_count?: number;
 }
 
 const CONTRACT_ID = /^[A-Za-z0-9._-]+$/;
@@ -164,8 +172,9 @@ export async function checkContract(
   });
   const hard = await applyHardRules(root, diff.changed, checkPaths(diff.changed, paths));
   const featureViolations = await featureViolationsInContract(root, markdown);
+  const review = await assessHumanReview(root, contractId, markdown);
   return {
-    ok: hard.violations.length === 0 && featureViolations.length === 0,
+    ok: hard.violations.length === 0 && featureViolations.length === 0 && review.violations.length === 0,
     contract_id: contractId,
     contract_path: file,
     repo_root: repo,
@@ -179,5 +188,9 @@ export async function checkContract(
     ...(featureViolations.length > 0 ? { feature_violations: featureViolations } : {}),
     hard_rule_ids: hard.hard_rule_ids,
     checklist: hard.checklist,
+    human_review_budget: review.budget,
+    human_review_warnings: review.warnings,
+    ...(review.violations.length > 0 ? { human_review_violations: review.violations } : {}),
+    inbox_needs_review_count: review.inbox_needs_review_count,
   };
 }

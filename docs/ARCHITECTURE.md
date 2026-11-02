@@ -160,6 +160,8 @@ Default is local:
 
 `agent-ship promote` and `inbox decide ... changes_requested --promote hook|contract|verify` write that file. `--promote` defaults to `none`. The file stays under gitignored `.agent-ship/`, so the gate is local to clones that installed the kit. It does not merge, deploy, or add CI for other contributors. Secret-shaped text is refused.
 
+`agent-ship check` fails a new proposal or contract whose `## Human review budget` section is missing `human_reviews_expected` or malformed (the count must match the purpose list), and only warns when that section is absent so older cards still pass; `inbox_needs_review_count` is reported for comparison and the check never merges.
+
 This does not need GitHub, GitLab, or CI. An optional extra, on any host, is to run the same command on the branch. A green extra check does not replace the verifier or the human.
 
 ## Verifier
