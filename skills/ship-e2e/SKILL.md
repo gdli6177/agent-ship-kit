@@ -4,9 +4,11 @@ description: >-
   Slash command /ship-e2e. The skill name is ship-e2e, matching that command,
   so hosts that support skills load this file when the human types /ship-e2e.
   Set up shared Playwright login and short smoke tests: one auth.setup.ts and
-  storageState per project and environment, read-only production smoke, and
-  E2E rows on the review packet. Also use when the human mentions e2e, login,
-  storageState, Playwright, smoke, captcha, or production acceptance.
+  storageState per project and environment, a Features table the contract
+  checks as feature:<id>, read-only production smoke, and evidence rows with
+  Claim feature:<id>, Kind e2e, pointing at the report. Also use when the
+  human mentions e2e, login, storageState, Playwright, smoke, captcha, or
+  production acceptance.
 ---
 
 # ship-e2e
@@ -21,7 +23,7 @@ This skill does not merge, deploy, or collect passwords.
 
 ## When to use
 
-- The contract's acceptance includes a logged-in smoke test.
+- The contract's acceptance includes a logged-in smoke test or `feature:<id>`.
 - Login, captcha, SMS, or a shared session is blocking a worker.
 - The human asks for production acceptance.
 
@@ -36,7 +38,11 @@ This skill does not merge, deploy, or collect passwords.
 
 1. Copy `$HOME/.agent-ship-kit/current/templates/e2e.md` to
    `.agent-ship/e2e/index.md` if that index does not exist yet. Add a row for
-   this project and environment. Do not reuse another project's row.
+   this project and environment. Do not reuse another project's row. On that
+   same index, keep the login rows and fill the Features table: `id`, the
+   route or UI entry, and a one-line assertion. A contract may check
+   `feature:<id>` only for an id in that table. Do not open a second feature
+   map.
 2. Add one `auth.setup.ts` for this project, following
    `$HOME/.agent-ship-kit/current/templates/e2e-testing.md`. It writes `storageState` to the path on that
    row. Smoke specs depend on the setup project and reuse the file. They do
@@ -75,14 +81,16 @@ mutating requests.
 
 ## Evidence
 
-On the review packet, add one evidence row per index row you actually ran:
+Contracts may check `feature:<id>` from the Features table. The verifier and
+the review packet each use one row per id that was checked:
 
-- Claim: `E2E smoke <project> <environment>`
+- Claim: `feature:<id>`
 - Kind: `e2e`
 - Pointer: the Playwright report path or the CI URL
 - Result: `pass`, `fail`, or `not run`
 
-That pointer goes into `evidence_urls` when you `inbox add` the
+The pointer is a report. It is never a storageState path, a cookie, or a
+password. That report URL goes into `evidence_urls` when you `inbox add` the
 `needs_review`. Do not put the storageState path in `evidence_urls`. A high
 priority review still needs a real evidence URL; an empty list is not paged.
 

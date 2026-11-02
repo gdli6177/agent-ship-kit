@@ -229,7 +229,7 @@ cp -R skills/ship-setup skills/ship-watchdog skills/ship-contract skills/ship-di
 
 生产只读。人在浏览器里登录一次，把短命的 `storageState` 导出到索引里那一行。只告诉船长文件已经放好，不要把文件、cookie 或密码贴进对话。会话过期就请人再导出一次。密码留在密码管理器或本机环境变量里，不进 git、技能或聊天。
 
-冒烟结果写成待审包里的证据行，指针是报告，不是 storageState。
+冒烟结果写成待审包里的证据行，指针是报告，不是 storageState。验收可以写 `feature:<id>`（索引 Features 表里的 id）：每个 id 单独一行，类型是 `e2e`，指针是报告；表存在时，`agent-ship check` 会拒绝表里没有的 id。
 
 ## 适配器
 

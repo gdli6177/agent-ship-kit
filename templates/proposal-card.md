@@ -18,10 +18,11 @@ Discussion mode: one current proposal. After each round, fill "What changed".
 
 ## Acceptance sketch 验收草案
 
-每一条都要能拿证据核对，不能只靠工人的判断。
+每一条都要能拿证据核对，不能只靠工人的判断。可以列出 `feature:<id>`（e2e 索引 Features 表里的 id）。
 
 - [ ] `<observable outcome 可观察的结果>`
 - [ ] `<check, command, or artifact 用来证明的检查、命令或产物>`
+- [ ] `feature:<id>` — `<one-line assertion 一行断言>`
 
 ## Allowed paths 允许改动的路径
 
