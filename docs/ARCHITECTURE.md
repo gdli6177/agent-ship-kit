@@ -163,6 +163,8 @@ This does not need GitHub, GitLab, or CI. An optional extra, on any host, is to 
 
 After a worker reports done, the captain spawns a second agent with `templates/verifier-prompt.md`. That agent sees the frozen contract and the branch, not the worker chat. It re-runs acceptance commands, `agent-ship check`, and the relevant E2E smoke. Disagreement goes back to the worker. Agreement is what allows `needs_review`.
 
+`agent-ship eval --fixture <dir>` (sample `cli/test/eval-fixtures/verifier-gates`) is the before/after check when changing `ship-*` skills or these gates; a non-zero exit is a regression.
+
 ## Changing a frozen contract
 
 The captain stops slices the change affects, drafts a new contract id with `Supersedes` set to the old id, and waits for the owner to freeze it again. Finished slices the new text does not touch are kept.

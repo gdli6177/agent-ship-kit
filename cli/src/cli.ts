@@ -12,6 +12,7 @@ import {
 import { loadAllowlistFile, loadPolicyFile, planNotification, type NotifyEvent } from "./notify.js";
 import { executeArgv } from "./run.js";
 import { checkContract } from "./check.js";
+import { formatEvalReport, runEvalFixture } from "./eval.js";
 import { setupProject } from "./setup.js";
 import { addLesson, checkLearning, reviewLesson, showLesson, teamContext, pendingLearning } from "./learning.js";
 import { activeSlices, installWatchdogTimer, runWatchdog, startSlice, updateSlice, timerIsActive, uninstallWatchdogTimer } from "./watchdog.js";
@@ -43,6 +44,7 @@ Usage:
   agent-ship lesson check --source-task-id ID --outcome none|candidate --reason TEXT --reviewed-by REF [--candidate-id ID ...] [--trigger TYPE ...] [--root DIR]
   agent-ship lesson pending [--source-task-id ID] [--root DIR]
   agent-ship check --contract ID [--repo DIR] [--slice ID] [--base REF] [--head REF] [--staged] [--root DIR]
+  agent-ship eval --fixture DIR [--json]
   agent-ship watchdog [--stale-minutes N] [--root DIR]
   agent-ship watchdog install|uninstall [--dry-run] [--root DIR]
   agent-ship slice start --contract ID --slice ID --source-task-id ID
@@ -70,6 +72,8 @@ shared AGENTS.md rules section, team profile and handbook. setup never sets core
 notify dry-run prints a plan and does not start a command.
 notify run starts the allowlisted argv with no shell, and only when the plan allows it.
 A high-priority needs_review with no evidence URLs is not paged.
+eval compares a fixture's expected checkpoints with the current check, notify, and skill gates.
+Exit 0 when they match; non-zero on regression. Use it when changing ship-* skills or those gates.
 `;
 
 const VALUE_OPTIONS = new Set([
@@ -104,7 +108,7 @@ const VALUE_OPTIONS = new Set([
   "repo",
   "state-root",
   "status",
-  "handbook", "lessons", "tag", "project", "proposal", "input", "reviewed-by", "review-after", "outcome", "candidate-id", "trigger",
+  "handbook", "lessons", "tag", "project", "proposal", "input", "reviewed-by", "review-after", "outcome", "candidate-id", "trigger", "fixture",
 ]);
 const REPEATABLE = new Set(["evidence", "tag", "candidate-id", "trigger"]);
 const BOOL_FLAGS = new Set(["json", "latest", "help", "all", "shared", "uninstall", "purge", "staged", "stale", "dry-run", "replace"]);
@@ -396,6 +400,13 @@ function printTimer(result: { warning?: string }, io: Io): void {
   if (result.warning) io.stderr(`warning: ${result.warning}\n`);
 }
 
+async function runEval(parsed: ParsedArgs, io: Io): Promise<number> {
+  if (parsed.positionals.length > 1) throw new Error("usage: agent-ship eval --fixture DIR");
+  const report = await runEvalFixture(requireOne(parsed.values, "fixture"));
+  io.stdout(parsed.flags.has("json") ? `${JSON.stringify(report, null, 2)}\n` : formatEvalReport(report));
+  return report.ok ? 0 : 1;
+}
+
 async function runCheck(parsed: ParsedArgs, io: Io): Promise<number> {
   const root = one(parsed.values, "root") ?? process.cwd();
   const result = await checkContract(root, requireOne(parsed.values, "contract"), {
@@ -443,6 +454,7 @@ export async function main(argv: string[], io: Io = defaultIo): Promise<number> 
     }
     if ((group === "setup" || group === "init") && sub === undefined) return await runSetup(parsed, io);
     if (group === "check" && sub === undefined) return await runCheck(parsed, io);
+    if (group === "eval" && sub === undefined) return await runEval(parsed, io);
     if (group === "watchdog" && sub === "install") {
       const root = one(parsed.values, "root") ?? process.cwd();
       const result = await installWatchdogTimer(root, { dryRun: parsed.flags.has("dry-run") });

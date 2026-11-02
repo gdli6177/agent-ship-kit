@@ -70,6 +70,8 @@ agent-ship check --contract contract_auth --base main
 
 Prints JSON and exits 1 when a path is forbidden or outside Allowed paths. `--staged` checks the index. No forge and no CI are required. A project may also run this command in CI; that is an extra, not the enforcement.
 
+Use `agent-ship eval --fixture cli/test/eval-fixtures/verifier-gates` when changing `ship-*` skills or check/verifier gates: it prints a before/after checkpoint report and exits non-zero on regression.
+
 ## Commands
 
 Run these in the project directory. The inbox is `.agent-ship/inbox.jsonl` there.
