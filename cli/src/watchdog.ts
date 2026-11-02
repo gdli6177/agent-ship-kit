@@ -555,16 +555,19 @@ export async function allSlices(root: string): Promise<SliceState[]> {
   return foldSlices(combined.map((item) => item.event));
 }
 
-async function drifted(root: string, slice: SliceState, checkDrift: boolean): Promise<boolean> {
-  if (!checkDrift) return false;
-  if (!slice.contract_id) throw new Error("slice has no contract_id");
-  const result = await checkContract(root, slice.contract_id, { repoRoot: slice.repo_root, base: slice.base_ref, head: slice.branch });
-  return !result.ok;
-}
-
-async function driftProblem(root: string, slice: SliceState, checkDrift: boolean): Promise<{ drift: boolean; error?: string }> {
+async function driftProblem(root: string, slice: SliceState, checkDrift: boolean): Promise<{ drift: boolean; error?: string; detail?: string }> {
+  if (!checkDrift) return { drift: false };
   try {
-    return { drift: await drifted(root, slice, checkDrift) };
+    if (!slice.contract_id) throw new Error("slice has no contract_id");
+    const result = await checkContract(root, slice.contract_id, { repoRoot: slice.repo_root, base: slice.base_ref, head: slice.branch });
+    if (result.ok) return { drift: false };
+    const parts: string[] = [];
+    if (result.violations.length > 0) parts.push("Paths drifted outside the frozen contract.");
+    const features = result.feature_violations ?? [];
+    if (features.length > 0) {
+      parts.push(`Feature id not in the e2e index: ${features.map((item) => item.id).join(", ")}.`);
+    }
+    return { drift: true, detail: parts.join(" ") || "Paths drifted outside the frozen contract." };
   } catch (error) {
     return { drift: true, error: error instanceof Error ? error.message : String(error) };
   }
@@ -623,7 +626,7 @@ export async function runWatchdog(
       .join(" -> ");
     const summary =
       reason === "drift"
-        ? `Check failed for ${hop}. ${problem.error ? "Unable to inspect the recorded repository/branch; run check for details." : "Paths drifted outside the frozen contract."}`
+        ? `Check failed for ${hop}. ${problem.error ? "Unable to inspect the recorded repository/branch; run check for details." : problem.detail ?? "Paths drifted outside the frozen contract."}`
         : `No progress on ${hop} for ${idle}m.`;
     const filed = await addInboxItem(root, {
       type: "blocked",

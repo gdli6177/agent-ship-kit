@@ -88,12 +88,16 @@ Do not script a production password login.
 
 ## Evidence on the review packet
 
-Each smoke run becomes one row on `templates/review-packet.md`:
+A contract may check `feature:<id>` for an id in the Features table on the
+e2e index. The verifier and the review packet (`templates/review-packet.md`)
+each record one row per id:
 
 | Claim | Kind | Pointer | Result |
 | --- | --- | --- | --- |
-| E2E smoke A staging | e2e | `playwright-report/` or the CI URL | pass / fail |
+| `feature:login` | e2e | `playwright-report/` or the CI URL | pass / fail |
+| `feature:home` | e2e | `playwright-report/` or the CI URL | pass / fail |
 
-The pointer is a report the human can open. It is not the storageState path
-and it is not a cookie. A failed or skipped smoke is `fail` or `not run`,
-with the reason in the packet. It is not a silent pass.
+Claim is `feature:<id>`. Kind is `e2e`. The pointer is a report the human can
+open. It is never the storageState path and it is never a cookie. A failed
+or skipped id is `fail` or `not run`, with the reason in the packet. It is
+not a silent pass.

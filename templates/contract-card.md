@@ -26,8 +26,11 @@ Frozen at: `<ISO-8601>`
 
 ## Acceptance 验收
 
+验收可以列出 `feature:<id>`。id 来自 `.agent-ship/e2e/index.md` 的 Features 表。每个 id 单独取证，指针是报告，不是 storageState。
+
 - [ ] `<check 检查>` — evidence 证据: `<url, command, or path>`
 - [ ] `<check>` — evidence 证据: `<url, command, or path>`
+- [ ] `feature:<id>` — evidence 证据: `<Playwright report path or CI URL>`
 
 ## Allowed paths 允许改动的路径
 

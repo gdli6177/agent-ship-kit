@@ -27,12 +27,13 @@ Next hop 下一跳: contract `<contract_id>` → slice `<slice_id>` → worker `
 ## Evidence 证据
 
 上面每条主张都要有一行。没有指针的行，不能把优先级标成 `high`。
-E2E 冒烟也写进行里。不要把 storageState、cookie 或密码贴进这张表。
+合同里的每个 `feature:<id>` 单独一行。不要把 storageState、cookie 或密码贴进这张表。
 
 | Claim 主张 | Kind 类型 | Pointer 指针 | Result 结果 |
 | --- | --- | --- | --- |
 | `<acceptance line 验收项>` | `<test / diff / log / screenshot>` | `<evidence url or repo path>` | `<pass / fail / not run>` |
-| E2E smoke `<project>` `<environment>` | e2e | `<report path or URL，不要写 storageState>` | `<pass / fail / not run>` |
+| `feature:<id>` | e2e | `<report path or URL，不要写 storageState>` | `<pass / fail / not run>` |
+| `feature:<another-id>` | e2e | `<report path or URL，不要写 storageState>` | `<pass / fail / not run>` |
 
 Commands that were run, with exit codes:
 
@@ -58,7 +59,7 @@ Not run, and why:
 - Verifier ref:
 - `agent-ship check`: `<ok true/false，violations 摘要>`
 - Acceptance commands rerun 重跑的验收命令:
-- E2E smoke rerun:
+- E2E feature rerun 重跑的功能冒烟: `feature:<id>` → `<report path or URL，不要写 storageState>`
 - Agrees with the worker 与工人一致: yes / no
 
 ## Learning check 经验检查

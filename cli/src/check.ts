@@ -2,6 +2,7 @@ import { execFile } from "node:child_process";
 import { readFile } from "node:fs/promises";
 import { promisify } from "node:util";
 import { join } from "node:path";
+import { featureViolationsInContract, type FeatureViolation } from "./features.js";
 import { checkPaths, parseContractPaths, type ContractPaths, type PathViolation } from "./paths.js";
 import { assertSingleRepository, repositoryRoot } from "./repository.js";
 import { readEvents } from "./storage.js";
@@ -20,6 +21,8 @@ export interface CheckResult {
   allowed: string[];
   forbidden: string[];
   violations: PathViolation[];
+  /** Present only when a Features table exists and a referenced id is missing. */
+  feature_violations?: FeatureViolation[];
 }
 
 const CONTRACT_ID = /^[A-Za-z0-9._-]+$/;
@@ -115,8 +118,9 @@ export async function checkContract(
     head: options.head ?? (!options.staged ? branches[0] : undefined),
   });
   const violations = checkPaths(diff.changed, paths);
+  const featureViolations = await featureViolationsInContract(root, markdown);
   return {
-    ok: violations.length === 0,
+    ok: violations.length === 0 && featureViolations.length === 0,
     contract_id: contractId,
     contract_path: file,
     repo_root: repo,
@@ -127,5 +131,6 @@ export async function checkContract(
     allowed: paths.allowed,
     forbidden: paths.forbidden,
     violations,
+    ...(featureViolations.length > 0 ? { feature_violations: featureViolations } : {}),
   };
 }

@@ -202,7 +202,7 @@ Expect a `needs_review` event, then a plan whose `matched_rule` is `high priorit
 
 Mid-task questions use `inbox add --type blocked` or `--type needs_approval`. The owner answers in this inbox. They do not open the worker session.
 
-To do the same loop with a captain and no CLI, follow [templates/workflow.md](templates/workflow.md) and [adapters/generic.md](adapters/generic.md). `spawn` is one fresh agent session per frozen slice. Login and smoke tests are [templates/e2e.md](templates/e2e.md). The human stays in the captain thread.
+To do the same loop with a captain and no CLI, follow [templates/workflow.md](templates/workflow.md) and [adapters/generic.md](adapters/generic.md). `spawn` is one fresh agent session per frozen slice. Login and smoke tests are [templates/e2e.md](templates/e2e.md). Acceptance can name `feature:<id>` from that index's Features table; each id is an evidence row (kind `e2e`) pointing at the report, and `agent-ship check` rejects an id missing from the table when the table is present. The human stays in the captain thread.
 
 ## Tests
 

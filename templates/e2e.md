@@ -27,6 +27,21 @@ across environments, and project A does not share one with project B.
 - **Smoke** reuses that storageState. Record the Playwright report path on the
   review packet. Do not attach the storageState.
 
+## Features 功能
+
+One row per behavior a contract can accept. The id is stable. A contract
+checks it as `feature:<id>`. Entry is the route or the UI the smoke opens.
+Assertion is one line a human can match to the report. This table is not a
+second document. Do not put passwords, cookies, or storageState contents here.
+
+| id | entry (route/UI entry) 路由或界面入口 | assertion (one-line) 一行 |
+| --- | --- | --- |
+| login | `/login` | Test account signs in and the app shell is visible |
+| home | `/` | Signed-in home shows the project name |
+
+Each id is its own evidence row: Claim `feature:<id>`, Kind `e2e`, pointer
+the Playwright report or CI URL. The pointer is never a storageState file.
+
 ## When a session dies
 
 Re-run that row's setup (staging / test) or ask the owner to export again
