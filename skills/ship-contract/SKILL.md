@@ -52,8 +52,9 @@ freeze, and do not spawn a worker.
   that card. If an older draft exists, set it to `superseded` and stop
   showing it as a choice.
 - After every human turn that changes scope, acceptance, allowed paths,
-  forbidden paths, or slices, update the card in place and add a line under
-  "What changed 本轮变更" saying what moved since the previous draft.
+  forbidden paths, slices, or the human review budget, update the card in
+  place and add a line under "What changed 本轮变更" saying what moved since
+  the previous draft.
 - Show that one card (or the delta plus the file path). Do not lay two
   proposals side by side and ask the human to pick a file.
 - If acceptance or either path list is still vague, ask one question and
@@ -72,7 +73,13 @@ freeze, and do not spawn a worker.
 1. Copy `$HOME/.agent-ship-kit/current/templates/proposal-card.md` to `.agent-ship/proposals/<proposal_id>.md`
    on the first drafting turn. Status stays `draft`. Fill Allowed paths and
    Forbidden paths. Put merge and production deploy in the out-of-scope list
-   even if the human did not mention them.
+   even if the human did not mention them. Fill Human review budget:
+   `human_reviews_expected` is how many human reviews this line still needs,
+   and the list under it says what each review is for (for example 方案冻结,
+   验收, 合 PR). The count must equal the list. Optional `must_human` and
+   `already_automated` notes say what still needs a person and what hard
+   checks already cover; delete a note you are not using. Do not leave
+   placeholders. This kit does not auto-merge or click merge.
 2. Stay in discussion mode until the human freezes.
 3. Freeze only on an explicit human decision accepting this exact proposal:
    an id or an unambiguous reference to the just-presented text is sufficient.
@@ -82,7 +89,10 @@ freeze, and do not spawn a worker.
    `.agent-ship/contracts/<contract_id>.md` using `$HOME/.agent-ship-kit/current/templates/contract-card.md`.
    Set status to `frozen`. Record the exact plan in `Accepted text`, the human
    in `Accepted by`, the time in `Accepted at`, and `Proposal id`. Also record
-   who froze it and when, and copy Allowed paths and Forbidden paths.
+   who froze it and when, and copy Allowed paths, Forbidden paths, and the
+   Human review budget (the same count, the same purpose list, and the same
+   optional notes). Acceptance compares that count with the contract's inbox
+   `needs_review` count. Do not merge.
    When `learning_required` is true, `slice start` refuses empty Accepted text,
    Accepted by, Accepted at, or Proposal id, and refuses a proposal id that
    does not match the contract or `--proposal`. The CLI enforces that record.
