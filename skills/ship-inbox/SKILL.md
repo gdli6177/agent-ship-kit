@@ -37,7 +37,7 @@ treating review feedback as permission to edit the frozen contract.
 3. Present ONE compact card. Do not paste the worker chat or the whole packet. The card is the inline summary (at most 280 characters) plus the recall chain: contract → slice → worker/branch → PR → evidence, then the risks. Expand a section only when the owner asks.
 4. Wait. Map the reply:
    - `pass` or `通过` → `inbox decide <id> accept`
-   - `changes` or `要改` plus a reason → `inbox decide <id> changes_requested --note "<reason>"`
+   - `changes` or `要改` plus a reason → `inbox decide <id> changes_requested --note "<reason>"` (`--promote` defaults to `none`)
    - `reject` or `拒绝` → `inbox decide <id> reject --note "<reason>"`
 5. Record the decision, then present the next open item. Stop when the owner says stop or the list is empty.
 
@@ -124,6 +124,39 @@ That appends `review_decided` with `subject_id` set to the inbox item.
 - `accept` means the evidence matches the frozen contract. It does not merge and does not deploy. Tell the human the branch and PR are ready for whatever their repo usually requires.
 - `changes_requested` sends the notes back to the same task if the adapter can continue it. A new spawn needs the human's say-so and still uses the same frozen contract (`ship-dispatch`).
 - `reject` stops the slice. Do not respawn it.
+
+## Promote repeated feedback 把反复出现的意见收成硬规则
+
+A `changes_requested` note that only lives in the inbox will be repeated by the next agent. When the human asks for the same constraint again, offer to promote it into a local hard rule. Do not promote on the first mention, and do not promote unless the human agrees. Promoting writes `.agent-ship/hard-rules.json` on this clone. The file is gitignored with the rest of `.agent-ship/`. It does not edit the frozen contract, does not merge, does not deploy, and does not add a CI job for other contributors. Only a machine that installed the kit runs the local hook.
+
+Kinds:
+
+- `hook` — path globs the local pre-commit hook and `agent-ship check` reject. Use this when the note says to stop touching files.
+- `contract` — extra forbidden paths. `check` fails closed with the rule id, in the same way contract Forbidden paths do.
+- `verify` — a checklist line for the worker and the verifier. `check` lists it and does not fail the path gate. The verifier runs `command_hint` when the diff matches. The CLI does not run that hint.
+
+```bash
+agent-ship inbox decide <id> changes_requested --note "<reason>"
+
+agent-ship inbox decide <id> changes_requested \
+  --note "<reason>" \
+  --promote hook \
+  --glob ".env*" \
+  --message "Do not commit env files." \
+  --tag no-env
+
+agent-ship promote \
+  --source "Do not commit env files." \
+  --kind hook \
+  --glob ".env*" \
+  --message "Do not commit env files."
+```
+
+`--promote` defaults to `none`. Without it, decide only appends `review_decided`. Pass a stable `--tag` when the feedback has a short label you can reuse (`no-env`). The same tag on a later decision increments a local count. At 2, if this decision does not promote, stderr includes `suggest promote: tag "no-env" count 2`. The same `changes_requested` note on two decisions also suggests promote. Ask the human before adding `--promote`. Never put tokens, passwords, cookies, or storageState into the rule. The CLI rejects that text and writes nothing.
+
+The same inbox item and kind updates the existing rule. Pass `--id` to update a specific rule instead of adding a second copy.
+
+同样的审阅意见再次出现时，先问人是否收成硬规则，不要自行 promote。`--promote` 默认 `none`。`hook` 和 `contract` 会让本机 `check` 和 pre-commit 带规则 id 失败；`verify` 只进入核验清单。规则只写在本克隆的 `.agent-ship/hard-rules.json`，不进共享 CI，也不含密钥。
 
 ## Refusals
 

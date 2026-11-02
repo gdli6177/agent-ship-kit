@@ -3,6 +3,7 @@ import { readFile } from "node:fs/promises";
 import { promisify } from "node:util";
 import { join } from "node:path";
 import { featureViolationsInContract, type FeatureViolation } from "./features.js";
+import { loadHardRules, matchHardRules, type ChecklistHit } from "./hard-rules.js";
 import { checkPaths, parseContractPaths, type ContractPaths, type PathViolation } from "./paths.js";
 import { assertSingleRepository, repositoryRoot } from "./repository.js";
 import { readEvents } from "./storage.js";
@@ -11,8 +12,8 @@ const execFileAsync = promisify(execFile);
 
 export interface CheckResult {
   ok: boolean;
-  contract_id: string;
-  contract_path: string;
+  contract_id: string | null;
+  contract_path: string | null;
   repo_root: string;
   base: string | null;
   head: string | null;
@@ -23,6 +24,8 @@ export interface CheckResult {
   violations: PathViolation[];
   /** Present only when a Features table exists and a referenced id is missing. */
   feature_violations?: FeatureViolation[];
+  hard_rule_ids: string[];
+  checklist: ChecklistHit[];
 }
 
 const CONTRACT_ID = /^[A-Za-z0-9._-]+$/;
@@ -75,6 +78,48 @@ export async function changedPaths(
   return { mode: "branch", base, head, changed };
 }
 
+async function applyHardRules(root: string, changed: readonly string[], contractViolations: PathViolation[]): Promise<{
+  violations: PathViolation[];
+  hard_rule_ids: string[];
+  checklist: ChecklistHit[];
+}> {
+  const store = await loadHardRules(root);
+  const matched = matchHardRules(changed, store.rules);
+  return {
+    violations: [...contractViolations, ...matched.violations],
+    hard_rule_ids: store.rules.map((rule) => rule.id),
+    checklist: matched.checklist,
+  };
+}
+
+export async function checkHardRules(
+  root: string,
+  options: { staged?: boolean; base?: string; head?: string; repoRoot?: string } = {},
+): Promise<CheckResult> {
+  const repo = await repositoryRoot(options.repoRoot ?? root, Boolean(options.repoRoot));
+  const diff = await changedPaths(repo, {
+    staged: options.staged === true,
+    base: options.base,
+    head: options.head,
+  });
+  const hard = await applyHardRules(root, diff.changed, []);
+  return {
+    ok: hard.violations.length === 0,
+    contract_id: null,
+    contract_path: null,
+    repo_root: repo,
+    base: diff.base,
+    head: diff.head,
+    mode: diff.mode,
+    changed: diff.changed,
+    allowed: [],
+    forbidden: [],
+    violations: hard.violations,
+    hard_rule_ids: hard.hard_rule_ids,
+    checklist: hard.checklist,
+  };
+}
+
 export async function checkContract(
   root: string,
   contractId: string,
@@ -117,10 +162,10 @@ export async function checkContract(
     base: options.base ?? (typeof target?.base_ref === "string" ? target.base_ref : undefined),
     head: options.head ?? (!options.staged ? branches[0] : undefined),
   });
-  const violations = checkPaths(diff.changed, paths);
+  const hard = await applyHardRules(root, diff.changed, checkPaths(diff.changed, paths));
   const featureViolations = await featureViolationsInContract(root, markdown);
   return {
-    ok: violations.length === 0 && featureViolations.length === 0,
+    ok: hard.violations.length === 0 && featureViolations.length === 0,
     contract_id: contractId,
     contract_path: file,
     repo_root: repo,
@@ -130,7 +175,9 @@ export async function checkContract(
     changed: diff.changed,
     allowed: paths.allowed,
     forbidden: paths.forbidden,
-    violations,
+    violations: hard.violations,
     ...(featureViolations.length > 0 ? { feature_violations: featureViolations } : {}),
+    hard_rule_ids: hard.hard_rule_ids,
+    checklist: hard.checklist,
   };
 }

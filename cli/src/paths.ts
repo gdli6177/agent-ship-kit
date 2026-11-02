@@ -1,7 +1,10 @@
 export interface PathViolation {
   path: string;
-  rule: "forbidden" | "outside_allowed";
+  rule: "forbidden" | "outside_allowed" | "hard_rule";
   pattern: string | null;
+  rule_id?: string;
+  kind?: "hook" | "contract_forbidden" | "verify_checklist";
+  message?: string;
 }
 
 export interface ContractPaths {

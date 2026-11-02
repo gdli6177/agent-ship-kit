@@ -8,11 +8,23 @@ import {
   assertPriority,
   decideInboxItem,
   listInbox,
+  readInbox,
 } from "./inbox.js";
 import { loadAllowlistFile, loadPolicyFile, planNotification, type NotifyEvent } from "./notify.js";
 import { executeArgv } from "./run.js";
-import { checkContract } from "./check.js";
+import { checkContract, checkHardRules } from "./check.js";
 import { formatEvalReport, runEvalFixture } from "./eval.js";
+import {
+  assertPromoteChoice,
+  assertRuleKind,
+  assertTag,
+  normalizePromoteInput,
+  noteFeedbackTags,
+  promoteHardRule,
+  promotionSuggestions,
+  repeatedNoteCount,
+  type PromoteInput,
+} from "./hard-rules.js";
 import { setupProject } from "./setup.js";
 import { addLesson, checkLearning, reviewLesson, showLesson, teamContext, pendingLearning } from "./learning.js";
 import { activeSlices, installWatchdogTimer, runWatchdog, startSlice, updateSlice, timerIsActive, uninstallWatchdogTimer } from "./watchdog.js";
@@ -44,6 +56,10 @@ Usage:
   agent-ship lesson check --source-task-id ID --outcome none|candidate --reason TEXT --reviewed-by REF [--candidate-id ID ...] [--trigger TYPE ...] [--root DIR]
   agent-ship lesson pending [--source-task-id ID] [--root DIR]
   agent-ship check --contract ID [--repo DIR] [--slice ID] [--base REF] [--head REF] [--staged] [--root DIR]
+  agent-ship check --hard-rules [--repo DIR] [--base REF] [--head REF] [--staged] [--root DIR]
+  agent-ship promote --kind hook|contract|verify --message TEXT
+                       (--inbox ID | --source TEXT) [--glob PATH ...]
+                       [--command-hint TEXT] [--id hr_...] [--tag TAG ...] [--root DIR]
   agent-ship eval --fixture DIR [--json]
   agent-ship watchdog [--stale-minutes N] [--root DIR]
   agent-ship watchdog install|uninstall [--dry-run] [--root DIR]
@@ -59,7 +75,9 @@ Usage:
   agent-ship inbox list [--type TYPE] [--priority normal|high]
                        [--sort priority] [--all] [--json] [--root DIR]
   agent-ship inbox decide ID accept|changes_requested|reject
-                       [--note TEXT] [--root DIR]
+                       [--note TEXT] [--promote hook|contract|verify|none]
+                       [--glob PATH ...] [--message TEXT] [--source TEXT]
+                       [--command-hint TEXT] [--id hr_...] [--tag TAG ...] [--root DIR]
   agent-ship notify dry-run --policy FILE --allowlist FILE
                        (--latest | --event FILE) [--action ARGV] [--root DIR]
   agent-ship notify run --policy FILE --allowlist FILE
@@ -72,6 +90,8 @@ shared AGENTS.md rules section, team profile and handbook. setup never sets core
 notify dry-run prints a plan and does not start a command.
 notify run starts the allowlisted argv with no shell, and only when the plan allows it.
 A high-priority needs_review with no evidence URLs is not paged.
+promote writes .agent-ship/hard-rules.json on this clone only. It does not merge,
+deploy, or add CI. inbox decide --promote defaults to none.
 eval compares a fixture's expected checkpoints with the current check, notify, and skill gates.
 Exit 0 when they match; non-zero on regression. Use it when changing ship-* skills or those gates.
 `;
@@ -109,9 +129,10 @@ const VALUE_OPTIONS = new Set([
   "state-root",
   "status",
   "handbook", "lessons", "tag", "project", "proposal", "input", "reviewed-by", "review-after", "outcome", "candidate-id", "trigger", "fixture",
+  "kind", "message", "source", "command-hint", "promote", "glob", "inbox",
 ]);
-const REPEATABLE = new Set(["evidence", "tag", "candidate-id", "trigger"]);
-const BOOL_FLAGS = new Set(["json", "latest", "help", "all", "shared", "uninstall", "purge", "staged", "stale", "dry-run", "replace"]);
+const REPEATABLE = new Set(["evidence", "tag", "candidate-id", "trigger", "glob"]);
+const BOOL_FLAGS = new Set(["json", "latest", "help", "all", "shared", "uninstall", "purge", "staged", "stale", "dry-run", "replace", "hard-rules"]);
 
 interface ParsedArgs {
   positionals: string[];
@@ -272,15 +293,90 @@ async function inboxList(parsed: ParsedArgs, io: Io): Promise<number> {
   return 0;
 }
 
+function tagsOf(parsed: ParsedArgs): string[] {
+  return (parsed.values.get("tag") ?? []).map((tag) => assertTag(tag));
+}
+
+function promoteExtras(parsed: ParsedArgs): string[] {
+  return ["glob", "command-hint", "message", "source", "id"].filter((name) => parsed.values.has(name));
+}
+
+function promoteInputFrom(
+  parsed: ParsedArgs,
+  kindText: string,
+  inboxId: string | undefined,
+  fallbackText: string | undefined,
+): PromoteInput {
+  const kind = assertRuleKind(kindText);
+  const message = one(parsed.values, "message") ?? fallbackText;
+  const source = one(parsed.values, "source") ?? fallbackText;
+  if (!message) throw new Error("--note or --message is required when promoting");
+  return normalizePromoteInput({
+    id: one(parsed.values, "id"),
+    kind,
+    inboxId,
+    sourceText: source,
+    message,
+    paths: parsed.values.get("glob") ?? [],
+    commandHint: one(parsed.values, "command-hint"),
+    tags: tagsOf(parsed),
+  });
+}
+
 async function inboxDecide(parsed: ParsedArgs, io: Io): Promise<number> {
   const subjectId = parsed.positionals[2];
   const decisionText = parsed.positionals[3];
   if (!subjectId || !decisionText) {
     throw new Error("usage: inbox decide <id> accept|changes_requested|reject");
   }
+  const decision = assertDecision(decisionText);
+  if (parsed.values.has("kind")) {
+    throw new Error("--kind is for promote; inbox decide uses --promote hook|contract|verify");
+  }
+  if (parsed.values.has("inbox")) {
+    throw new Error("inbox decide uses the positional id; do not pass --inbox");
+  }
+  const promoteText = one(parsed.values, "promote");
+  const extras = promoteExtras(parsed);
+  if ((promoteText === undefined || promoteText === "none") && extras.length > 0) {
+    throw new Error(`--${extras[0]} requires --promote hook|contract|verify`);
+  }
+  const choice = promoteText === undefined ? "none" : assertPromoteChoice(promoteText);
+  if (choice !== "none" && decision !== "changes_requested") {
+    throw new Error("--promote is only valid with changes_requested");
+  }
+  const note = one(parsed.values, "note");
+  const pending = choice === "none" ? undefined : promoteInputFrom(parsed, choice, subjectId, note);
   const root = one(parsed.values, "root") ?? process.cwd();
-  const event = await decideInboxItem(root, subjectId, assertDecision(decisionText), one(parsed.values, "note"));
+  const tags = tagsOf(parsed);
+  const event = await decideInboxItem(root, subjectId, decision, note);
   io.stdout(`${JSON.stringify(event, null, 2)}\n`);
+  if (pending) {
+    const rule = await promoteHardRule(root, pending);
+    io.stderr(`promoted ${rule.id}\n`);
+  }
+  if (tags.length > 0 || (choice === "none" && note && decision === "changes_requested")) {
+    const counts = tags.length > 0 ? await noteFeedbackTags(root, tags) : [];
+    if (choice === "none") {
+      const noteCount = note && decision === "changes_requested" ? repeatedNoteCount(await readInbox(root), note) : 0;
+      for (const line of promotionSuggestions(counts, noteCount)) io.stderr(`${line}\n`);
+    }
+  }
+  return 0;
+}
+
+async function runPromote(parsed: ParsedArgs, io: Io): Promise<number> {
+  if (parsed.positionals.length > 1) {
+    throw new Error("usage: agent-ship promote --kind hook|contract|verify --message TEXT (--inbox ID | --source TEXT)");
+  }
+  if (parsed.values.has("promote")) throw new Error("promote takes --kind; --promote belongs on inbox decide");
+  const root = one(parsed.values, "root") ?? process.cwd();
+  const rule = await promoteHardRule(
+    root,
+    promoteInputFrom(parsed, requireOne(parsed.values, "kind"), one(parsed.values, "inbox"), one(parsed.values, "source")),
+  );
+  if ((parsed.values.get("tag") ?? []).length > 0) await noteFeedbackTags(root, tagsOf(parsed));
+  io.stdout(`${JSON.stringify(rule, null, 2)}\n`);
   return 0;
 }
 
@@ -409,13 +505,19 @@ async function runEval(parsed: ParsedArgs, io: Io): Promise<number> {
 
 async function runCheck(parsed: ParsedArgs, io: Io): Promise<number> {
   const root = one(parsed.values, "root") ?? process.cwd();
-  const result = await checkContract(root, requireOne(parsed.values, "contract"), {
+  const contract = one(parsed.values, "contract");
+  const hardRulesOnly = parsed.flags.has("hard-rules");
+  if (contract && hardRulesOnly) throw new Error("pass either --contract or --hard-rules");
+  if (!contract && !hardRulesOnly) throw new Error("--contract is required");
+  const options = {
     staged: parsed.flags.has("staged"),
     base: one(parsed.values, "base"),
     head: one(parsed.values, "head"),
     repoRoot: one(parsed.values, "repo"),
-    sliceId: one(parsed.values, "slice"),
-  });
+  };
+  const result = contract
+    ? await checkContract(root, contract, { ...options, sliceId: one(parsed.values, "slice") })
+    : await checkHardRules(root, options);
   io.stdout(`${JSON.stringify(result, null, 2)}\n`);
   return result.ok ? 0 : 1;
 }
@@ -455,6 +557,7 @@ export async function main(argv: string[], io: Io = defaultIo): Promise<number> 
     if ((group === "setup" || group === "init") && sub === undefined) return await runSetup(parsed, io);
     if (group === "check" && sub === undefined) return await runCheck(parsed, io);
     if (group === "eval" && sub === undefined) return await runEval(parsed, io);
+    if (group === "promote" && sub === undefined) return await runPromote(parsed, io);
     if (group === "watchdog" && sub === "install") {
       const root = one(parsed.values, "root") ?? process.cwd();
       const result = await installWatchdogTimer(root, { dryRun: parsed.flags.has("dry-run") });

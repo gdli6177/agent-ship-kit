@@ -68,7 +68,21 @@ agent-ship watchdog uninstall
 agent-ship check --contract contract_auth --base main
 ```
 
-Prints JSON and exits 1 when a path is forbidden or outside Allowed paths. `--staged` checks the index. No forge and no CI are required. A project may also run this command in CI; that is an extra, not the enforcement.
+Prints JSON and exits 1 when a path is forbidden, outside Allowed paths, or matched by a `hook` / `contract_forbidden` hard rule. The violation includes `rule_id`. `--staged` checks the index. `--hard-rules` checks hard rules without a contract, which is what pre-commit runs when no active contract is set and `.agent-ship/hard-rules.json` exists. No forge and no CI are required. A project may also run this command in CI; that is an extra, not the enforcement.
+
+## Hard rules
+
+```bash
+agent-ship promote --kind hook --glob ".env*" \
+  --message "Do not commit env files." \
+  --source "Do not commit env files."
+
+agent-ship inbox decide evt_<id> changes_requested \
+  --note "Do not commit env files." \
+  --promote hook --glob ".env*" --tag no-env
+```
+
+Rules live in `.agent-ship/hard-rules.json` on this clone. `--promote` defaults to `none`. A repeated `--tag` or an identical `changes_requested` note prints `suggest promote` on stderr and does not write a rule until you pass `--promote` or `promote`. Secret-shaped text is rejected and not stored. `command_hint` is recorded for the verifier and is not executed. `verify` rules show up as `checklist` and do not fail the path check by themselves.
 
 Use `agent-ship eval --fixture cli/test/eval-fixtures/verifier-gates` when changing `ship-*` skills or check/verifier gates: it prints a before/after checkpoint report and exits non-zero on regression.
 

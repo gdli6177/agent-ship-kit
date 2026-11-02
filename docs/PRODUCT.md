@@ -17,6 +17,7 @@ agent-ship-kit 是并行 AI 编程交付的验收与注意力层。人从需求�
 - 把待审、卡住、中途要拍板放进本地收件箱（`needs_review`、`blocked`、`needs_approval`）
 - 普通待审默认拉取：人看收件箱，不推送。只有带证据的高优先级，或 `blocked` / `needs_approval`，才推送
 - 用策略和允许列表做通知。`notify dry-run` 只打印计划；`notify run` 在 `allow: true` 时按 argv 执行，不经过 shell
+- 把反复出现的审阅意见收成本地硬规则（`.agent-ship/hard-rules.json`）。只约束安装了本工具的克隆，不自动合并，也不给其他贡献者加 CI
 
 不做这些事：
 
@@ -37,6 +38,7 @@ agent-ship-kit 是并行 AI 编程交付的验收与注意力层。人从需求�
 | 方案卡与合同 | `templates/proposal-card.md`、`templates/contract-card.md`。冻结合同不可就地修改 |
 | 证据包 | `templates/review-packet.md`。主张必须带可打开的指针 |
 | 收件箱 | `.agent-ship/inbox.jsonl`。`inbox list` 默认只显示还没 `inbox decide` 的项 |
+| 硬规则 | 本地 `.agent-ship/hard-rules.json`。`promote` 或 `inbox decide --promote` 写入。`hook` / `contract` 让 `check` 和 pre-commit 带规则 id 失败 |
 | 通知 | 策略里有给人读的自由文本，也有 CLI 解析的规则。允许列表始终生效 |
 | 端到端登录 | 每个项目一份 Playwright `auth.setup.ts`，冒烟复用 gitignore 的 storageState。见 `templates/e2e.md` |
 

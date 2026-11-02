@@ -185,6 +185,15 @@ cp -R skills/ship-setup skills/ship-watchdog skills/ship-contract skills/ship-di
 
 `agent-ship check --contract <id>` 用普通 git 把工作分支和基线分支做 diff。改动的路径落在禁止列表里，或不在允许列表里，检查就失败。本地 pre-commit 对 `.agent-ship/active-contract` 里的合同做暂存区检查。pre-push 拒绝推到 `main` 和 `master`，除非人自己设置 `AGENT_SHIP_ALLOW_PROTECTED_PUSH=1`。CI 也可以跑同一条 `check`，那是附加的，钩子不依赖它。
 
+反复出现的审阅意见可以收成本地硬规则。`agent-ship promote`，或 `inbox decide ... changes_requested --promote hook|contract|verify`，会写入 `.agent-ship/hard-rules.json`。这个文件跟 `.agent-ship/` 一起被忽略，只约束装了本工具的克隆。`hook` 和 `contract` 会让 `agent-ship check` 和本地 pre-commit 带规则 id 失败。`verify` 是核验者要读的清单。`--promote` 默认 `none`，普通决定不会写规则。这里不会合并、不会发布，也不会给其他贡献者加 CI。
+
+```bash
+agent-ship promote --kind hook --glob ".env*" \
+  --message "Do not commit env files." \
+  --source "Do not commit env files."
+agent-ship check --hard-rules
+```
+
 ## 交付流程
 
 完整步骤在 [templates/workflow.md](templates/workflow.md)。压缩起来是：

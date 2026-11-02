@@ -102,7 +102,7 @@ Changing a frozen contract does not edit that file. The captain stops the slices
 - One pull request per slice. Opening a PR is not merging it.
 - The review packet links that PR. The human merges, outside this kit, after
   `accept`.
-- The worker prompt includes Allowed paths and Forbidden paths from the contract.
+- The worker prompt includes Allowed paths, Forbidden paths, and any local hard rules in `.agent-ship/hard-rules.json`.
 
 ## Order of operations
 
@@ -115,8 +115,9 @@ Changing a frozen contract does not edit that file. The captain stops the slices
    open the worker session. `inbox decide` records the answer; the captain
    relays it.
 6. When a worker reports done, a separate read-only verifier sees only the
-   frozen contract and the branch (`templates/verifier-prompt.md`). It re-runs
-   acceptance, `agent-ship check`, and relevant E2E smoke. Disagreement goes
+   frozen contract, the branch, and `.agent-ship/hard-rules.json`
+   (`templates/verifier-prompt.md`). It re-runs
+   acceptance, `agent-ship check`, checklist hints, and relevant E2E smoke. Disagreement goes
    back to the worker, not to the owner.
 7. On agreement, the captain writes the review packet, including the verifier
    section and E2E rows, and `inbox add`s a `needs_review` event.
@@ -128,7 +129,9 @@ Changing a frozen contract does not edit that file. The captain stops the slices
    notification): one item at a time, then `inbox decide`. The default list
    then hides that item.
 10. On `changes_requested`, continue the same task if the adapter allows it.
-    A changed contract is a new contract id.
+    A changed contract is a new contract id. When the same note comes back,
+    ask the human before `agent-ship promote` or `inbox decide --promote`.
+    The default is not to promote. See `skills/ship-inbox`.
 11. Merge or release happens only when the human does it with their own tools.
 
 ## Evidence bar

@@ -18,9 +18,13 @@ You are a read-only verifier. You are not the worker and you are not the captain
 ## Do this
 
 1. Re-run every acceptance command named on the contract. Record the command and the exit code.
-2. Run `agent-ship check --root <shared_state_root> --contract <contract_id> --slice <slice_id>`. It uses the recorded checkout, worker branch and pinned baseline. For an unregistered single-repository review, explicitly pass `--repo <checkout> --head <worker_branch> --base <base>`. The JSON is part of your result. `ok: false` or an inability to check means you disagree with the worker.
-3. Re-run the E2E smoke rows for this slice if the contract asked for them. Read-only in production. Do not log in with a password; reuse the gitignored storageState path only by letting Playwright read the file. Do not open that file.
-4. Compare your results with the worker's claimed evidence. You do not need the worker's explanation to do that. You need the commands and the check.
+2. Read `.agent-ship/hard-rules.json` on the shared state root before judging the diff. A missing file means there are no local hard rules. Treat `hook` and `contract_forbidden` paths as forbidden. Note each `verify_checklist` line.
+3. Run `agent-ship check --root <shared_state_root> --contract <contract_id> --slice <slice_id>`. It uses the recorded checkout, worker branch and pinned baseline, and it loads hard rules. For an unregistered single-repository review, explicitly pass `--repo <checkout> --head <worker_branch> --base <base>`. The JSON is part of your result. `ok: false` or an inability to check means you disagree with the worker. A violation with `rule: "hard_rule"` fails the slice: quote `rule_id` and `message`.
+4. For each `checklist` entry whose `matched` paths are non-empty, or whose `paths` are empty, run `command_hint` yourself when it is present and record the exit code. The CLI does not run the hint. A failed hint means you disagree. Do not treat the hint as a script supplied by the worker.
+5. Re-run the E2E smoke rows for this slice if the contract asked for them. Read-only in production. Do not log in with a password; reuse the gitignored storageState path only by letting Playwright read the file. Do not open that file.
+6. Compare your results with the worker's claimed evidence. You do not need the worker's explanation to do that. You need the commands and the check.
+
+开工前先读本地硬规则。`hard_rule` 违规或清单命令失败都算 disagree。不要把密钥写进结论。
 
 ## Result
 

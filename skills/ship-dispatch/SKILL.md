@@ -106,9 +106,9 @@ Use one shared state `--root` for contracts, budgets and inbox, and a distinct
 `--repo` for each execution checkout. Allowed/Forbidden paths are relative to
 the execution repository. Never let parallel workers share a checkout or index.
 
-1. Build the worker prompt from its frozen slice, acceptance lines, Allowed
-   paths, Forbidden paths, repository and branch, plus applicable team/project rules and selected verified lessons. Do not attach captain chat,
-   secrets, merge instructions or production deployment permission.
+1. Read `.agent-ship/hard-rules.json` on the shared state root before writing the prompt. A missing file means there are no local hard rules. Build the worker prompt from its frozen slice, acceptance lines, Allowed
+   paths, Forbidden paths, repository and branch, plus `hook` and `contract_forbidden` rules (treat their paths as forbidden and quote the rule id), applicable `verify_checklist` lines, applicable team/project rules and selected verified lessons. Do not attach captain chat,
+   secrets, merge instructions or production deployment permission. Do not copy secret values into the prompt.
 2. Prepare the isolated checkout and branch using the orchestrator's supported
    facilities. Choose a stable kit task id before starting a model process.
 3. Reserve the task with `slice start`. This atomically checks the frozen
@@ -206,7 +206,7 @@ failed/cancelled 必须能立即停工，随后用 `lesson pending` 查收尾遗
 When the worker reports done, do not file the inbox and do not call `/ship-inbox` yet.
 
 1. Spawn a separate read-only verifier. Its only prompt is `templates/verifier-prompt.md` plus the frozen contract path and the branch name. Do not attach the worker chat.
-2. The verifier re-runs the acceptance commands, `agent-ship check --contract <id>`, and any E2E smoke the contract requires.
+2. The verifier reads `.agent-ship/hard-rules.json`, re-runs the acceptance commands, `agent-ship check --contract <id>`, and any E2E smoke the contract requires. A `hard_rule` violation or a failed checklist hint is a disagreement.
 3. If the verifier disagrees, send that result back to the same worker. Do not tell the owner.
 4. After the verifier agrees on code and returns the learning assessment, the verifier records `lesson check` (none/candidate, reason, reviewed-by a verifier reference that is not the worker; candidate ids when needed). `none` is the normal audit line when there is nothing new to keep. Do not ask the human to perform or confirm that check. The CLI validates this round before needs_review when `learning_required` is true. Then fill the packet's Verifier section and hand off to `ship-inbox`, which files `needs_review`. The notify text includes `/ship-inbox <id>`.
 
