@@ -51,10 +51,10 @@ Usage:
   agent-ship team context [--tag TAG ...] [--project ID] [--repo DIR] [--root DIR]
   agent-ship lesson search [--tag TAG ...] [--project ID] [--root DIR]
   agent-ship lesson show --id ID [--root DIR]
-  agent-ship lesson add --input FILE [--root DIR]
+  agent-ship lesson add --input FILE [--auto] [--demand TAG ...] [--root DIR]
   agent-ship lesson review --id ID --status active|needs_review|retired --reviewed-by REF --note TEXT [--review-after DATE] [--root DIR]
   agent-ship lesson check --source-task-id ID --outcome none|candidate --reason TEXT --reviewed-by REF [--candidate-id ID ...] [--trigger TYPE ...] [--root DIR]
-  agent-ship lesson pending [--source-task-id ID] [--root DIR]
+  agent-ship lesson pending [--source-task-id ID] [--handbook] [--root DIR]
   agent-ship check --contract ID [--repo DIR] [--slice ID] [--base REF] [--head REF] [--staged] [--root DIR]
   agent-ship check --hard-rules [--repo DIR] [--base REF] [--head REF] [--staged] [--root DIR]
   agent-ship promote --kind hook|contract|verify --message TEXT
@@ -83,6 +83,11 @@ Usage:
   agent-ship notify run --policy FILE --allowlist FILE
                        (--latest | --event FILE) [--action ARGV] [--root DIR]
 
+lesson add --auto writes a candidate under <lessons>/auto/ and records a demand fingerprint
+(source task id plus any --demand tags). The same conclusion from a second distinct
+demand sets handbook_review_suggested. lesson pending --handbook lists that queue.
+Auto cards are not execution summaries until lesson review promotes them.
+The handbook and team rules are never edited automatically.
 Captain-facing skills: /ship-setup, /ship-contract, /ship-dispatch, /ship-inbox [id], /ship-notify, /ship-e2e, /ship-watchdog.
 setup is local to this clone: hooks go in .git/hooks only, and ignore rules
 go in .git/info/exclude. Pass --shared to write a .gitignore block and a
@@ -128,11 +133,11 @@ const VALUE_OPTIONS = new Set([
   "repo",
   "state-root",
   "status",
-  "handbook", "lessons", "tag", "project", "proposal", "input", "reviewed-by", "review-after", "outcome", "candidate-id", "trigger", "fixture",
+  "handbook", "lessons", "tag", "project", "proposal", "input", "reviewed-by", "review-after", "outcome", "candidate-id", "trigger", "demand", "fixture",
   "kind", "message", "source", "command-hint", "promote", "glob", "inbox",
 ]);
-const REPEATABLE = new Set(["evidence", "tag", "candidate-id", "trigger", "glob"]);
-const BOOL_FLAGS = new Set(["json", "latest", "help", "all", "shared", "uninstall", "purge", "staged", "stale", "dry-run", "replace", "hard-rules"]);
+const REPEATABLE = new Set(["evidence", "tag", "candidate-id", "trigger", "glob", "demand"]);
+const BOOL_FLAGS = new Set(["json", "latest", "help", "all", "shared", "uninstall", "purge", "staged", "stale", "dry-run", "replace", "hard-rules", "auto"]);
 
 interface ParsedArgs {
   positionals: string[];
@@ -167,6 +172,13 @@ export function parseArgs(argv: string[]): ParsedArgs {
       if (inline !== undefined) throw new Error(`--${name} does not take a value`);
       flags.add(name);
       continue;
+    }
+    if (name === "handbook" && inline === undefined) {
+      const following = argv[index + 1];
+      if (following === undefined || following.startsWith("--")) {
+        flags.add("handbook-queue");
+        continue;
+      }
     }
     if (!VALUE_OPTIONS.has(name)) throw new Error(`unknown flag --${name}`);
     const next = argv[index + 1];
@@ -540,17 +552,21 @@ export async function main(argv: string[], io: Io = defaultIo): Promise<number> 
   const [group, sub] = parsed.positionals;
   try {
     const root = one(parsed.values, "root") ?? process.cwd();
+    if (parsed.flags.has("handbook-queue") && !(group === "lesson" && sub === "pending")) throw new Error("--handbook requires a value");
+    if (group === "lesson" && sub === "pending" && one(parsed.values, "handbook") !== undefined) throw new Error("--handbook does not take a value on lesson pending");
+    if (parsed.flags.has("auto") && !(group === "lesson" && sub === "add")) throw new Error("--auto is only valid with lesson add");
+    if ((parsed.values.get("demand")?.length ?? 0) > 0 && !(group === "lesson" && sub === "add" && parsed.flags.has("auto"))) throw new Error("--demand is only valid with lesson add --auto");
     if ((group === "team" && sub === "context") || (group === "lesson" && sub === "search")) {
       const context = await teamContext(root, { tags: parsed.values.get("tag"), project: one(parsed.values, "project"), repo: one(parsed.values, "repo") });
       io.stdout(`${JSON.stringify(context, null, 2)}\n`); return 0;
     }
     if (group === "lesson") {
       let result: unknown;
-      if (sub === "add") result = await addLesson(root, requireOne(parsed.values, "input"));
+      if (sub === "add") result = await addLesson(root, requireOne(parsed.values, "input"), { auto: parsed.flags.has("auto"), demandTags: parsed.values.get("demand") ?? [] });
       else if (sub === "show") result = await showLesson(root, requireOne(parsed.values, "id"));
       else if (sub === "review") result = await reviewLesson(root, requireOne(parsed.values, "id"), requireOne(parsed.values, "status"), requireOne(parsed.values, "reviewed-by"), requireOne(parsed.values, "note"), one(parsed.values, "review-after"));
       else if (sub === "check") result = await checkLearning(root, requireOne(parsed.values, "source-task-id"), requireOne(parsed.values, "outcome"), requireOne(parsed.values, "reason"), requireOne(parsed.values, "reviewed-by"), parsed.values.get("candidate-id"), parsed.values.get("trigger"));
-      else if (sub === "pending") result = await pendingLearning(root, one(parsed.values, "source-task-id"));
+      else if (sub === "pending") result = await pendingLearning(root, one(parsed.values, "source-task-id"), parsed.flags.has("handbook-queue"));
       else throw new Error("unknown lesson command");
       io.stdout(`${JSON.stringify(result, null, 2)}\n`); return 0;
     }

@@ -5,6 +5,7 @@
 `setup --shared` 初始化或引用团队手册；普通 setup 只建立本地引用。
 `team context --tag <tag>` 返回必读资料引用和有限经验摘要。
 `lesson add/review/search/show/check/pending` 提供候选准入、评审、检索和交付检查。
+`lesson add --auto` 把自动候选写入经验目录的 `auto/`。同一结论跨第二个需求出现时标记 `handbook_review_suggested`，用 `lesson pending --handbook` 查看。检索在评审激活之前不采用这些卡片。CLI 不自动改写手册或规则。
 完整命令与边界见[团队手册和经验回流](../docs/team-and-learning.md)。
 
 多仓库和 Git worktree 使用共享 `--root` 保存合同、运行状态和 inbox，

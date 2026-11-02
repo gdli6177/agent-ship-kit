@@ -65,7 +65,8 @@ agent-ship team context --tag git --tag parallel --project api-service
 
 默认最多 3 条摘要，摘要 JSON 合计不超过 1200 字符（不是 token 计数），可在配置中调整。
 必读项目规则不受经验预算裁剪。候选、退役条目不进入摘要；过期或 needs_review 条目只提示编号，
-不能直接作为执行要求。需要更多细节时显式展开一条：
+不能直接作为执行要求。`auto/` 中的卡片在维护者用 `lesson review` 激活并移出该目录之前，
+不进入摘要，也不占复核编号。需要更多细节时显式展开一条：
 
 ```sh
 agent-ship lesson show --id isolated-repositories
@@ -110,7 +111,7 @@ agent-ship lesson check --source-task-id task_upload \
 
 add 校验字段、字数和证据指针，创建 candidate。同条件、动作、项目和标签的精确重复返回已有编号，
 保留原文，不再创建卡片；语义相似性仍由核验者判断。现有条目需要补证据或修订时，
-使用该来源的正常评审方式，CLI 不自动合并或改写旧经验。
+使用该来源的正常评审方式，CLI 不自动合并或改写旧经验。自动候选的目录和跨需求复发见「自动候选」一节。
 
 新 setup 后派发的受管任务，会记录 learning_required。进入 `needs_review` 前必须有本轮工作之后的
 有效 none/candidate 检查、原因和核验者引用。恢复执行或收到退回修改后，旧回执不能继续用于交付。
@@ -125,6 +126,40 @@ agent-ship lesson pending --source-task-id task_upload
 
 pending 默认最多返回 20 个任务编号与状态，并报告总量；不会把历史报告全部带入上下文。
 检查这些结束任务，补上 none 或有证据的候选，不自动重启工人。
+
+## 自动候选：先进入 auto/，跨需求复发才进入手册复核队列
+
+未经维护者确认的回流可以写成自动候选。卡片写到经验目录下的 `auto/`
+（默认 `docs/agent-team/lessons/auto/`；配置了其它 lessons 目录时，写到该目录下的 `auto/`）。
+这一步不写入手册，也不写入团队配置的 `rules`。
+
+```sh
+agent-ship lesson add --input /path/to/verified-finding.json --auto
+agent-ship lesson add --input /path/to/verified-finding.json --auto --demand billing
+```
+
+每张自动候选记录需求指纹：卡片上的 `source_task_id`，加上可选的 `--demand` 标签。
+指纹按任务编号和标签的大小写不敏感形式区分。同一任务、同一组标签再次提交只算一次，
+不改文件。条件、动作、项目和经验标签相同的结论视为同一条。
+
+第一次出现只保存卡片，`handbook_review_suggested` 不出现。第二次来自另一个需求时，
+CLI 在原卡片上追加该指纹并标记 `handbook_review_suggested`。不新建第二张卡，
+也不改写已有结论和证据。已经在经验根目录的相同结论不会被自动候选改写，也不会因此进入队列。
+
+```sh
+agent-ship lesson pending --handbook
+agent-ship lesson pending --handbook --source-task-id task_upload
+```
+
+`--handbook` 只列出被标记且尚未退役的卡片（编号、来源路径、状态、需求指纹），
+默认最多 20 条，并报告总量。它可以按 `source_task_id` 过滤。
+队列是给维护者看的建议：CLI 不修改手册正文，不把结论推进硬规则或 `rules`，
+也不把 `auto/` 卡片当作执行摘要。退役后该卡片离开队列。
+
+检索不读取 `auto/`。把目录里的卡片手工改成 active，开工摘要和复核编号仍然不包含它。
+维护者确认来源、适用范围和重复性之后，沿用原来的评审命令。激活会把卡片从 `auto/`
+移到经验根目录，之后才按既有 active 规则进入摘要。`needs_review` 和 `retired` 留在原路径。
+评审、复发和队列都不会自动编写手册，也不会自动新增规则。
 
 ## 候选到活动经验
 
@@ -147,4 +182,5 @@ CLI 能校验结构完整性、精确重复、预算和状态，不能证明证�
 
 结合派工中的经验编号检查：是否未检索到、条件写错、动作含糊、未执行，或应由程序防止。
 优先改进检索标签、已有经验、测试或门禁。一次复发不直接生成一条新规则。
+自动候选要跨第二个不同需求出现，才进入手册复核队列；队列本身不改手册、不新增规则。
 本地运行日志可以增长，但不会整体注入提示；长期资料只保留筛选后的结论。
