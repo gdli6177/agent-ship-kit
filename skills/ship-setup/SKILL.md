@@ -69,7 +69,7 @@ It creates `.agent-ship/` (proposals, contracts, packets, e2e index, notify poli
 
 ## Hooks
 
-`pre-commit` runs `agent-ship check --staged --contract <id>` when `.agent-ship/active-contract` names a contract. No active contract means the path check is skipped and any chained hook still runs. `pre-push` refuses `main`, `master`, and names listed in `.agent-ship/protected-branches`. A human may set `AGENT_SHIP_ALLOW_PROTECTED_PUSH=1`. The captain must not set that variable.
+`pre-commit` runs `agent-ship check --staged --contract <id>` when `.agent-ship/active-contract` names a contract. That check also enforces `.agent-ship/hard-rules.json` on the state root. With no active contract, the hook runs `agent-ship check --staged --hard-rules` when that file exists, then chains. No contract and no hard-rules file skips the path check, and any chained hook still runs. Hard rules stay in the gitignored `.agent-ship/` directory, so they bind this clone only. `pre-push` refuses `main`, `master`, and names listed in `.agent-ship/protected-branches`. A human may set `AGENT_SHIP_ALLOW_PROTECTED_PUSH=1`. The captain must not set that variable.
 
 The hooks are plain shell. They call the CLI with `shell` off inside the CLI. They do not talk to GitHub, GitLab, or any other forge.
 

@@ -34,6 +34,7 @@ These rules stay in force for every agent in this checkout. \`/ship-setup\` rewr
 - Follow-ups on a subscribed thread go to the owning worker. You handle new or unowned events and cross-slice coordination.
 - Do not spawn a worker until the human freezes the contract.
 - Edit only Allowed paths on the frozen contract. Never touch Forbidden paths. Workers do the edits.
+- Read \`.agent-ship/hard-rules.json\` before dispatch or review. \`hook\` and \`contract_forbidden\` rules fail the local check with their rule id. Promote a repeated review note only after the human agrees. Never copy a secret into a rule.
 - At most 3 workers may be queued or running across all contracts.
 - A separate read-only verifier must agree before a \`needs_review\` inbox item is filed. The verifier does not see the worker chat.
 - Read the configured team handbook and project rules via \`agent-ship team context\`. Search only relevant lesson summaries with explicit tags; do not load the entire history. Existing owner rules remain authoritative.
@@ -54,7 +55,7 @@ These rules stay in force for every agent in this checkout. \`/ship-setup\` rewr
   - \`/ship-watchdog\` → \`skills/ship-watchdog/SKILL.md\` → \`agent-ship watchdog\` (independent of the captain; a timer runs it)
 - Speculative drafts stay off unless \`.agent-ship/limits.json\` sets \`"speculative": true\`. Even then, do not dispatch or edit code without a frozen contract, and only show the owner a draft that has evidence.
 
-人直接提需求、问进度和审结果，船长自行衔接技能并保管编号。明确“按这个方案开始”可确认刚展示的唯一方案并开工，不要求背命令。合同要人确认，禁止路径不能碰，同时最多 3 个工人；独立核验后才待审。船长不改产品代码，合并和发布只由人做，不碰密码。
+人直接提需求、问进度和审结果，船长自行衔接技能并保管编号。明确“按这个方案开始”可确认刚展示的唯一方案并开工，不要求背命令。合同要人确认，禁止路径不能碰，同时最多 3 个工人；独立核验后才待审。反复的审阅意见在人同意后才能收成本地硬规则。船长不改产品代码，合并和发布只由人做，不碰密码。
 ${RULES_END}
 `;
 
@@ -189,17 +190,26 @@ function hookScript(kind: "pre-commit" | "pre-push"): string {
     return `#!/bin/sh
 ${HOOK_START}
 root=$(git rev-parse --show-toplevel) || exit 1
+contract=""
 id_file="$root/.agent-ship/active-contract"
 if [ -f "$id_file" ]; then
   contract=$(tr -d ' \\t\\r\\n' < "$id_file")
-  if [ -n "$contract" ]; then
-    kit=$(tr -d '\\r\\n' < "$root/.agent-ship/kit-root") || exit 1
-    nodebin=$(tr -d '\\r\\n' < "$root/.agent-ship/node-bin") || exit 1
+fi
+state="$root"
+if [ -f "$root/.agent-ship/state-root" ]; then
+  state=$(tr -d '\\r\\n' < "$root/.agent-ship/state-root") || exit 1
+  if [ -z "$state" ]; then
     state="$root"
-    if [ -f "$root/.agent-ship/state-root" ]; then
-      state=$(tr -d '\\r\\n' < "$root/.agent-ship/state-root") || exit 1
-    fi
+  fi
+fi
+rules="$state/.agent-ship/hard-rules.json"
+if [ -n "$contract" ] || [ -f "$rules" ]; then
+  kit=$(tr -d '\\r\\n' < "$root/.agent-ship/kit-root") || exit 1
+  nodebin=$(tr -d '\\r\\n' < "$root/.agent-ship/node-bin") || exit 1
+  if [ -n "$contract" ]; then
     (cd "$kit/cli" && "$nodebin" --import tsx src/cli.ts check --staged --root "$state" --repo "$root" --contract "$contract") || exit $?
+  else
+    (cd "$kit/cli" && "$nodebin" --import tsx src/cli.ts check --staged --root "$state" --repo "$root" --hard-rules) || exit $?
   fi
 fi
 ${HOOK_END}

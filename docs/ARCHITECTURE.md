@@ -125,6 +125,7 @@ Optional cross-links on any type: `proposal_id`, `contract_id`, `slice_id`, `wor
 
 ```text
 .agent-ship/inbox.jsonl
+.agent-ship/hard-rules.json
 .agent-ship/proposals/<proposal_id>.md
 .agent-ship/contracts/<contract_id>.md
 .agent-ship/packets/<task_id>.md
@@ -155,7 +156,9 @@ Default is local:
 
 ## Path check
 
-`agent-ship check --root <state> --contract <id> --slice <slice>` reads the shared contract and uses the recorded execution checkout, worker branch and pinned base commit. Unregistered single-repository checks may explicitly pass `--repo`, `--head` and `--base`. Ambiguous multi-repository/branch checks and scopes entering nested Git repositories are rejected. It lists paths with plain `git diff` and prints JSON. A changed path that matches Forbidden paths, or that matches none of the Allowed paths, fails the check. `--staged` is what the pre-commit hook uses. The JSON belongs in the review packet's verifier section.
+`agent-ship check --root <state> --contract <id> --slice <slice>` reads the shared contract and uses the recorded execution checkout, worker branch and pinned base commit. Unregistered single-repository checks may explicitly pass `--repo`, `--head` and `--base`. Ambiguous multi-repository/branch checks and scopes entering nested Git repositories are rejected. It lists paths with plain `git diff` and prints JSON. A changed path that matches Forbidden paths, or that matches none of the Allowed paths, fails the check. The same command loads `.agent-ship/hard-rules.json` from the state root. A `hook` or `contract_forbidden` glob match fails the check with `rule: "hard_rule"` and that rule's id. `verify_checklist` entries are returned as `checklist` and do not fail the path gate. `--hard-rules` runs only that file, with no contract. `--staged` is what the pre-commit hook uses: the active contract when one is set, otherwise `--hard-rules` when the file exists. The JSON belongs in the review packet's verifier section.
+
+`agent-ship promote` and `inbox decide ... changes_requested --promote hook|contract|verify` write that file. `--promote` defaults to `none`. The file stays under gitignored `.agent-ship/`, so the gate is local to clones that installed the kit. It does not merge, deploy, or add CI for other contributors. Secret-shaped text is refused.
 
 This does not need GitHub, GitLab, or CI. An optional extra, on any host, is to run the same command on the branch. A green extra check does not replace the verifier or the human.
 
