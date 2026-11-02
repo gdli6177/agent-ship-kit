@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { appendFile, lstat, mkdir, readdir, realpath, rename, writeFile } from "node:fs/promises";
+import { appendFile, lstat, mkdir, readdir, realpath, rename, rm, writeFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { assertReference, boundedText, DEFAULT_LESSONS, optionalText, ownedDirectory, parseJson, readTeam, requiredSources } from "./team.js";
 import { nextSequence, readEvents, withLock } from "./storage.js";
@@ -24,6 +24,10 @@ export interface Lesson {
   review_note?: string;
   review_after?: string;
   authored_by?: string;
+  /** Demand identities that produced this conclusion. Recorded for auto candidates. */
+  demands?: { source_task_id: string; tags: string[] }[];
+  /** Set only after the same conclusion is seen from a second distinct demand. */
+  handbook_review_suggested?: true;
 }
 function text(value: unknown, name: string, max = 400): string {
   if (typeof value !== "string" || !value.trim() || value.length > max || /[\r\n\0]/.test(value)) {
@@ -38,7 +42,7 @@ function strings(value: unknown, name: string, max: number): string[] {
 function parseLesson(value: unknown): Lesson {
   if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("lesson must be an object");
   const c = value as Record<string, unknown>;
-  const keys = ["id", "title", "summary", "when", "action", "tags", "project", "evidence", "source_task_id", "reuse_reason", "status", "updated_at", "reviewed_by", "review_note", "review_after", "authored_by"];
+  const keys = ["id", "title", "summary", "when", "action", "tags", "project", "evidence", "source_task_id", "reuse_reason", "status", "updated_at", "reviewed_by", "review_note", "review_after", "authored_by", "demands", "handbook_review_suggested"];
   if (Object.keys(c).some((key) => !keys.includes(key))) throw new Error("unknown lesson field");
   const id = text(c.id, "id", 80);
   if (!ID.test(id) || !STATUSES.includes(c.status as LessonStatus)) throw new Error("invalid lesson id/status");
@@ -53,16 +57,53 @@ function parseLesson(value: unknown): Lesson {
     lesson.review_after = text(c.review_after, "review_after");
     if (!Number.isFinite(Date.parse(lesson.review_after))) throw new Error("invalid review_after");
   }
+  if (c.demands !== undefined) lesson.demands = parseDemands(c.demands);
+  if (c.handbook_review_suggested !== undefined) {
+    if (c.handbook_review_suggested !== true) throw new Error("invalid handbook_review_suggested");
+    if ((lesson.demands?.length ?? 0) < 2) throw new Error("handbook review requires a second distinct demand");
+    lesson.handbook_review_suggested = true;
+  }
   if (lesson.status === "active" && (!lesson.reviewed_by || !lesson.review_note)) throw new Error("active lesson needs an explicit review");
   return lesson;
+}
+const DEMAND_LIMIT = 20;
+function canonicalDemandTags(tags: string[]): string[] {
+  const byKey = new Map<string, string>();
+  for (const tag of tags) {
+    const key = tag.toLowerCase();
+    if (!byKey.has(key)) byKey.set(key, tag);
+  }
+  return [...byKey.entries()].sort(([left], [right]) => left.localeCompare(right)).map(([, tag]) => tag);
+}
+function demandKey(sourceTaskId: string, tags: string[]): string {
+  return JSON.stringify([sourceTaskId.toLowerCase(), tags.map((tag) => tag.toLowerCase()).sort()]);
+}
+function parseDemands(value: unknown): { source_task_id: string; tags: string[] }[] {
+  if (!Array.isArray(value) || !value.length || value.length > DEMAND_LIMIT) throw new Error("invalid demands");
+  const demands = [];
+  const seen = new Set<string>();
+  for (const item of value) {
+    if (!item || typeof item !== "object" || Array.isArray(item)) throw new Error("invalid demands");
+    const record = item as Record<string, unknown>;
+    if (Object.keys(record).some((key) => key !== "source_task_id" && key !== "tags")) throw new Error("invalid demands");
+    const source_task_id = text(record.source_task_id, "demand source_task_id");
+    if (source_task_id.includes("<")) throw new Error("lesson evidence/task placeholders must be replaced");
+    const rawTags = record.tags === undefined ? [] : record.tags;
+    if (!Array.isArray(rawTags) || rawTags.length > 12) throw new Error("invalid demand tags");
+    const tags = canonicalDemandTags(rawTags.map((tag) => text(tag, "demand tag", 120)));
+    const key = demandKey(source_task_id, tags);
+    if (seen.has(key)) throw new Error("duplicate demand fingerprint");
+    seen.add(key);
+    demands.push({ source_task_id, tags });
+  }
+  return demands;
 }
 async function lessonDirectory(root: string) {
   const path = resolve(root, (await readTeam(root))?.config.lessons ?? DEFAULT_LESSONS);
   try { const actual = await realpath(path); assertReference(actual); return actual; }
   catch (error) { if ((error as NodeJS.ErrnoException).code === "ENOENT") return path; throw error; }
 }
-async function readLessons(root: string): Promise<{ lesson: Lesson; source: string }[]> {
-  const directory = await lessonDirectory(root);
+async function readLessonFiles(directory: string): Promise<{ lesson: Lesson; source: string }[]> {
   let names: string[];
   try { names = await readdir(directory); }
   catch (error) { if ((error as NodeJS.ErrnoException).code === "ENOENT") return []; throw error; }
@@ -77,29 +118,86 @@ async function readLessons(root: string): Promise<{ lesson: Lesson; source: stri
   }
   return cards;
 }
+async function assertAutoDirectory(lessonsRoot: string): Promise<void> {
+  try {
+    const info = await lstat(join(lessonsRoot, "auto"));
+    if (info.isSymbolicLink()) throw new Error("lesson auto directory cannot be a symlink");
+    if (!info.isDirectory()) throw new Error("lesson auto path is not a directory");
+  } catch (error) { if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error; }
+}
+/** Top-level cards are the reviewed library. auto/ is included only for admission, review, and the handbook queue. */
+async function readLessons(root: string, includeAuto = true): Promise<{ lesson: Lesson; source: string; auto: boolean }[]> {
+  const directory = await lessonDirectory(root);
+  const top = (await readLessonFiles(directory)).map((card) => ({ ...card, auto: false }));
+  if (!includeAuto) return top;
+  const autoDir = join(directory, "auto");
+  let info;
+  try { info = await lstat(autoDir); }
+  catch (error) { if ((error as NodeJS.ErrnoException).code === "ENOENT") return top; throw error; }
+  if (info.isSymbolicLink()) throw new Error("lesson auto directory cannot be a symlink");
+  if (!info.isDirectory()) throw new Error("lesson auto path is not a directory");
+  const auto = (await readLessonFiles(autoDir)).map((card) => ({ ...card, auto: true }));
+  const seen = new Set(top.map((card) => card.lesson.id));
+  for (const card of auto) {
+    if (seen.has(card.lesson.id)) throw new Error("duplicate lesson id");
+    seen.add(card.lesson.id);
+  }
+  return [...top, ...auto];
+}
 function fingerprint(lesson: Lesson): string {
   const normalized = [lesson.when, lesson.action, lesson.project ?? "", ...[...lesson.tags].sort()].map((s) => s.toLowerCase().replace(/\s+/g, " ").trim());
   return createHash("sha256").update(JSON.stringify(normalized)).digest("hex");
 }
 
-export async function addLesson(root: string, inputFile: string) {
+async function writeLesson(source: string, lesson: Lesson) {
+  const temporary = `${source}.tmp`;
+  await writeFile(temporary, `${JSON.stringify(lesson, null, 2)}\n`, { flag: "wx" });
+  await rename(temporary, source);
+}
+async function noteAutoDemand(card: { lesson: Lesson; source: string }, incoming: Lesson, tags: string[]) {
+  const demand = { source_task_id: incoming.source_task_id, tags: canonicalDemandTags(tags) };
+  const recorded = card.lesson.demands ?? [{ source_task_id: card.lesson.source_task_id, tags: [] }];
+  const known = recorded.some((item) => demandKey(item.source_task_id, item.tags) === demandKey(demand.source_task_id, demand.tags));
+  if (known) return { id: card.lesson.id, source: card.source, duplicate: true, handbook_review_suggested: card.lesson.handbook_review_suggested === true };
+  const atCap = recorded.length >= DEMAND_LIMIT;
+  const demands = atCap ? recorded : [...recorded, demand];
+  const suggested = demands.length >= 2;
+  if (atCap && card.lesson.handbook_review_suggested) return { id: card.lesson.id, source: card.source, duplicate: true, handbook_review_suggested: true };
+  const payload: Record<string, unknown> = { ...card.lesson, demands, updated_at: new Date().toISOString() };
+  if (suggested) payload.handbook_review_suggested = true;
+  else delete payload.handbook_review_suggested;
+  const lesson = parseLesson(payload);
+  await writeLesson(card.source, lesson);
+  return { id: lesson.id, source: card.source, duplicate: true, handbook_review_suggested: suggested };
+}
+export async function addLesson(root: string, inputFile: string, options: { auto?: boolean; demandTags?: string[] } = {}) {
+  if (options.demandTags?.length && !options.auto) throw new Error("--demand is only valid with lesson add --auto");
+  if ((options.demandTags?.length ?? 0) > 12) throw new Error("invalid demand tags");
+  const demandTags = canonicalDemandTags((options.demandTags ?? []).map((tag) => text(tag, "demand tag", 120)));
   assertReference(await realpath(inputFile));
   const raw = parseJson(await boundedText(inputFile), "lesson input");
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) throw new Error("lesson input must be an object");
   const input = raw as Record<string, unknown>;
   if (input.status !== undefined && input.status !== "candidate") throw new Error("new lessons must start as candidate");
   if (input.reviewed_by !== undefined || input.review_note !== undefined) throw new Error("new lessons cannot pre-approve their own review");
-  const candidate = parseLesson({ ...input, status: "candidate", updated_at: new Date().toISOString() });
+  if (input.demands !== undefined || input.handbook_review_suggested !== undefined) throw new Error("demand history and handbook review are recorded by the CLI");
+  const draft = parseLesson({ ...input, status: "candidate", updated_at: new Date().toISOString() });
+  const candidate = options.auto ? parseLesson({ ...draft, demands: [{ source_task_id: draft.source_task_id, tags: demandTags }] }) : draft;
   return withLock(join(root, ".agent-ship"), async () => {
-    const directory = await ownedDirectory(root, await lessonDirectory(root));
+    const lessonsRoot = await ownedDirectory(root, await lessonDirectory(root));
+    if (options.auto) await assertAutoDirectory(lessonsRoot);
     const existing = await readLessons(root);
     const duplicate = existing.find(({ lesson }) => fingerprint(lesson) === fingerprint(candidate));
-    if (duplicate) return { id: duplicate.lesson.id, source: duplicate.source, duplicate: true };
+    if (duplicate) {
+      if (options.auto && duplicate.auto) return noteAutoDemand(duplicate, candidate, demandTags);
+      return { id: duplicate.lesson.id, source: duplicate.source, duplicate: true, ...(options.auto ? { handbook_review_suggested: false } : {}) };
+    }
     if (existing.some(({ lesson }) => lesson.id === candidate.id)) throw new Error("lesson id already exists; revise the existing card through review");
+    const directory = options.auto ? join(lessonsRoot, "auto") : lessonsRoot;
     await mkdir(directory, { recursive: true });
     const source = join(directory, `${candidate.id}.json`);
     await writeFile(source, `${JSON.stringify(candidate, null, 2)}\n`, { flag: "wx" });
-    return { id: candidate.id, source, duplicate: false };
+    return { id: candidate.id, source, duplicate: false, ...(options.auto ? { handbook_review_suggested: false } : {}) };
   });
 }
 
@@ -117,9 +215,16 @@ export async function reviewLesson(root: string, id: string, status: string, rev
       if (author && author === lesson.reviewed_by) throw new Error("lesson author and reviewer must differ");
       if (lesson.review_after && Date.parse(lesson.review_after) <= Date.now()) throw new Error("active lesson needs a future review_after date");
     }
-    const temporary = `${card.source}.tmp`;
-    await writeFile(temporary, `${JSON.stringify(lesson, null, 2)}\n`, { flag: "wx" });
-    await rename(temporary, card.source);
+    // Active review is the existing promotion path. It moves an auto card into the library and never writes the handbook.
+    if (card.auto && status === "active") {
+      const directory = await ownedDirectory(root, await lessonDirectory(root));
+      const destination = join(directory, `${lesson.id}.json`);
+      try { await writeFile(destination, `${JSON.stringify(lesson, null, 2)}\n`, { flag: "wx" }); }
+      catch (error) { if ((error as NodeJS.ErrnoException).code === "EEXIST") throw new Error("lesson id already exists; revise the existing card through review"); throw error; }
+      await rm(card.source);
+      return { id, status, source: destination, promoted: true };
+    }
+    await writeLesson(card.source, lesson);
     return { id, status, source: card.source };
   });
 }
@@ -127,7 +232,7 @@ export async function showLesson(root: string, id: string) {
   if (!ID.test(id)) throw new Error("invalid lesson id");
   const card = (await readLessons(root)).find((entry) => entry.lesson.id === id);
   if (!card) throw new Error("lesson not found");
-  return card;
+  return { lesson: card.lesson, source: card.source };
 }
 
 export async function teamContext(root: string, options: { tags?: string[]; project?: string; repo?: string } = {}) {
@@ -137,12 +242,13 @@ export async function teamContext(root: string, options: { tags?: string[]; proj
   const project = options.project === undefined ? undefined : text(options.project, "project", 120);
   const tags = new Set((options.tags ?? []).map((tag) => text(tag, "tag", 120).toLowerCase()));
   const max = profile?.config.max_lessons ?? 3, budget = profile?.config.summary_chars ?? 1200;
-  const matches = tags.size ? (await readLessons(root)).filter(({ lesson }) => (!lesson.project || lesson.project === project) && lesson.tags.some((tag) => tags.has(tag.toLowerCase()))) : [];
+  const matches = tags.size ? (await readLessons(root, false)).filter(({ lesson }) => (!lesson.project || lesson.project === project) && lesson.tags.some((tag) => tags.has(tag.toLowerCase()))) : [];
   const ranked = matches.map((entry) => ({ ...entry, score: entry.lesson.tags.filter((tag) => tags.has(tag.toLowerCase())).length })).sort((a, b) => b.score - a.score || a.lesson.id.localeCompare(b.lesson.id));
   const lessons: { id: string; title: string; summary: string; when: string; action: string; source: string }[] = [];
   const review_required: { id: string }[] = [];
   let chars = 0, omitted = 0, reviewCount = 0;
-  for (const { lesson, source } of ranked) {
+  for (const { lesson, source, auto } of ranked) {
+    if (auto) continue; // auto/ cards are not execution summaries until review promotes them out of auto/.
     const expired = lesson.review_after && Date.parse(lesson.review_after) <= Date.now();
     if (lesson.status === "needs_review" || (lesson.status === "active" && expired)) {
       reviewCount++;
@@ -212,8 +318,21 @@ export async function assertLearningChecked(root: string, task: string): Promise
   }
 }
 
+async function pendingHandbookReview(root: string, onlyTask?: string) {
+  const cards = (await readLessons(root)).filter(({ lesson }) => {
+    if (lesson.handbook_review_suggested !== true || lesson.status === "retired" || (lesson.demands?.length ?? 0) < 2) return false;
+    if (!onlyTask) return true;
+    return lesson.source_task_id === onlyTask || (lesson.demands ?? []).some((demand) => demand.source_task_id === onlyTask);
+  }).sort((a, b) => a.lesson.id.localeCompare(b.lesson.id));
+  return {
+    items: cards.slice(0, 20).map(({ lesson, source }) => ({ id: lesson.id, source, status: lesson.status, demands: lesson.demands ?? [], handbook_review_suggested: true })),
+    total_count: cards.length,
+    omitted_count: Math.max(0, cards.length - 20),
+  };
+}
 /** Cancellation never waits for documentation. Surface unfinished checks to the captain at wrap-up. */
-export async function pendingLearning(root: string, onlyTask?: string) {
+export async function pendingLearning(root: string, onlyTask?: string, handbook = false) {
+  if (handbook) return pendingHandbookReview(root, onlyTask);
   const events = await readEvents(root);
   const inbox = await inboxRecords(root);
   const records = [...events, ...inbox].sort((a, b) => Date.parse(String(a.created_at)) - Date.parse(String(b.created_at)) || Number(a.sequence ?? 0) - Number(b.sequence ?? 0));

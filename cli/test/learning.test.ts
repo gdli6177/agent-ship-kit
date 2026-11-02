@@ -305,6 +305,187 @@ test("lesson activation rejects the author and field errors name the limit", asy
   assert.equal((await call(root, "lesson", "review", "--id", "authored", "--status", "active", "--reviewed-by", "maintainer", "--note", "Independent review.")).code, 0);
 }));
 
+async function addAuto(root: string, input: Record<string, unknown>, ...extra: string[]) {
+  const file = join(root, "lesson-input.json");
+  await writeFile(file, JSON.stringify(input));
+  return call(root, "lesson", "add", "--input", file, "--auto", ...extra);
+}
+
+test("auto candidates recirculate under auto/ and only a second demand suggests handbook review", async () => fixture(async (root) => {
+  await call(root, "setup", "--shared");
+  const handbookPath = join(root, "docs/agent-team/handbook.md");
+  const handbook = await readFile(handbookPath, "utf8");
+  const config = JSON.parse(await readFile(join(root, "agent-ship.team.json"), "utf8"));
+  const bareHandbook = await call(root, "setup", "--handbook");
+  assert.match(bareHandbook.stderr, /--handbook requires a value/);
+  const valuedHandbook = await call(root, "lesson", "pending", "--handbook", "docs/agent-team/handbook.md");
+  assert.match(valuedHandbook.stderr, /--handbook does not take a value on lesson pending/);
+  const selfMark = await add(root, lesson("self-mark", { action: "Check self mark.", handbook_review_suggested: true }));
+  assert.equal(selfMark.code, 1);
+  assert.match(selfMark.stderr, /demand history and handbook review are recorded by the CLI/);
+  const demandOnly = await call(root, "lesson", "add", "--input", join(root, "lesson-input.json"), "--demand", "billing");
+  assert.equal(demandOnly.code, 1);
+  assert.match(demandOnly.stderr, /--demand is only valid with lesson add --auto/);
+
+  assert.equal((await add(root, lesson("library", { action: "Check the library copy." }))).code, 0);
+  const libraryPath = join(root, "docs/agent-team/lessons/library.json");
+  const libraryBefore = await readFile(libraryPath, "utf8");
+  const libraryAuto = await addAuto(root, lesson("library-auto", { action: "Check the library copy.", source_task_id: "other-demand", evidence: ["https://example.com/other"] }));
+  assert.equal(libraryAuto.code, 0, libraryAuto.stderr);
+  assert.equal(JSON.parse(libraryAuto.stdout).duplicate, true);
+  assert.equal(JSON.parse(libraryAuto.stdout).id, "library");
+  assert.equal(JSON.parse(libraryAuto.stdout).handbook_review_suggested, false);
+  assert.equal(await readFile(libraryPath, "utf8"), libraryBefore);
+  await assert.rejects(readFile(join(root, "docs/agent-team/lessons/auto/library-auto.json")));
+
+  const created = await addAuto(root, lesson("recur", { source_task_id: "task-a" }));
+  assert.equal(created.code, 0, created.stderr);
+  const createdBody = JSON.parse(created.stdout);
+  assert.equal(createdBody.duplicate, false);
+  assert.equal(createdBody.handbook_review_suggested, false);
+  const autoPath = join(root, "docs/agent-team/lessons/auto/recur.json");
+  assert.equal(createdBody.source, autoPath);
+  await assert.rejects(readFile(join(root, "docs/agent-team/lessons/recur.json")));
+  const firstCard = JSON.parse(await readFile(autoPath, "utf8"));
+  assert.equal(firstCard.handbook_review_suggested, undefined);
+  assert.deepEqual(firstCard.demands, [{ source_task_id: "task-a", tags: [] }]);
+  assert.deepEqual(JSON.parse((await call(root, "lesson", "search", "--tag", "git")).stdout).lessons, []);
+  assert.deepEqual(JSON.parse((await call(root, "lesson", "pending", "--handbook")).stdout).items, []);
+
+  const beforeRepeat = await readFile(autoPath, "utf8");
+  const repeated = await addAuto(root, lesson("recur-again", { source_task_id: "task-a", title: "Same demand", evidence: ["https://example.com/same"] }));
+  assert.equal(JSON.parse(repeated.stdout).duplicate, true);
+  assert.equal(JSON.parse(repeated.stdout).handbook_review_suggested, false);
+  assert.equal(await readFile(autoPath, "utf8"), beforeRepeat);
+  const manual = await add(root, lesson("manual-copy", { source_task_id: "task-manual", evidence: ["https://example.com/manual"] }));
+  assert.equal(JSON.parse(manual.stdout).id, "recur");
+  assert.equal(await readFile(autoPath, "utf8"), beforeRepeat);
+
+  const second = await addAuto(root, lesson("recur-b", { source_task_id: "task-b", title: "Another demand", evidence: ["https://example.com/second"] }));
+  assert.equal(second.code, 0, second.stderr);
+  const secondBody = JSON.parse(second.stdout);
+  assert.equal(secondBody.id, "recur");
+  assert.equal(secondBody.duplicate, true);
+  assert.equal(secondBody.handbook_review_suggested, true);
+  await assert.rejects(readFile(join(root, "docs/agent-team/lessons/auto/recur-b.json")));
+  const recurred = JSON.parse(await readFile(autoPath, "utf8"));
+  assert.equal(recurred.handbook_review_suggested, true);
+  assert.equal(recurred.title, "Lesson recur");
+  assert.deepEqual(recurred.evidence, ["https://example.com/reports/verified"]);
+  assert.equal(recurred.source_task_id, "task-a");
+  assert.deepEqual(recurred.demands, [{ source_task_id: "task-a", tags: [] }, { source_task_id: "task-b", tags: [] }]);
+
+  const routed = await addAuto(root, lesson("routed", { action: "Check the route owner.", source_task_id: "route-task" }), "--demand", "Billing", "--demand", "api");
+  assert.equal(routed.code, 0, routed.stderr);
+  const routedPath = join(root, "docs/agent-team/lessons/auto/routed.json");
+  const routedBefore = await readFile(routedPath, "utf8");
+  const sameTags = await addAuto(root, lesson("routed-again", { action: "Check the route owner.", source_task_id: "route-task" }), "--demand", "api", "--demand", "billing");
+  assert.equal(JSON.parse(sameTags.stdout).handbook_review_suggested, false);
+  assert.equal(await readFile(routedPath, "utf8"), routedBefore);
+  const otherTags = await addAuto(root, lesson("routed-next", { action: "Check the route owner.", source_task_id: "route-task", evidence: ["https://example.com/route"] }), "--demand", "shipping");
+  assert.equal(JSON.parse(otherTags.stdout).handbook_review_suggested, true);
+  const routedCard = JSON.parse(await readFile(routedPath, "utf8"));
+  assert.deepEqual(routedCard.tags, ["git", "parallel"]);
+  assert.deepEqual(routedCard.demands, [{ source_task_id: "route-task", tags: ["api", "Billing"] }, { source_task_id: "route-task", tags: ["shipping"] }]);
+
+  recurred.status = "active";
+  recurred.reviewed_by = "maintainer";
+  recurred.review_note = "Stays in auto until promotion.";
+  await writeFile(autoPath, JSON.stringify(recurred));
+  const hidden = JSON.parse((await call(root, "team", "context", "--tag", "git")).stdout);
+  assert.deepEqual(hidden.lessons, []);
+  assert.equal(hidden.review_required_count, 0);
+
+  const queue = JSON.parse((await call(root, "lesson", "pending", "--handbook")).stdout);
+  assert.deepEqual(queue.items.map((item: { id: string }) => item.id), ["recur", "routed"]);
+  assert.equal(queue.items[0].handbook_review_suggested, true);
+  assert.equal(queue.items[0].demands.length, 2);
+  const filtered = JSON.parse((await call(root, "lesson", "pending", "--handbook", "--source-task-id", "task-b")).stdout);
+  assert.deepEqual(filtered.items.map((item: { id: string }) => item.id), ["recur"]);
+  assert.equal(JSON.parse((await call(root, "lesson", "pending")).stdout).total_count, 0);
+
+  await writeFile(join(root, ".agent-ship/events.jsonl"), `${JSON.stringify({ id: "evt_start", type: "worker_dispatched", source_task_id: "task", status: "running", learning_required: true, sequence: 0 })}\n`);
+  assert.equal((await addAuto(root, lesson("checked", { action: "Check the audit link.", source_task_id: "task" }))).code, 0);
+  const checked = await call(root, "lesson", "check", "--source-task-id", "task", "--outcome", "candidate", "--candidate-id", "checked", "--reason", "Auto candidate is a valid link.", "--reviewed-by", "verifier");
+  assert.equal(checked.code, 0, checked.stderr);
+  assert.equal(JSON.parse((await call(root, "lesson", "show", "--id", "checked")).stdout).lesson.status, "candidate");
+
+  const retired = await call(root, "lesson", "review", "--id", "routed", "--status", "retired", "--reviewed-by", "maintainer", "--note", "Not handbook material.");
+  assert.equal(retired.code, 0, retired.stderr);
+  assert.equal(JSON.parse(await readFile(routedPath, "utf8")).status, "retired");
+  assert.equal(JSON.parse(retired.stdout).promoted, undefined);
+
+  const promoted = await call(root, "lesson", "review", "--id", "recur", "--status", "active", "--reviewed-by", "maintainer", "--note", "Promoted after a second demand.");
+  assert.equal(promoted.code, 0, promoted.stderr);
+  const promotedBody = JSON.parse(promoted.stdout);
+  assert.equal(promotedBody.promoted, true);
+  assert.equal(promotedBody.source, join(root, "docs/agent-team/lessons/recur.json"));
+  await assert.rejects(readFile(autoPath));
+  const visible = JSON.parse((await call(root, "lesson", "search", "--tag", "git")).stdout);
+  assert.deepEqual(visible.lessons.map((item: { id: string }) => item.id), ["recur"]);
+  const stillQueued = JSON.parse((await call(root, "lesson", "pending", "--handbook")).stdout);
+  assert.deepEqual(stillQueued.items.map((item: { id: string }) => item.id), ["recur"]);
+  assert.equal(await readFile(handbookPath, "utf8"), handbook);
+  assert.deepEqual(JSON.parse(await readFile(join(root, "agent-ship.team.json"), "utf8")).rules, config.rules);
+  assert.deepEqual((await readdir(join(root, "docs/agent-team"))).sort(), ["handbook.md", "lessons"]);
+
+  await writeFile(join(root, "docs/agent-team/lessons/auto/broken.json"), "{not-json");
+  const afterBreak = await call(root, "team", "context", "--tag", "git");
+  assert.equal(afterBreak.code, 0, afterBreak.stderr);
+  assert.equal(JSON.parse(afterBreak.stdout).lessons[0].id, "recur");
+  assert.equal((await call(root, "lesson", "pending", "--handbook")).code, 1);
+}));
+
+test("auto candidates follow the configured lessons directory and reject a linked auto directory", async () => fixture(async (root) => {
+  const configured = await call(root, "setup", "--shared", "--lessons", "docs/engineering/lessons");
+  assert.equal(configured.code, 0, configured.stderr);
+  const added = await addAuto(root, lesson("custom", { action: "Check the configured directory." }));
+  assert.equal(added.code, 0, added.stderr);
+  const source = join(root, "docs/engineering/lessons/auto/custom.json");
+  assert.equal(JSON.parse(added.stdout).source, source);
+  assert.equal(JSON.parse(await readFile(source, "utf8")).status, "candidate");
+  const outside = await mkdtemp(join(tmpdir(), "agent-ship-auto-outside-"));
+  try {
+    await rm(join(root, "docs/engineering/lessons/auto"), { recursive: true, force: true });
+    await symlink(outside, join(root, "docs/engineering/lessons/auto"));
+    const escaped = await addAuto(root, lesson("escape", { action: "Should stay inside." }));
+    assert.equal(escaped.code, 1);
+    assert.match(escaped.stderr, /lesson auto directory cannot be a symlink/);
+    assert.equal((await readdir(outside)).length, 0);
+    const context = await call(root, "team", "context", "--tag", "git");
+    assert.equal(context.code, 0, context.stderr);
+    assert.deepEqual(JSON.parse(context.stdout).lessons, []);
+  } finally { await rm(outside, { recursive: true, force: true }); }
+}));
+
+test("handbook review queue is bounded to cross-demand suggestions", async () => fixture(async (root) => {
+  const auto = join(root, "docs/agent-team/lessons/auto");
+  await mkdir(auto, { recursive: true });
+  const card = (id: string, demands: { source_task_id: string; tags: string[] }[], suggested = true) => ({
+    ...lesson(id, { action: `Check boundary ${id}.`, source_task_id: demands[0]?.source_task_id }),
+    status: "candidate",
+    updated_at: "2026-11-02T00:00:00.000Z",
+    demands,
+    ...(suggested ? { handbook_review_suggested: true } : {}),
+  });
+  for (let index = 0; index < 21; index += 1) {
+    const id = `queue-${index}`;
+    await writeFile(join(auto, `${id}.json`), `${JSON.stringify(card(id, [{ source_task_id: `${id}-a`, tags: [] }, { source_task_id: `${id}-b`, tags: [] }]), null, 2)}\n`);
+  }
+  await writeFile(join(auto, "only-once.json"), `${JSON.stringify(card("only-once", [{ source_task_id: "once", tags: [] }], false), null, 2)}\n`);
+  const retired = card("retired-suggestion", [{ source_task_id: "retired-a", tags: [] }, { source_task_id: "retired-b", tags: [] }]);
+  retired.status = "retired";
+  await writeFile(join(auto, "retired-suggestion.json"), `${JSON.stringify(retired, null, 2)}\n`);
+  const pending = await call(root, "lesson", "pending", "--handbook");
+  assert.equal(pending.code, 0, pending.stderr);
+  const body = JSON.parse(pending.stdout);
+  assert.equal(body.items.length, 20);
+  assert.equal(body.total_count, 21);
+  assert.equal(body.omitted_count, 1);
+  assert.equal(body.items.some((item: { id: string }) => item.id === "only-once" || item.id === "retired-suggestion"), false);
+  assert.equal(body.items.every((item: { handbook_review_suggested: boolean }) => item.handbook_review_suggested), true);
+}));
+
 test("bad JSON is reported without copying its contents into output", async () => fixture(async (root) => {
   await call(root, "setup", "--shared");
   const file = join(root, "bad-input.json");
