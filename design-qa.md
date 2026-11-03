@@ -27,7 +27,7 @@
    `herdr-terminal-*.png` 是真实 Herdr 会话，`shell-terminal-*.png` 包含真实命令输出。
 8. **窄窗口：通过。** `narrow-dark.png`、`new-goal-narrow-dark.png` 和
    `settings-narrow-dark.png` 检查 1050×760；文档宽度为 1050px，主内容
-   `scrollWidth=700`、`clientWidth=700`，没有横向溢出。
+   `scrollWidth=685`、`clientWidth=685`，没有横向溢出。
 
 ## 本轮修正
 

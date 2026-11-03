@@ -15,10 +15,14 @@ import {
   type Project,
   type Task,
   type WorkflowTemplate,
+  type CredentialReference,
 } from "../../core/src/index.js";
 import { discoverRuntimes } from "./discovery.js";
 import { ProtocolAdapter } from "./adapters.js";
 import { canonicalRepo, git } from "./git.js";
+import { submitTask } from "./tasks.js";
+import { configureKnowledge, knowledgeContext, knowledgeLibrary, reviewKnowledge, type KnowledgeConfiguration } from "./knowledge.js";
+import { validateCredentialReference } from "./credentials.js";
 export type ServiceCommand =
   | { type: "snapshot" }
   | { type: "scan"; probe?: string }
@@ -49,7 +53,15 @@ export type ServiceCommand =
       remember?: boolean;
       expiresAt?: string;
     }
-  | { type: "chat.send"; projectId: string; text: string; taskId?: string };
+  | { type: "chat.send"; projectId: string; text: string; taskId?: string; clarifies?: string; targetTaskId?: string }
+  | { type: "chat.retry"; messageId: string }
+  | { type: "knowledge.list"; projectId: string; query?: string }
+  | { type: "knowledge.query"; projectId: string; query?: string }
+  | { type: "knowledge.extract"; taskId: string }
+  | { type: "credential.register"; projectId: string; reference: CredentialReference }
+  | { type: "credential.remove"; projectId: string; credentialId: string }
+  | { type: "knowledge.configure"; projectId: string; config: KnowledgeConfiguration }
+  | { type: "knowledge.review"; projectId: string; lessonId: string; status: "active" | "needs_review" | "retired"; by: string; note: string };
 const limited = (v: unknown, size = 12000) => {
   if (typeof v !== "string" || !v.trim() || v.length > size || v.includes("\0"))
     throw new Error("invalid text");
@@ -66,6 +78,45 @@ export class WorkspaceService {
     if (command.type === "snapshot") return this.store.read();
     assertHumanHost();
     switch (command.type) {
+      case "credential.register":
+        return this.store.update("credential.registered", s => {
+          const project = s.projects.find(p => p.id === command.projectId);
+          if (!project) throw new Error("project not found");
+          validateCredentialReference(command.reference, project);
+          if (project.credentials?.some(ref => ref.id === command.reference.id)) throw new Error("credential references are immutable; save a new reference");
+          project.credentials = [...(project.credentials ?? []), structuredClone(command.reference)];
+          return command.reference;
+        });
+      case "credential.remove":
+        return this.store.update("credential.removed", s => {
+          const project = s.projects.find(p => p.id === command.projectId);
+          if (!project?.credentials?.some(ref => ref.id === command.credentialId)) throw new Error("credential not found in project");
+          if (project.grant && !project.grant.revokedAt && project.grant.credentials?.includes(command.credentialId))
+            throw new Error("revoke the project grant before removing an authorized credential");
+          project.credentials = project.credentials.filter(ref => ref.id !== command.credentialId);
+          return true;
+        });
+      case "knowledge.extract":
+        return this.store.update("knowledge.extraction_requested", s => {
+          const task = s.tasks.find(t => t.id === command.taskId);
+          if (!task || task.status !== "completed") throw new Error("only completed verified tasks can produce reusable knowledge");
+          task.learning = { outcome: "pending", reason: "等待提炼", lessonIds: [] };
+          return task.learning;
+        });
+      case "knowledge.list":
+      case "knowledge.query":
+      case "knowledge.configure":
+      case "knowledge.review": {
+        const project = (await this.store.read()).projects.find(p => p.id === command.projectId);
+        if (!project) throw new Error("project not found");
+        if (command.type === "knowledge.list") return knowledgeLibrary(project, command.query?.slice(0, 1000));
+        if (command.type === "knowledge.query") return knowledgeContext(project, command.query?.slice(0, 1000) ?? "");
+        const result = command.type === "knowledge.configure"
+          ? await configureKnowledge(project, command.config)
+          : await reviewKnowledge(project, command.lessonId, command.status, limited(command.by, 120), limited(command.note, 400));
+        await this.store.update("knowledge.changed", s => { s.knowledgeRevision = (s.knowledgeRevision ?? 0) + 1; });
+        return result;
+      }
       case "scan": {
         const found = await discoverRuntimes(this.root);
         const previous = await this.store.read();
@@ -135,6 +186,11 @@ export class WorkspaceService {
       }
       case "project.save": {
         const p = structuredClone(command.project);
+        const existing = (await this.store.read()).projects.find(project => project.id === p.id);
+        if (existing?.grant && !existing.grant.revokedAt)
+          throw new Error("revoke the project grant before changing project execution settings");
+        if (Object.keys(p).some(key => !["id", "name", "path", "baseBranch", "checks", "roles", "defaultProfile", "credentials"].includes(key)))
+          throw new Error("unknown project setting");
         assertId(p.id);
         p.name = limited(p.name, 100);
         p.path = await canonicalRepo(p.path);
@@ -151,6 +207,7 @@ export class WorkspaceService {
           )
         )
           throw new Error("verification commands must be nonempty argv arrays");
+        for (const reference of p.credentials ?? []) validateCredentialReference(reference, { ...p, shipPolicy: "external-approval" });
         return this.store.update("project.save", (state) => {
           for (const id of [p.defaultProfile, ...Object.values(p.roles)])
             if (id && !state.profiles.some((v) => v.id === id))
@@ -217,60 +274,7 @@ export class WorkspaceService {
         });
       case "task.submit":
         return this.store.update("task.submit", (state) => {
-          const project = state.projects.find(
-            (p) => p.id === command.projectId,
-          );
-          if (!project) throw new Error("project not found");
-          activeGrant(project);
-          const template = state.workflows.find(
-            (w) => w.id === command.workflowId,
-          );
-          if (!template) throw new Error("workflow not found");
-          validateWorkflow(template, state.profiles);
-          for (const role of ["captain", "lead", "worker", "verifier"] as const)
-            executionProfile(state, project, role, command.profile);
-          for (const stage of template.stages)
-            executionProfile(
-              state,
-              project,
-              stage.role,
-              command.profile,
-              stage.profile,
-            );
-          const request = limited(command.request),
-            id = newId("task");
-          const task: Task = {
-            id,
-            projectId: project.id,
-            grantId: activeGrant(project).id,
-            title: request.split("\n")[0]!.slice(0, 90),
-            request,
-            status: "queued",
-            createdAt: new Date().toISOString(),
-            workflow: {
-              template: structuredClone(template),
-              stage: 0,
-              round: 0,
-              results: [],
-            },
-            profile: command.profile,
-            branch: `crewvane/${id}`,
-            decisions: [],
-            reviewRounds: 0,
-          };
-          if (command.discussion) {
-            task.discussion = true;
-            task.summary = "讨论模式：先沟通方案，尚未授权此任务开工。";
-          }
-          state.tasks.push(task);
-          state.messages.push({
-            id: newId("msg"),
-            role: "human",
-            text: request,
-            taskId: id,
-            projectId: project.id,
-            at: task.createdAt,
-          });
+          const task = submitTask(state, command);
           return task;
         });
       case "task.cancel":
@@ -389,15 +393,28 @@ export class WorkspaceService {
             )
           )
             throw new Error("task not found in selected project");
+          if (command.targetTaskId && !state.tasks.some(t => t.id === command.targetTaskId && t.projectId === project.id))
+            throw new Error("target task not found in project");
+          if (command.clarifies && !state.messages.some(m => m.id === command.clarifies && m.projectId === project.id && m.routing?.status === "clarifying" && !m.routing.resolvedBy))
+            throw new Error("clarification not found or already resolved");
           const message = {
             id: newId("msg"),
             role: "human" as const,
             text: limited(command.text),
-            taskId: command.taskId,
+            contextTaskId: command.taskId,
+            clarifies: command.clarifies,
+            routing: { status: "pending" as const, ...(command.targetTaskId ? { taskId: command.targetTaskId } : {}) },
             projectId: project.id,
             at: new Date().toISOString(),
           };
           state.messages.push(message);
+          return message;
+        });
+      case "chat.retry":
+        return this.store.update("chat.retry", state => {
+          const message = state.messages.find(m => m.id === command.messageId && m.role === "human");
+          if (!message || message.routing?.status !== "failed") throw new Error("message is not retryable");
+          message.routing = { status: "pending" };
           return message;
         });
       default:

@@ -9,6 +9,7 @@ import {
   type Project,
   type Task,
 } from "../../core/src/index.js";
+import { maskTestSecrets } from "./credentials.js";
 export async function command(
   argv: string[],
   cwd: string,
@@ -16,6 +17,7 @@ export async function command(
     timeout?: number;
     signal?: AbortSignal;
     env?: NodeJS.ProcessEnv;
+    secrets?: string[];
   } = {},
 ): Promise<string> {
   if (
@@ -62,13 +64,14 @@ export async function command(
       clearTimeout(timer);
       if (killTimer) clearTimeout(killTimer);
       options.signal?.removeEventListener("abort", abort);
-      error ? reject(error) : resolve(output.trim());
+      error ? reject(new Error(maskTestSecrets(redact(error.message), options.secrets ?? [])))
+        : resolve(maskTestSecrets(redact(output.trim()), options.secrets ?? []));
     }
     child.stdout.on("data", (data: Buffer) => {
-      output = redact((output + String(data)).slice(-100_000));
+      output = (output + String(data)).slice(-100_000);
     });
     child.stderr.on("data", (data: Buffer) => {
-      stderr = redact((stderr + String(data)).slice(-100_000));
+      stderr = (stderr + String(data)).slice(-100_000);
     });
     child.on("error", (error) => finish(error));
     child.on("close", (code) =>

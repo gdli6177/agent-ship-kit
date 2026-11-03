@@ -82,6 +82,15 @@ export interface DelegationGrant {
   forbiddenPaths: string[];
   maxParallel: number;
   maxTaskMinutes: number;
+  credentials?: string[];
+}
+export interface CredentialReference {
+  id: string;
+  projectId: string;
+  label: string;
+  env: string;
+  checkIndex: number;
+  createdAt: string;
 }
 export interface Project {
   id: string;
@@ -93,6 +102,7 @@ export interface Project {
   defaultProfile?: string;
   grant?: DelegationGrant;
   shipPolicy: "external-approval";
+  credentials?: CredentialReference[];
 }
 export type RiskAction =
   | "delete_data"
@@ -104,6 +114,8 @@ export type RiskAction =
   | "change_permissions"
   | "change_ship_policy";
 export interface StageResult {
+  knowledgeQuery?: string;
+  verifyCheck?: number;
   action?: RiskAction;
   status: "done" | "blocked" | "rework";
   summary: string;
@@ -147,6 +159,9 @@ export interface Task {
   reviewRounds: number;
   decisions: string[];
   integrationHead?: string;
+  contextRevision?: number;
+  executedRevision?: number;
+  learning?: { outcome: "pending" | "none" | "candidate" | "failed"; reason: string; lessonIds: string[] };
 }
 export interface AgentInstance {
   id: string;
@@ -169,6 +184,9 @@ export interface AgentInstance {
   startedAt: string;
   finishedAt?: string;
   summary?: string;
+  contextSources?: { path: string; digest: string; bodyIncluded: boolean }[];
+  lessonIds?: string[];
+  hostChecks?: { head: string; checks: { index: number; output: string }[] };
 }
 export interface DecisionRequest {
   id: string;
@@ -197,6 +215,15 @@ export interface DecisionRecord {
   at: string;
   expiresAt?: string;
 }
+export type ChatRouteAction = "create" | "forward" | "status" | "reply" | "clarify";
+export interface ChatRouting {
+  status: "pending" | "clarifying" | "applied" | "failed";
+  action?: ChatRouteAction;
+  taskId?: string;
+  candidates?: string[];
+  resolvedBy?: string;
+  error?: string;
+}
 export interface ChatMessage {
   id: string;
   role: "human" | "captain";
@@ -205,6 +232,9 @@ export interface ChatMessage {
   taskId?: string;
   projectId?: string;
   replyTo?: string;
+  contextTaskId?: string;
+  clarifies?: string;
+  routing?: ChatRouting;
 }
 export interface WorkspaceState {
   version: 1;
@@ -219,6 +249,8 @@ export interface WorkspaceState {
   messages: ChatMessage[];
   defaultProfile?: string;
   maxParallel: number;
+  knowledgeRevision?: number;
+  credentialAccess?: { taskId: string; credentialIds: string[]; checkIndex: number; at: string }[];
 }
 export interface RuntimeEvent {
   type: "text" | "tool" | "permission" | "status";

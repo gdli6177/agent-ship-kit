@@ -3697,3 +3697,56 @@ summary:focus-visible,
     transition-duration: 0.01ms !important;
   }
 }
+
+.message-routing { margin-top: 12px; padding-top: 10px; border-top: 1px solid var(--cv-border); font-size: 11px; color: var(--cv-muted); }
+.message-routing > span { display: inline-flex; align-items: center; gap: 6px; line-height: 1.6; }
+.message-routing button { font-size: 11px; padding: 7px 9px; min-height: 32px; text-align: left; }
+.clarification-choices { display: flex; flex-wrap: wrap; gap: 7px; }
+.clarification-choices > span { width: 100%; margin-bottom: 3px; }
+.captain-drawer > form > span { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.knowledge-page { max-width: 1100px; margin: 0 auto; }
+.knowledge-sources { margin: 32px 0 24px; }
+.knowledge-sources > summary { display: flex; align-items: center; gap: 10px; cursor: pointer; }
+.knowledge-sources > summary > span { margin-left: auto; color: var(--cv-muted); font-size: 11px; }
+.knowledge-sources form { display: grid; gap: 16px; margin-top: 24px; }
+.knowledge-sources form > button { justify-self: start; }
+.knowledge-toolbar { display: flex; gap: 12px; margin: 24px 0; }
+.knowledge-search { display: flex; flex-direction: row !important; align-items: center; flex: 1; min-width: 0; gap: 9px; }
+.knowledge-search > .rt-TextFieldRoot { flex: 1; min-width: 0; }
+.knowledge-toolbar select { min-width: 130px; }
+.knowledge-cards { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
+.knowledge-cards > .empty { grid-column: 1 / -1; min-height: 220px; }
+.knowledge-card h2 { margin: 20px 0 10px; }
+.knowledge-card > p, .knowledge-card dd { line-height: 1.75; color: var(--cv-text-soft); }
+.knowledge-card dl { display: grid; gap: 7px; margin: 20px 0; }
+.knowledge-card dt { font-size: 10px; color: var(--cv-muted); margin-top: 8px; }
+.knowledge-card dd { margin: 0; font-size: 12px; }
+.knowledge-card details { color: var(--cv-muted); font-size: 11px; overflow-wrap: anywhere; }
+.knowledge-card details p { white-space: pre-line; }
+.knowledge-card details small { display: block; margin-top: 10px; }
+.knowledge-actions { display: flex; gap: 8px; margin-top: 22px; }
+.knowledge-deliveries { margin-top: 28px; }
+.knowledge-deliveries > h2 { display: flex; align-items: center; gap: 8px; }
+.knowledge-deliveries > div { display: flex; align-items: center; gap: 16px; padding: 16px 0; border-bottom: 1px solid var(--cv-border); }
+.knowledge-deliveries > div > span { flex: 1; min-width: 0; }
+.knowledge-deliveries strong { font-weight: 500; }
+.knowledge-deliveries small { display: block; color: var(--cv-muted); margin-top: 6px; overflow-wrap: anywhere; }
+.knowledge-notice { display: flex; align-items: center; gap: 8px; color: var(--cv-green); }
+@media (max-width: 1180px) { .knowledge-cards { grid-template-columns: 1fr; } }
+.credentials-page { max-width: 1000px; margin: 0 auto; }
+.vault-status { display: flex; align-items: center; gap: 15px; margin: 32px 0 20px; }
+.vault-status > svg { color: var(--cv-blue); }
+.vault-status > div { flex: 1; }
+.vault-status p { margin: 7px 0 0; color: var(--cv-muted); font-size: 12px; }
+.credential-form { margin-bottom: 24px; }
+.credential-form h2 { display: flex; align-items: center; gap: 8px; }
+.credential-form form { display: grid; gap: 18px; margin-top: 22px; }
+.credential-form form > button { justify-self: start; }
+.credential-form input[type=password] { width: 100%; padding: 10px 12px; border: 1px solid var(--cv-border); border-radius: 7px; background: var(--cv-panel-raised); }
+.credential-list > article { display: flex; align-items: center; gap: 16px; padding: 18px 0; border-bottom: 1px solid var(--cv-border); }
+.credential-list > article > div { flex: 1; }
+.credential-list article small { display: block; color: var(--cv-muted); font-size: 11px; margin: 7px 0 10px; }
+.credential-list article > span { color: var(--cv-muted); letter-spacing: 2px; }
+.credential-access { margin-top: 24px; }
+.credential-access > div { padding: 14px 0; border-bottom: 1px solid var(--cv-border); }
+.credential-access small { display: block; color: var(--cv-muted); margin-top: 6px; }

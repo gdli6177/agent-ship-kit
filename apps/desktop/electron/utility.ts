@@ -6,6 +6,7 @@ import {
 import { redact } from "../../../packages/core/src/index.js";
 import { isAbsolute } from "node:path";
 import { spawn as spawnPty, type IPty } from "node-pty";
+import type { TestEnvironment } from "../../../packages/orchestrator/src/credentials.js";
 const port = (
   process as unknown as {
     parentPort: {
@@ -21,6 +22,16 @@ let service: WorkspaceService | undefined,
   stopped = false;
 const terminals = new Map<string, IPty>();
 const send = (data: unknown) => port.postMessage(data);
+const credentialRequests = new Map<string, { resolve(value: TestEnvironment): void; reject(error: Error): void; timer: NodeJS.Timeout }>();
+let credentialRequestNumber = 0;
+function testEnvironment(taskId: string, checkIndex: number): Promise<TestEnvironment> {
+  return new Promise((resolve, reject) => {
+    const id = `credential_request_${++credentialRequestNumber}`;
+    const timer = setTimeout(() => { credentialRequests.delete(id); reject(new Error("secure storage request timed out")); }, 60_000);
+    credentialRequests.set(id, { resolve, reject, timer });
+    send({ type: "credential.request", id, taskId, checkIndex });
+  });
+}
 function closeTerminals() {
   for (const terminal of terminals.values()) {
     try {
@@ -66,10 +77,17 @@ function validTerminalRequest(data: any): asserts data is {
 }
 port.on("message", async ({ data }) => {
   try {
-    if (data.type === "init") {
+    if (data.type === "credential.response") {
+      const pending = credentialRequests.get(data.id);
+      if (!pending) return;
+      credentialRequests.delete(data.id);
+      clearTimeout(pending.timer);
+      data.error ? pending.reject(new Error(data.error)) : pending.resolve(data.environment);
+      return;
+    } else if (data.type === "init") {
       closeTerminals();
       service = new WorkspaceService(data.root);
-      scheduler = new Orchestrator(data.root);
+      scheduler = new Orchestrator(data.root, undefined, { testEnvironment });
       scheduler.on("runtime", (event) => send({ type: "runtime", event }));
       scheduler.on("attention", (event) => send({ type: "attention", event }));
       scheduler.on("diagnostic", (message) =>
@@ -137,6 +155,8 @@ port.on("message", async ({ data }) => {
       send({ type: "reply", id: data.id, result });
     } else if (data.type === "stop") {
       stopped = true;
+      for (const request of credentialRequests.values()) { clearTimeout(request.timer); request.reject(new Error("application is stopping")); }
+      credentialRequests.clear();
       closeTerminals();
       await scheduler?.stop();
       send({ type: "stopped" });

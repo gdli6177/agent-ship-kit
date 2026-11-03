@@ -534,3 +534,262 @@ test("publication pushes only the verified branch and recovers the existing PR w
       await engine.stop();
     }
   }));
+
+class ConversationAdapter extends FixtureAdapter {
+  routePrompts: string[] = [];
+  workerPrompts: string[] = [];
+  constructor(readonly route: (message: import('../../core/src/index.js').ChatMessage) => import('../src/routing.js').CaptainRoute, wait = 20) {
+    super({ wait });
+  }
+  override async open(options: SessionOptions) {
+    const base = await super.open(options);
+    return { ...base, prompt: async (prompt: string) => {
+      const current = /当前消息：([^\n]+)/.exec(prompt);
+      if (current) {
+        this.routePrompts.push(prompt);
+        return JSON.stringify({ status: 'done', summary: 'routing decision', evidence: ['conversation'],
+          outputs: { routing: JSON.stringify(this.route(JSON.parse(current[1]!))) } });
+      }
+      if (options.role === 'worker') this.workerPrompts.push(prompt);
+      return base.prompt(prompt);
+    } };
+  }
+}
+
+test('captain conversation switches A/B, creates new goals and queries status without forwarding the question', () => fixture(async (root, service) => {
+  const a = await service.execute({ type: 'task.submit', projectId: 'project', request: 'Goal A', workflowId: 'trial', discussion: true }) as Task;
+  const adapter = new ConversationAdapter(message => message.text === 'Create B'
+    ? { action: 'create', workflowId: 'trial', request: 'Goal B', discussion: true, reply: 'B is now a separate goal' }
+    : message.text === '补充A：保留旧行为'
+      ? { action: 'forward', taskId: a.id, reply: '交给 A 队长' }
+      : { action: 'status', taskId: a.id, reply: 'this model text must not be used as progress evidence' });
+  const engine = new Orchestrator(root, () => adapter);
+  try {
+    await engine.runUntilIdle();
+    await service.execute({ type: 'chat.send', projectId: 'project', taskId: a.id, text: 'Create B' });
+    await service.execute({ type: 'chat.send', projectId: 'project', text: '补充A：保留旧行为' });
+    await service.execute({ type: 'chat.send', projectId: 'project', text: 'A做到哪了' });
+    await engine.runUntilIdle();
+    const state = await service.store.read();
+    assert.equal(state.tasks.length, 2);
+    const b = state.tasks.find(t => t.id !== a.id)!;
+    assert.equal(b.request, 'Goal B');
+    assert.equal(state.tasks.find(t => t.id === a.id)!.contextRevision, 1);
+    assert.equal(b.contextRevision, undefined);
+    assert.equal(state.agents.filter(a => a.role === 'worker').length, 0);
+    const messages = state.messages.filter(m => m.role === 'human' && m.routing);
+    assert.deepEqual(messages.map(m => m.routing!.action), ['create', 'forward', 'status']);
+    assert.equal(messages[0]!.contextTaskId, a.id);
+    assert.equal(messages[0]!.taskId, b.id);
+    const progress = state.messages.find(m => m.replyTo === messages[2]!.id)!.text;
+    assert.match(progress, /Goal A：(等待你的决定|规划中|排队中)/);
+    assert.ok(!progress.includes('this model text'));
+    assert.ok(adapter.routePrompts[2]!.includes('Create B'), 'captain sees earlier turns across goals');
+  } finally { await engine.stop(); }
+}));
+
+test('ambiguous messages survive restart, launch no workers, and a chosen target resolves the original question once', () => fixture(async (root, service) => {
+  const a = await service.execute({ type: 'task.submit', projectId: 'project', request: 'A plan', workflowId: 'trial', discussion: true }) as Task;
+  const adapter = new ConversationAdapter(() => ({ action: 'clarify', reply: '这条补充属于 A，还是新目标？', candidates: [a.id] }));
+  let engine = new Orchestrator(root, () => adapter);
+  await engine.runUntilIdle();
+  const message = await service.execute({ type: 'chat.send', projectId: 'project', text: '原消息：需要额外边界测试' }) as import('../../core/src/index.js').ChatMessage;
+  await engine.runUntilIdle();
+  await engine.stop();
+  assert.equal((await service.store.read()).messages.find(m => m.id === message.id)!.routing!.status, 'clarifying');
+  assert.equal((await service.store.read()).agents.some(a => a.role === 'worker'), false);
+  engine = new Orchestrator(root, () => adapter);
+  try {
+    await service.execute({ type: 'chat.send', projectId: 'project', clarifies: message.id, targetTaskId: a.id, text: '是A的补充' });
+    await engine.runUntilIdle();
+    const state = await service.store.read();
+    const original = state.messages.find(m => m.id === message.id)!;
+    assert.ok(original.routing!.resolvedBy);
+    assert.equal(original.taskId, a.id);
+    assert.equal(state.tasks[0]!.contextRevision, 1);
+    await engine.runUntilIdle();
+    assert.equal((await service.store.read()).tasks[0]!.contextRevision, 1);
+    await assert.rejects(service.execute({ type: 'chat.send', projectId: 'project', clarifies: message.id, text: 'duplicate answer' }), /already resolved/);
+  } finally { await engine.stop(); }
+}));
+
+test('routing is atomic, idempotent and cannot target another project or reuse revoked authorization', () => fixture(async (_root, service) => {
+  const { applyCaptainRoute, parseCaptainRoute } = await import('../src/routing.js');
+  const m = await service.execute({ type: 'chat.send', projectId: 'project', text: 'Create a new goal' }) as import('../../core/src/index.js').ChatMessage;
+  const state = await service.store.read();
+  const grantId = state.projects[0]!.grant!.id;
+  const route = { action: 'create' as const, workflowId: 'trial', request: m.text, discussion: true, reply: '已创建' };
+  applyCaptainRoute(state, m.id, route, grantId);
+  applyCaptainRoute(state, m.id, route, grantId);
+  assert.equal(state.tasks.length, 1);
+  assert.equal(state.messages.filter(msg => msg.replyTo === m.id).length, 1);
+  assert.throws(() => parseCaptainRoute(JSON.stringify({ ...route, actions: ['publish_pr'] })), /invalid/);
+  const fresh = await service.store.read();
+  assert.throws(() => applyCaptainRoute(fresh, m.id, { action: 'forward', taskId: 'foreign', reply: 'x' }, grantId), /project/);
+  assert.equal(fresh.tasks.length, 0);
+  await service.execute({ type: 'grant.revoke', projectId: 'project' });
+  assert.throws(() => applyCaptainRoute(fresh, m.id, route, 'stale-grant'), /authorization/);
+}));
+
+test('information arriving during a worker run is delivered only to its goal and forces fresh independent verification', () => fixture(async (root, service) => {
+  const task = await submit(service);
+  const adapter = new ConversationAdapter(() => ({ action: 'forward', taskId: task.id, reply: 'forwarded' }), 700);
+  const engine = new Orchestrator(root, () => adapter);
+  try {
+    await engine.start();
+    const running = engine.runUntilIdle();
+    const deadline = Date.now() + 10_000;
+    while (!adapter.workerPrompts.length && Date.now() < deadline) await delay(10);
+    assert.equal(adapter.workerPrompts.length, 1);
+    await service.execute({ type: 'chat.send', projectId: 'project', text: 'NEW_BOUNDARY_CASE 必须保留旧行为' });
+    await running;
+    const state = await service.store.read();
+    assert.equal(state.tasks[0]!.status, 'completed', state.tasks[0]!.error);
+    assert.equal(state.tasks[0]!.contextRevision, 1);
+    assert.equal(state.tasks[0]!.executedRevision, 1);
+    assert.ok(adapter.workerPrompts.length >= 2);
+    assert.ok(adapter.workerPrompts.at(-1)!.includes('NEW_BOUNDARY_CASE'));
+    assert.ok(!adapter.workerPrompts[0]!.includes('NEW_BOUNDARY_CASE'));
+  } finally { await engine.stop(); }
+}));
+
+test('desktop knowledge uses existing CLI cards, injects rules, promotes only after review, and excludes expired lessons', () => fixture(async (root, service) => {
+  const { knowledgeContext, persistLearning } = await import('../src/knowledge.js');
+  await writeFile(join(root, 'TEAM.md'), '# Team rules\nBoundary tests must include zero.\n');
+  await service.execute({ type: 'knowledge.configure', projectId: 'project', config: { handbook: 'TEAM.md', rules: [] } });
+  const project = (await service.store.read()).projects[0]!;
+  const initial = await knowledgeContext(project, 'boundary');
+  assert.ok(initial.sources.some(s => s.bodyIncluded && s.body?.includes('include zero')));
+  const task = { id: 'task_knowledge', integrationHead: 'a'.repeat(40) } as Task;
+  const proposal = JSON.stringify({ outcome: 'candidate', reason: 'Prevents boundary regressions', title: 'Boundary checks', summary: 'Use real boundary assertions', when: 'When adding input boundaries', action: 'Test zero and negative inputs against the real file', tags: ['boundary'] });
+  const result = await persistLearning(project, task, proposal, 'independent-author');
+  assert.equal((await knowledgeContext(project, 'boundary')).lessons.length, 0);
+  let library = await service.execute({ type: 'knowledge.list', projectId: 'project', query: 'boundary' }) as Awaited<ReturnType<typeof import('../src/knowledge.js').knowledgeLibrary>>;
+  assert.equal(library.cards.length, 1);
+  assert.equal(library.cards[0]!.auto, true);
+  await assert.rejects(service.execute({ type: 'knowledge.review', projectId: 'project', lessonId: result.lessonIds[0]!, status: 'active', by: 'independent-author', note: 'Self review denied' }), /author and reviewer/);
+  await service.execute({ type: 'knowledge.review', projectId: 'project', lessonId: result.lessonIds[0]!, status: 'active', by: 'test-human', note: 'Checked evidence and applicability' });
+  const { teamContext } = await import('../../../cli/src/learning.js');
+  assert.equal((await teamContext(root, { project: 'project', auto: true })).lessons[0]!.id, result.lessonIds[0]);
+  assert.equal((await knowledgeContext(project, 'boundary')).lessons[0]!.id, result.lessonIds[0]);
+  await service.execute({ type: 'knowledge.review', projectId: 'project', lessonId: result.lessonIds[0]!, status: 'retired', by: 'test-human', note: 'Superseded by project change' });
+  assert.equal((await knowledgeContext(project, 'boundary')).lessons.length, 0);
+  assert.equal(await readFile(join(root, 'TEAM.md'), 'utf8'), '# Team rules\nBoundary tests must include zero.\n');
+  await assert.rejects(service.execute({ type: 'knowledge.configure', projectId: 'project', config: { handbook: '.env', rules: [] } }), /unsafe/);
+}));
+
+test('verified delivery extracts a candidate and a later worker can query the reviewed knowledge in the same session', () => fixture(async (root, service) => {
+  await service.execute({ type: 'knowledge.configure', projectId: 'project', config: { handbook: null, rules: [] } });
+  let queried = false;
+  let received = false;
+  const adapter = new FixtureAdapter();
+  const open = adapter.open.bind(adapter);
+  adapter.open = async options => {
+    const session = await open(options);
+    let original = '';
+    let asked = false;
+    return { ...session, prompt: async prompt => {
+      if (prompt.includes('本轮只从已经完成')) return JSON.stringify({ status: 'done', summary: 'Reusable learning identified', evidence: ['verified branch'], outputs: { learning: JSON.stringify({ outcome: 'candidate', reason: 'Actual file checks are reusable', title: 'Boundary tests', summary: 'Use real files', when: 'Boundary file changes', action: 'Read the file from disk and assert its exact bytes', tags: ['boundary'] }) } });
+      if (options.role === 'worker' && queried && !asked) {
+        original = prompt; asked = true;
+        return JSON.stringify({ status: 'blocked', summary: 'Need team knowledge', question: 'How to check boundaries?', knowledgeQuery: 'boundary', evidence: [], outputs: {} });
+      }
+      if (prompt.startsWith('查询结果：')) {
+        received = prompt.includes('Read the file from disk');
+        return session.prompt(original + '\n' + prompt);
+      }
+      return session.prompt(prompt);
+    } };
+  };
+  const engine = new Orchestrator(root, () => adapter);
+  try {
+    await submit(service, 'First boundary goal');
+    await engine.runUntilIdle();
+    let state = await service.store.read();
+    assert.equal(state.tasks[0]!.status, 'completed', state.tasks[0]!.error);
+    assert.equal(state.tasks[0]!.learning?.outcome, 'candidate', state.tasks[0]!.learning?.reason);
+    const id = state.tasks[0]!.learning!.lessonIds[0]!;
+    await service.execute({ type: 'knowledge.review', projectId: 'project', lessonId: id, status: 'active', by: 'test-human', note: 'Verified actual task evidence' });
+    queried = true;
+    await submit(service, 'Second boundary goal');
+    await engine.runUntilIdle();
+    state = await service.store.read();
+    assert.equal(state.tasks[1]!.status, 'completed', state.tasks[1]!.error);
+    assert.ok(received);
+    assert.ok(state.agents.some(a => a.role === 'worker' && a.taskId === state.tasks[1]!.id && a.lessonIds?.includes(id)));
+  } finally { await engine.stop(); }
+}));
+
+test('secure references inject only the authorized host check, redact split output, and never reach agents or events', () => fixture(async (root, service) => {
+  const { CredentialVault } = await import('../src/credentials.js');
+  const { createCipheriv, createDecipheriv, randomBytes } = await import('node:crypto');
+  const secret = 'synthetic-only-' + randomBytes(16).toString('hex');
+  const key = randomBytes(32);
+  const vault = new CredentialVault(join(root, 'vault'), {
+    available: async () => true,
+    encrypt: async text => { const iv = randomBytes(12); const cipher = createCipheriv('aes-256-gcm', key, iv); return Buffer.concat([iv, cipher.update(text), cipher.final(), cipher.getAuthTag()]); },
+    decrypt: async data => { const decipher = createDecipheriv('aes-256-gcm', key, data.subarray(0, 12)); decipher.setAuthTag(data.subarray(-16)); return Buffer.concat([decipher.update(data.subarray(12, -16)), decipher.final()]).toString(); },
+  });
+  await service.execute({ type: 'grant.revoke', projectId: 'project' });
+  let project = (await service.store.read()).projects[0]!;
+  const { grant: oldGrant, shipPolicy, ...settings } = project;
+  settings.checks = [[process.execPath, '-e', "const v=process.env.E2E_PASSWORD;if(!v)process.exit(1);process.stdout.write(v.slice(0,8));setTimeout(()=>process.stdout.write(v.slice(8)),5)"]];
+  await service.execute({ type: 'project.save', project: settings });
+  project = (await service.store.read()).projects[0]!;
+  const reference = await vault.save(project, { label: 'Test password', env: 'E2E_PASSWORD', checkIndex: 0, value: secret });
+  await service.execute({ type: 'credential.register', projectId: project.id, reference });
+  await assert.rejects(service.execute({ type: 'credential.register', projectId: project.id, reference: { ...reference, value: secret } as typeof reference }), /invalid/);
+  await service.execute({ type: 'grant.save', projectId: project.id, grant: {
+    approvedBy: 'test-human', profiles: ['test'], actions: ['read', 'write', 'verify'],
+    allowedPaths: ['app.txt'], forbiddenPaths: ['AGENTS.md'], maxParallel: 3, maxTaskMinutes: 1, credentials: [reference.id],
+  } });
+  project = (await service.store.read()).projects[0]!;
+  const wrongCheck = await vault.environment(project, 1);
+  assert.deepEqual(wrongCheck.env, {});
+  assert.equal((await readFile(join(root, 'vault', `${reference.id}.json`), 'utf8')).includes(secret), false);
+  const adapter = new ConversationAdapter(() => ({ action: 'reply', reply: 'test' }));
+  const baseOpen = adapter.open.bind(adapter);
+  let verifierReceivedRedaction = false;
+  let verificationHead = '';
+  adapter.open = async options => {
+    if (options.role === 'verifier') {
+      const { git } = await import('../src/git.js');
+      verificationHead = await git(options.cwd, 'rev-parse', 'HEAD');
+    }
+    const session = await baseOpen(options);
+    let original = '';
+    return { ...session, prompt: async prompt => {
+      if (options.role === 'verifier' && !original) {
+        original = prompt;
+        return JSON.stringify({ status: 'blocked', question: 'Run the credential check through the host', summary: 'Host verification required', verifyCheck: 0, evidence: [], outputs: {} });
+      }
+      if (options.role === 'verifier' && prompt.startsWith('宿主实际验证结果')) {
+        verifierReceivedRedaction = prompt.includes('[redacted]') && !prompt.includes(secret);
+        return session.prompt(original + '\n' + prompt);
+      }
+      return session.prompt(prompt);
+    } };
+  };
+  const engine = new Orchestrator(root, () => adapter, {
+    testEnvironment: async (_taskId, checkIndex) => vault.environment((await service.store.read()).projects[0]!, checkIndex),
+  });
+  try {
+    const task = await submit(service);
+    await engine.runUntilIdle();
+    const state = await service.store.read();
+    assert.equal(state.tasks[0]!.status, 'completed', state.tasks[0]!.error);
+    const report = await readFile(join(root, '.crewvane/evidence', task.id, 'report.md'), 'utf8');
+    assert.ok(report.includes('[redacted]'));
+    assert.ok(!report.includes(secret));
+    assert.ok(!JSON.stringify(state).includes(secret));
+    assert.ok(!adapter.workerPrompts.join('').includes(secret));
+    assert.equal(state.credentialAccess?.[0]!.credentialIds[0], reference.id);
+    assert.equal(state.credentialAccess?.length, 1);
+    assert.ok(state.agents.some(a => a.role === 'verifier' && a.hostChecks?.head === verificationHead && a.hostChecks.checks[0]?.index === 0 && a.hostChecks.checks[0].output.includes('[redacted]')));
+    assert.ok(verifierReceivedRedaction);
+    await assert.rejects(service.execute({ type: 'credential.remove', projectId: project.id, credentialId: reference.id }), /revoke/);
+    await assert.rejects(vault.environment({ ...project, credentials: [{ ...reference, env: 'E2E_OTHER' }] }, 0), /differs/);
+    await service.execute({ type: 'grant.revoke', projectId: project.id });
+    await assert.rejects(vault.environment((await service.store.read()).projects[0]!, 0), /current human/);
+  } finally { await engine.stop(); }
+}));

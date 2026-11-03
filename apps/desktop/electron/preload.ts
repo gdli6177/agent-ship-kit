@@ -24,6 +24,9 @@ contextBridge.exposeInMainWorld("crewvane", {
   herdrStatus: () => ipcRenderer.invoke("crewvane:herdr-status"),
   installHerdr: () => ipcRenderer.invoke("crewvane:install-herdr"),
   openHerdrDocs: () => ipcRenderer.invoke("crewvane:open-herdr-docs"),
+  vaultStatus: () => ipcRenderer.invoke("crewvane:vault-status"),
+  saveCredential: (input: { projectId: string; label: string; env: string; checkIndex: number; value: string }) => ipcRenderer.invoke("crewvane:vault-save", input),
+  removeCredential: (input: { projectId: string; credentialId: string }) => ipcRenderer.invoke("crewvane:vault-remove", input),
   subscribe: (listener: (event: unknown) => void) => {
     const handler = (_: unknown, data: unknown) => listener(data);
     ipcRenderer.on("crewvane:event", handler);

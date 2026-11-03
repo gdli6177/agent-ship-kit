@@ -16,6 +16,7 @@ import {
   FolderCog,
   Inbox,
   LayoutGrid,
+  KeyRound,
   LoaderCircle,
   MessageCircle,
   Moon,
@@ -46,6 +47,8 @@ export const pageDefinitions = [
   { id: "tasks", label: "目标", title: "全部目标", icon: LayoutGrid },
   { id: "runtimes", label: "运行时", title: "运行时", icon: Blocks },
   { id: "workflows", label: "工序", title: "工序模板", icon: Workflow },
+  { id: "knowledge", label: "知识", title: "团队知识", icon: BookOpen },
+  { id: "credentials", label: "密码本", title: "测试凭据", icon: KeyRound },
   { id: "projects", label: "项目", title: "项目设置", icon: FolderCog },
 ] as const;
 
@@ -710,8 +713,7 @@ export function CaptainDrawer({
   const project = state.projects.find((item) => item.id === selectedProject),
     messages = state.messages.filter(
       (message) =>
-        (!selectedProject || message.projectId === selectedProject) &&
-        (!taskId || !message.taskId || message.taskId === taskId),
+        (!selectedProject || message.projectId === selectedProject),
     );
   useEffect(() => {
     if (open) end.current?.scrollIntoView({ block: "end" });
@@ -727,7 +729,7 @@ export function CaptainDrawer({
             </span>
             <div>
               <Dialog.Title>船长</Dialog.Title>
-              <small>团队内部问题会先逐级解决</small>
+              <small>{project?.name ?? "选择项目开始"} · 所有目标，一处沟通</small>
             </div>
             <Dialog.Close asChild>
               <button type="button" aria-label="关闭船长对话">
@@ -739,7 +741,7 @@ export function CaptainDrawer({
             <article className="captain-intro">
               <span>协航船长</span>
               <p>
-                把目标与完成标准交给我。我会安排队长、工人和独立验证员，只有团队无法决定的事才升级给你。
+                可以随时换个目标聊。我会识别是新需求还是已有目标的补充，不确定时先向你确认。团队内部问题会逐级解决。
               </p>
             </article>
             {messages.slice(-60).map((message) => (
@@ -752,6 +754,32 @@ export function CaptainDrawer({
                   {shortTime(message.at)}
                 </small>
                 <p>{message.text}</p>
+                {message.role === "human" && message.routing && (
+                  <div className="message-routing">
+                    {message.routing.status === "pending" && <span><LoaderCircle size={12} className="spin" /> 船长正在处理</span>}
+                    {message.routing.status === "applied" && <span><Check size={12} />
+                      {({ create: "已创建目标", forward: "已转交队长", status: "进度查询", reply: "已回复", clarify: "归属已确认" })[message.routing.action ?? "reply"]}
+                      {message.routing.taskId && ` · ${state.tasks.find(t => t.id === message.routing!.taskId)?.title ?? "目标"}`}
+                    </span>}
+                    {message.routing.status === "failed" && <>
+                      <span title={message.routing.error}><ShieldAlert size={12} /> 暂未处理</span>
+                      <button type="button" onClick={() => run({ type: "chat.retry", messageId: message.id })}>重试这条消息</button>
+                    </>}
+                    {message.routing.status === "clarifying" && (message.routing.resolvedBy
+                      ? <span><Check size={12} /> 已澄清</span>
+                      : <div className="clarification-choices">
+                          <span>这条信息属于哪个目标？也可以直接回复。</span>
+                          {message.routing.candidates?.map(id => {
+                            const task = state.tasks.find(t => t.id === id);
+                            return task && !["completed", "cancelled", "failed", "needs_reconcile"].includes(task.status) ?
+                              <button key={id} type="button" onClick={() => run({ type: "chat.send", projectId: project!.id,
+                                text: `这条信息属于：${task.title}`, clarifies: message.id, targetTaskId: id })}>{task.title}</button> : null;
+                          })}
+                          <button type="button" onClick={() => run({ type: "chat.send", projectId: project!.id,
+                            text: "这是一个独立的新目标，请结合原消息创建需求。", clarifies: message.id })}>另开一个目标</button>
+                        </div>)}
+                  </div>
+                )}
               </article>
             ))}
             <div ref={end} />
@@ -772,13 +800,13 @@ export function CaptainDrawer({
             <textarea
               aria-label="给船长发消息"
               placeholder={
-                project ? "问进度、补信息，或讨论下一步…" : "先选择一个项目"
+                project ? "提新目标、补充已有需求，或问问进度…" : "先选择一个项目"
               }
               value={text}
               onChange={(event) => setText(event.target.value)}
               disabled={!project}
             />
-            <span>{project?.name ?? "未选择项目"}</span>
+            <span>{taskId ? `正在查看：${state.tasks.find(t => t.id === taskId)?.title ?? "目标"}，也可以聊其他目标` : project?.name ?? "未选择项目"}</span>
             <button
               type="submit"
               className="primary"

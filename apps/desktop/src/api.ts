@@ -34,6 +34,9 @@ export interface DesktopApi {
   herdrStatus(): Promise<HerdrStatus>;
   installHerdr(): Promise<HerdrStatus & { output: string }>;
   openHerdrDocs(): Promise<void>;
+  vaultStatus(): Promise<{ available: boolean; provider: string }>;
+  saveCredential(input: { projectId: string; label: string; env: string; checkIndex: number; value: string }): Promise<import("../../../packages/core/src/types.js").CredentialReference>;
+  removeCredential(input: { projectId: string; credentialId: string }): Promise<true>;
   subscribe(listener: (event: any) => void): () => void;
 }
 declare global {

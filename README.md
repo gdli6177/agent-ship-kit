@@ -11,6 +11,9 @@ parent first. Only decisions the captain cannot resolve reach you.
 - Install Herdr from Settings as the recommended optional terminal backend. When present it is selected by default; without it, Shell and discovered runtime CLIs remain available.
 - Edit versioned workflow stages, run parallel workers in isolated Git worktrees, require independent verification and bounded rework.
 - Grant project scope once; ordinary work proceeds through a PR within that grant. Merge and deployment remain manual.
+- Talk to one captain across parallel goals: create, route follow-ups, inspect real status, and resolve persistent routing clarifications.
+- Connect team handbooks, review evidence-backed lessons, and let later workers recall approved knowledge.
+- Keep test credentials in the OS-backed Electron safe store and inject them only into authorized verification commands.
 - Share one append-only workspace record between the desktop app and the `crewvane` CLI.
 
 This is the first macOS arm64 internal desktop release.
@@ -39,6 +42,7 @@ pnpm test
 pnpm desktop:build
 pnpm test:desktop
 pnpm test:crewvane # real runtime trial; requires configured local runtimes/models
+pnpm test:product # real captain, knowledge and credential trial; requires Codex
 ```
 
 The existing manual contract CLI, portable skills and templates remain available under the new brand. [CLI guide](cli/README.md).

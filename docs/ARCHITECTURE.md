@@ -18,6 +18,19 @@ protocols execute work; terminal backends only expose or observe sessions.
   structured work through ACP or Codex App Server and Crewvane's persistent state.
 - Workspace-level `crewvane.runtimes.json` can add protocol-aware local CLIs. The
   manifest stores executable names and argv arrays, not credentials or shell strings.
+- Captain messages are durable routing commands. The host validates the model's
+  proposed route and atomically records task creation, follow-up context and the
+  captain reply. Ambiguous routes stay open across restarts; follow-ups invalidate
+  stale stage evidence and require another independent verification.
+- Team handbook and explicitly configured Markdown sources have a combined 64 KB
+  injection budget. Large owner `AGENTS.md` files still get streaming digest receipts
+  without a body-injection limit. Completed, independently verified tasks can create
+  lesson candidates; a different human reviewer must approve them before reuse.
+- Test credentials live in Electron safeStorage under the OS keychain. Workspace
+  events contain only references and access metadata. The main process decrypts a
+  granted reference for the utility process's specified test command; the renderer,
+  model prompts, runtime events and evidence never receive the plaintext. The host
+  masks plaintext and encoded forms even when process output splits them across chunks.
 - `external-approval` is fixed. The product does not auto-merge or deploy.
 
 The UI and infrastructure deliberately reuse maintained components:
@@ -31,6 +44,7 @@ The UI and infrastructure deliberately reuse maintained components:
 | PTY | node-pty |
 | Agent protocol | ACP, Codex App Server |
 | Optional terminal sessions | Herdr |
+| Test-secret encryption | Electron safeStorage / OS keychain |
 | Desktop E2E | Playwright |
 
 ACP and Codex App Server use a narrowly tested JSON-RPC subset. Adding

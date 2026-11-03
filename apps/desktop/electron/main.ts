@@ -8,6 +8,7 @@ import {
   Notification,
   powerMonitor,
   shell,
+  safeStorage,
   Tray,
   utilityProcess,
   type UtilityProcess,
@@ -29,6 +30,8 @@ import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import type { ServiceCommand } from "../../../packages/orchestrator/src/service.js";
 import type { WorkspaceState } from "../../../packages/core/src/types.js";
+import { CredentialVault } from "../../../packages/orchestrator/src/credentials.js";
+import { activeGrant } from "../../../packages/core/src/authority.js";
 const here = __dirname;
 const exec = promisify(execFile);
 let window: BrowserWindow,
@@ -49,6 +52,13 @@ const pending = new Map<
 >();
 const projectSelections = new Set<string>();
 const rendererURL = pathToFileURL(join(here, "renderer/index.html")).href;
+function credentialVault() {
+  return new CredentialVault(join(app.getPath("userData"), "credential-vault"), {
+    available: () => safeStorage.isAsyncEncryptionAvailable(),
+    encrypt: value => safeStorage.encryptStringAsync(value),
+    decrypt: async value => (await safeStorage.decryptStringAsync(value)).result,
+  });
+}
 function sender(event: Electron.IpcMainInvokeEvent) {
   if (
     event.sender !== window.webContents ||
@@ -262,7 +272,28 @@ async function openWorkspace(path: string) {
     serviceName: "Crewvane Orchestrator",
     stdio: "pipe",
   });
+  const workspaceChild = child;
   child.on("message", (data: any) => {
+    if (data.type === "credential.request") {
+      const requestedRoot = root;
+      void (async () => {
+        try {
+          const current = await rpc({ type: "snapshot" }) as WorkspaceState;
+          const task = current.tasks.find(t => t.id === data.taskId);
+          const project = current.projects.find(p => p.id === task?.projectId);
+          if (!task || !project || task.status !== "running" || task.cancelledAt ||
+            activeGrant(project).id !== task.grantId || !Number.isInteger(data.checkIndex) ||
+            data.checkIndex < 0 || data.checkIndex >= project.checks.length || root !== requestedRoot || child !== workspaceChild)
+            throw new Error("task is not authorized for credential use");
+          const environment = await credentialVault().environment(project, data.checkIndex);
+          if (root !== requestedRoot || child !== workspaceChild) throw new Error("workspace changed during secure storage access");
+          workspaceChild.postMessage({ type: "credential.response", id: data.id, environment });
+        } catch {
+          workspaceChild.postMessage({ type: "credential.response", id: data.id, error: "测试凭据不可用或授权已改变，验证未执行。请检查系统安全存储与项目授权。" });
+        }
+      })();
+      return; // Secure broker traffic is never forwarded to the renderer.
+    }
     if (data.type === "reply") {
       const p = pending.get(data.id);
       if (p) {
@@ -362,6 +393,29 @@ app.whenReady().then(async () => {
   ipcMain.handle("crewvane:environment", (event) => {
     sender(event);
     return { workspace: root, version: app.getVersion() };
+  });
+  ipcMain.handle("crewvane:vault-status", async event => {
+    sender(event);
+    return { available: await safeStorage.isAsyncEncryptionAvailable(), provider: "系统钥匙串 / Electron safeStorage" };
+  });
+  ipcMain.handle("crewvane:vault-save", async (event, input: { projectId: string; label: string; env: string; checkIndex: number; value: string }) => {
+    sender(event);
+    if (!input || typeof input !== "object") throw new Error("invalid credential input");
+    const current = await rpc({ type: "snapshot" }) as WorkspaceState;
+    const project = current.projects.find(p => p.id === input.projectId);
+    if (!project) throw new Error("project not found");
+    const vault = credentialVault();
+    const reference = await vault.save(project, input);
+    try {
+      await rpc({ type: "credential.register", projectId: project.id, reference });
+      return reference;
+    } catch (error) { await vault.remove(reference.id); throw error; }
+  });
+  ipcMain.handle("crewvane:vault-remove", async (event, input: { projectId: string; credentialId: string }) => {
+    sender(event);
+    await rpc({ type: "credential.remove", projectId: input.projectId, credentialId: input.credentialId });
+    await credentialVault().remove(input.credentialId);
+    return true;
   });
   ipcMain.handle("crewvane:workspace", async (event) => {
     sender(event);

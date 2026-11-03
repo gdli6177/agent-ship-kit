@@ -315,6 +315,13 @@ export class ProtocolAdapter implements RuntimeAdapter {
         );
         sessionId = options.resume ?? result.sessionId;
         models = modelsFromAcp(result);
+        if (this.id === "omp" && options.role !== "worker") {
+          const mode = (result.modes?.availableModes ?? []).find(
+            (mode: Wire) => mode.id === "plan",
+          );
+          if (!mode) throw new Error("OMP read-only plan mode is required for this role");
+          await rpc.request("session/set_mode", { sessionId, modeId: "plan" });
+        }
         if (options.model) {
           if (!models.some((m) => m.id === options.model))
             throw new Error(`model unavailable: ${options.model}`);
@@ -364,11 +371,12 @@ export class ProtocolAdapter implements RuntimeAdapter {
           output = "";
           try {
             if (!codex) {
-              await rpc.request(
+              const response = await rpc.request(
                 "session/prompt",
                 { sessionId, prompt: [{ type: "text", text }] },
                 15 * 60_000,
               );
+              if (response.stopReason === "error") throw new Error(response.error?.message ?? response.errorMessage ?? "runtime turn failed");
               return output;
             }
             const completion = new Promise<string>((resolve, reject) => {

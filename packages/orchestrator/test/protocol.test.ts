@@ -32,8 +32,9 @@ const send=m=>process.stdout.write(JSON.stringify(m)+'\\n');let pending;
 console.log('[fixture] startup diagnostic');
 readline.createInterface({input:process.stdin}).on('line',line=>{const m=JSON.parse(line);appendFileSync(${JSON.stringify(log)},JSON.stringify(m)+'\\n');if(!m.method){if(pending){send({method:'session/update',params:{sessionId:'s',update:{sessionUpdate:'agent_message_chunk',content:{type:'text',text:m.result?.outcome?.outcome==='selected'?'permission answered':'denied'}}}});send({id:pending,result:{stopReason:'end_turn'}});pending=null}return}
 if(m.method==='initialize')send({id:m.id,result:{agentCapabilities:{sessionCapabilities:{resume:{},close:{}}}}});
-else if(m.method==='session/new'||m.method==='session/resume')send({id:m.id,result:{sessionId:'s',configOptions:[{id:'model',category:'model',options:[{value:'fixture',name:'fixture'}]}]}});
-else if(m.method==='session/set_config_option'||m.method==='session/close')send({id:m.id,result:{}});
+else if(m.method==='session/new'||m.method==='session/resume')send({id:m.id,result:{sessionId:'s',modes:{availableModes:[{id:'default',name:'Default'},{id:'plan',name:'Plan'}]},configOptions:[{id:'model',category:'model',options:[{value:'fixture',name:'fixture'}]}]}});
+else if(m.method==='session/set_config_option'||m.method==='session/set_mode'||m.method==='session/close')send({id:m.id,result:{}});
+else if(m.method==='session/prompt'&&m.params.prompt[0].text==='fail')send({id:m.id,result:{stopReason:'error',error:{message:'Provider quota exhausted (429)'}}});
 else if(m.method==='session/prompt'){pending=m.id;send({id:'permission-1',method:'session/request_permission',params:{sessionId:'s',toolCall:{kind:'read',rawInput:{path:'file.txt'}},options:[{kind:'allow_once',optionId:'once'},{kind:'reject_once',optionId:'no'}]}})}
 else if(m.method==='session/cancel'){send({id:pending,result:{stopReason:'cancelled'}});pending=null}
 else send({id:m.id,error:{code:-32601,message:'unsupported'}});
@@ -124,6 +125,29 @@ test("DSH ACP uses session/resume, answers one-shot permissions, tolerates start
     );
     assert.ok(rows.some((r) => r.method === "session/close"));
     assert.ok(seen.includes("permission"));
+  }));
+
+test("ACP provider failures surface the actual error instead of a missing JSON result", () =>
+  fixture(async (file, root) => {
+    const adapter = new ProtocolAdapter({ id: "omp", name: "OMP fixture", executable: file, protocol: "acp", status: "ready", models: [] });
+    const session = await adapter.open({ cwd: root, model: "fixture", role: "captain", onEvent: () => {}, permission: async () => false });
+    await assert.rejects(session.prompt("fail"), /Provider quota exhausted.*429/);
+    await session.close();
+  }));
+
+test("OMP coordinators and verifiers use ACP plan mode while workers retain write mode", () =>
+  fixture(async (file, root) => {
+    const adapter = new ProtocolAdapter({
+      id: "omp", name: "OMP fixture", executable: file, protocol: "acp", launchArgs: ["acp"],
+      status: "ready", models: [{ id: "fixture", name: "fixture" }],
+    });
+    for (const role of ["captain", "lead", "verifier", "worker"] as const) {
+      await rm(join(root, "methods.jsonl"), { force: true });
+      const session = await adapter.open({ cwd: root, model: "fixture", role, onEvent: () => {}, permission: async () => false });
+      await session.close();
+      const rows = (await readFile(join(root, "methods.jsonl"), "utf8")).split("\n").filter(Boolean).map(line => JSON.parse(line));
+      assert.equal(rows.find(row => row.method === "session/set_mode")?.params.modeId, role === "worker" ? undefined : "plan");
+    }
   }));
 
 test("Codex App Server applies role-scoped permission profiles without unsupported RPC fields", () =>

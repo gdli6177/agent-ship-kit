@@ -32,6 +32,10 @@ export function validateGrant(
   project: Project,
   profiles: ExecutionProfile[],
 ) {
+  if (grant.credentials && (!Array.isArray(grant.credentials) || grant.credentials.length > 20 ||
+    new Set(grant.credentials).size !== grant.credentials.length ||
+    grant.credentials.some(id => !project.credentials?.some(reference => reference.id === id))))
+    throw new Error("grant contains unknown credential references");
   if (
     grant.projectId !== project.id ||
     !grant.approvedBy?.trim() ||

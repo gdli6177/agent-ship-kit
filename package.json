@@ -30,6 +30,7 @@
     "test:desktop": "node scripts/desktop-smoke.mjs",
     "test:design": "tsx scripts/design-qa.mjs",
     "test:crewvane": "tsx scripts/crewvane-dogfood.ts",
+    "test:product": "tsx scripts/product-dogfood.ts",
     "desktop": "pnpm --dir apps/desktop dev",
     "build": "pnpm --dir apps/desktop build",
     "package:mac": "pnpm --dir apps/desktop package:mac"

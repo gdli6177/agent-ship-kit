@@ -35,6 +35,8 @@ import {
 } from "./workspace.js";
 import { TerminalDrawer } from "./terminal.js";
 import { SettingsPage } from "./settings.js";
+import { KnowledgePage } from "./knowledge.js";
+import { CredentialsPage } from "./credentials.js";
 import { shortTime, statusText } from "./view.js";
 import "./style.css";
 function App() {
@@ -69,6 +71,8 @@ function App() {
     localStorage.setItem("crewvane.theme", theme);
   }, [theme]);
   useEffect(() => {
+    const refresh = () => { void api.command({ type: "snapshot" }).then(setState).catch(() => {}); };
+    window.addEventListener("crewvane:workspace-changed", refresh);
     void api.environment().then((env) => {
       setWorkspace(env.workspace);
       if (env.workspace)
@@ -77,7 +81,7 @@ function App() {
           .then(setState)
           .catch(() => {});
     });
-    return api.subscribe((event) => {
+    const unsubscribe = api.subscribe((event) => {
       if (event.type === "snapshot") {
         setState(event.state);
         if (event.workspace) setWorkspace(event.workspace);
@@ -91,6 +95,7 @@ function App() {
         );
       if (event.type === "diagnostic") setError(event.message);
     });
+    return () => { unsubscribe(); window.removeEventListener("crewvane:workspace-changed", refresh); };
   }, []);
   useEffect(() => {
     if (!projectInitialized.current && state.projects[0]) {
@@ -342,6 +347,10 @@ function App() {
             <div className="settings-page">
               <Workflows state={state} execute={execute} />
             </div>
+          ) : page === "knowledge" ? (
+            <div className="settings-page"><KnowledgePage state={state} projectId={selectedProjectId} /></div>
+          ) : page === "credentials" ? (
+            <div className="settings-page"><CredentialsPage state={state} projectId={selectedProjectId} /></div>
           ) : page === "projects" ? (
             <div className="settings-page">
               <Projects
@@ -1196,6 +1205,7 @@ function Projects({
     [forbidden, setForbidden] = useState("AGENTS.md,.agents/**,.github/**"),
     [publish, setPublish] = useState(false),
     [approvedProfiles, setApprovedProfiles] = useState<string[]>([]),
+    [approvedCredentials, setApprovedCredentials] = useState<string[]>([]),
     [maxParallel, setMaxParallel] = useState(3),
     [minutes, setMinutes] = useState(30);
   useEffect(() => {
@@ -1418,6 +1428,7 @@ function Projects({
                 className="primary"
                 onClick={() => {
                   setApprovedProfiles(state.profiles.map((p) => p.id));
+                  setApprovedCredentials([]);
                   setGrantOpen(true);
                 }}
               >
@@ -1471,6 +1482,7 @@ function Projects({
                     ...(publish ? ["publish_pr" as const] : []),
                   ],
                   profiles: approvedProfiles,
+                  credentials: approvedCredentials,
                   allowedPaths: allowed
                     .split(",")
                     .map((v) => v.trim())
@@ -1519,6 +1531,13 @@ function Projects({
                 {p.name} · {p.runtime} / {p.model}
               </label>
             ))}
+            {!!selected.credentials?.length && <>
+              <label>允许指定验证命令使用的测试凭据</label>
+              {selected.credentials.map(reference => <label className="check" key={reference.id}>
+                <Input type="checkbox" checked={approvedCredentials.includes(reference.id)} onChange={event => setApprovedCredentials(event.target.checked ? [...approvedCredentials, reference.id] : approvedCredentials.filter(id => id !== reference.id))} />
+                {reference.label} · {selected.checks[reference.checkIndex]?.join(" ")}
+              </label>)}
+            </>}
             <div className="form-row">
               <label>
                 项目工人并发
