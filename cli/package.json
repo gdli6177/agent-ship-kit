@@ -1,6 +1,6 @@
 {
   "name": "@crewvane/cli",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "description": "Local inbox and notify dry-run for the crewvane captain. Never merges, deploys, or starts a shell.",
   "license": "MIT",
   "type": "module",
