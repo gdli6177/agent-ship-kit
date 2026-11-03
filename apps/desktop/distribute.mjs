@@ -30,8 +30,9 @@ try {
   await symlink("/Applications", join(stage, "Applications"));
   await writeFile(join(stage, "安装说明.txt"),
     "Crewvane｜协航\n\n将 Crewvane.app 拖入 Applications 后，从应用程序打开。\n" +
-    "适用于 Apple Silicon Mac。本内测版尚未进行 Apple Developer ID 签名与公证。\n" +
-    "若系统阻止打开，请按 macOS 系统设置 > 隐私与安全性中的提示处理。\n" +
+    "适用于 Apple Silicon Mac。本内测版采用完整 ad-hoc 签名，但尚未使用 Apple Developer ID 签名与公证。\n" +
+    "若提示“无法验证开发者”，请在 macOS 系统设置 > 隐私与安全性中选择“仍要打开”。\n" +
+    "若提示“已损坏”，请核对 SHA-256 并从 GitHub Releases 重新下载当前版本，不要继续使用 v0.3.0。\n" +
     "使用说明：https://github.com/gdli6177/crewvane/blob/main/docs/crewvane.md\n");
   await exec("hdiutil", ["create", "-volname", "Crewvane", "-srcfolder", stage,
     "-format", "UDZO", "-ov", join(output, `${stem}.dmg`)], { timeout: 180_000 });

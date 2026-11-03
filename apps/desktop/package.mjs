@@ -22,6 +22,7 @@ const here = dirname(fileURLToPath(import.meta.url)),
   desktopPackage = JSON.parse(
     await readFile(join(here, "package.json"), "utf8"),
   ),
+  signingIdentity = process.env.CREWVANE_MACOS_SIGN_IDENTITY,
   stage = await mkdtemp(join(tmpdir(), "crewvane-package-"));
 
 try {
@@ -94,6 +95,21 @@ try {
     overwrite: true,
     prune: true,
     appCategoryType: "public.app-category.developer-tools",
+    // Electron patches its binaries while packaging. Re-sign every nested
+    // executable and seal the app afterwards so Gatekeeper does not report the
+    // downloaded app as damaged. An explicitly configured Developer ID enables
+    // hardened runtime; ad-hoc builds must not mix it with Electron's bundled
+    // frameworks or macOS refuses to load them in the signed helpers.
+    osxSign: {
+      identity: signingIdentity || "-",
+      identityValidation: Boolean(signingIdentity),
+      timestamp: signingIdentity ? undefined : "none",
+      strictVerify: true,
+      optionsForFile: () => ({
+        hardenedRuntime: Boolean(signingIdentity),
+        ...(signingIdentity ? {} : { entitlements: [] }),
+      }),
+    },
   });
   console.log(paths.join("\n"));
 } finally {
