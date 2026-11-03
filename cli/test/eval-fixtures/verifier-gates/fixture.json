@@ -129,7 +129,7 @@
       "expect": {
         "includes": [
           "You are a read-only verifier.",
-          "agent-ship check",
+          "crewvane check",
           "Do not file `needs_review`."
         ]
       }
@@ -141,7 +141,7 @@
       "expect": {
         "includes": [
           "Spawn a separate read-only verifier.",
-          "agent-ship check --contract",
+          "crewvane check --contract",
           "Do not tell the owner."
         ]
       }
@@ -167,14 +167,14 @@
             "project": "A",
             "environment": "staging",
             "auth_setup_includes": "auth.setup.ts",
-            "storage_state": ".agent-ship/e2e/A.staging.storage-state.json",
+            "storage_state": ".crewvane/e2e/A.staging.storage-state.json",
             "smoke_includes": "app.smoke.spec.ts"
           },
           {
             "project": "A",
             "environment": "production",
             "auth_setup_includes": "hand export",
-            "storage_state": ".agent-ship/e2e/A.production.storage-state.json",
+            "storage_state": ".crewvane/e2e/A.production.storage-state.json",
             "smoke_includes": "readonly"
           }
         ]

@@ -1,22 +1,22 @@
 {
-  "name": "agent-ship-kit",
-  "version": "0.2.0",
-  "description": "Local inbox and notify dry-run for the agent-ship-kit captain. Never merges, deploys, or starts a shell.",
+  "name": "@crewvane/cli",
+  "version": "0.3.0",
+  "description": "Local inbox and notify dry-run for the crewvane captain. Never merges, deploys, or starts a shell.",
   "license": "MIT",
   "type": "module",
   "engines": {
     "node": ">=20"
   },
   "bin": {
-    "agent-ship": "./bin/agent-ship.js"
+    "crewvane": "./bin/crewvane.js"
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/gdli6177/agent-ship-kit.git",
+    "url": "git+https://github.com/gdli6177/crewvane.git",
     "directory": "cli"
   },
   "scripts": {
-    "agent-ship": "tsx src/cli.ts",
+    "crewvane": "tsx src/cli.ts",
     "test": "tsx --test test/*.test.ts",
     "typecheck": "tsc --noEmit"
   },

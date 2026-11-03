@@ -79,7 +79,7 @@ export function parseFeatureIds(markdown: string): string[] | null {
 export async function featureViolationsInContract(root: string, contractMarkdown: string): Promise<FeatureViolation[]> {
   const referenced = featureIdsReferenced(contractMarkdown);
   if (referenced.length === 0) return [];
-  const indexPath = join(root, ".agent-ship", "e2e", "index.md");
+  const indexPath = join(root, ".crewvane", "e2e", "index.md");
   let index: string;
   try {
     index = await readFile(indexPath, "utf8");

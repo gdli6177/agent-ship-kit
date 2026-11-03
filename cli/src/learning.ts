@@ -1,3 +1,4 @@
+import { createReadStream } from "node:fs";
 import { createHash } from "node:crypto";
 import { appendFile, lstat, mkdir, readdir, realpath, rename, rm, writeFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
@@ -188,7 +189,7 @@ export async function addLesson(root: string, inputFile: string, options: { auto
   if (input.demands !== undefined || input.handbook_review_suggested !== undefined || input.handbook_review_reason !== undefined) throw new Error("demand history and handbook review are recorded by the CLI");
   const draft = parseLesson({ ...input, status: "candidate", updated_at: new Date().toISOString() });
   const candidate = options.auto ? parseLesson({ ...draft, demands: [{ source_task_id: draft.source_task_id, tags: demandTags }] }) : draft;
-  return withLock(join(root, ".agent-ship"), async () => {
+  return withLock(join(root, ".crewvane"), async () => {
     const lessonsRoot = await ownedDirectory(root, await lessonDirectory(root));
     if (options.auto) await assertAutoDirectory(lessonsRoot);
     const existing = await readLessons(root);
@@ -208,7 +209,7 @@ export async function addLesson(root: string, inputFile: string, options: { auto
 
 export async function reviewLesson(root: string, id: string, status: string, reviewer: string, note: string, reviewAfter?: string) {
   if (!ID.test(id) || !["active", "needs_review", "retired"].includes(status)) throw new Error("invalid lesson review id/status");
-  return withLock(join(root, ".agent-ship"), async () => {
+  return withLock(join(root, ".crewvane"), async () => {
     await ownedDirectory(root, await lessonDirectory(root));
     const card = (await readLessons(root)).find((entry) => entry.lesson.id === id);
     if (!card) throw new Error("lesson not found");
@@ -257,8 +258,9 @@ export async function teamContext(root: string, options: { tags?: string[]; proj
   const review_required: { id: string }[] = [];
   const source_details = [];
   for (const path of required_sources) {
-    const raw = await boundedText(path);
-    source_details.push({ path, read_required: true, digest: createHash("sha256").update(raw).digest("hex") });
+    const hash = createHash("sha256");
+    for await (const chunk of createReadStream(path)) hash.update(chunk);
+    source_details.push({ path, read_required: true, digest: hash.digest("hex"), body_included: false });
   }
   const handbookPath = profile?.config.handbook ? resolve(root, profile.config.handbook) : null;
   const handbookRaw = handbookPath ? await boundedText(handbookPath) : "";
@@ -286,7 +288,7 @@ export async function teamContext(root: string, options: { tags?: string[]; proj
 }
 
 async function inboxRecords(root: string): Promise<Record<string, unknown>[]> {
-  const raw = await optionalText(join(root, ".agent-ship/inbox.jsonl"));
+  const raw = await optionalText(join(root, ".crewvane/inbox.jsonl"));
   return (raw ?? "").split("\n").filter(Boolean).map((line) => JSON.parse(line) as Record<string, unknown>);
 }
 function workVersion(events: Record<string, unknown>[], task: string): number {
@@ -299,7 +301,7 @@ export async function checkLearning(root: string, task: string, outcome: string,
   task = text(task, "source_task_id");
   reason = text(reason, "reason", 280); reviewer = text(reviewer, "reviewed_by", 120);
   if (ids.length > 10) throw new Error("at most 10 candidate links per check");
-  return withLock(join(root, ".agent-ship"), async () => {
+  return withLock(join(root, ".crewvane"), async () => {
     const events = await readEvents(root);
     const dispatch = events.find((event) => event.type === "worker_dispatched" && event.source_task_id === task);
     if (!dispatch && !events.some(event => event.source_task_id === task || event.source === task)) throw new Error("learning check requires a recorded task, proposal or correction source");
@@ -315,7 +317,7 @@ export async function checkLearning(root: string, task: string, outcome: string,
     if ((await inboxRecords(root)).some((event) => event.source_task_id === task && event.type === "review_decided" && event.decision === "changes_requested")) triggers = [...new Set([...triggers, "user_correction"])];
     const sequence = await nextSequence(root);
     const event = { id: `evt_learning_${sequence}`, sequence, type: "learning_checked", title: "Learning check", summary: reason, created_at: new Date().toISOString(), source_task_id: task, outcome, learning_reason: reason, reviewed_by: reviewer, lesson_ids: [...new Set(ids)], triggers: [...new Set(triggers)], work_sequence: workVersion(events, task) };
-    await appendFile(join(root, ".agent-ship/events.jsonl"), `${JSON.stringify(event)}\n`);
+    await appendFile(join(root, ".crewvane/events.jsonl"), `${JSON.stringify(event)}\n`);
     return event;
   });
 }

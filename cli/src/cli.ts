@@ -1,3 +1,4 @@
+import { workspaceCommand } from "./workspace.js";
 import { readFile, writeFile, mkdir, rename } from "node:fs/promises";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -53,67 +54,72 @@ const defaultIo: Io = {
   },
 };
 
-const USAGE = `agent-ship — local inbox, path check, and notify
+const USAGE = `crewvane — local inbox, path check, and notify
 
 Usage:
-  agent-ship intake add --text TEXT --project ID [--id ID] [--by REF] [--channel chat|cli|im|agent|ci] [--root DIR]
-  agent-ship intake list [--state open|claimed|done|dropped|all] [--root DIR]
-  agent-ship intake claim ID --by OWNER [--lane ID] [--root DIR]
-  agent-ship intake update ID --state done|dropped [--root DIR]
-  agent-ship status [--brief] [--root DIR]
-  agent-ship status decisions [--root DIR]
-  agent-ship captain heartbeat [--busy-until ISO] [--root DIR]
-  agent-ship authority init --human REF --captain REF [--root DIR]
-  agent-ship authority status [--root DIR]
-  agent-ship contract freeze --contract ID --by HUMAN --accepted-text TEXT [--root DIR]
-  agent-ship limits set --global-max-parallel N --by HUMAN [--root DIR]
-  agent-ship role list|show [ID] [--root DIR]
-  agent-ship guard tool --input FILE [--repo DIR] [--root DIR]
-  agent-ship guard command --argv JSON [--root DIR]
-  agent-ship slice open (same arguments as slice start; --repo required; prepares checkout/packet but does not spawn)
-  agent-ship intake --text TEXT [--id ID] [--root DIR]
-  agent-ship intake --direct --text TEXT --allowed GLOB --forbidden GLOB --accepted-by HUMAN --accepted-text TEXT [--id ID] [--root DIR]
-  agent-ship guard [--contract ID] [--repo DIR] [--staged] [--root DIR]
-  agent-ship doctor [--repo DIR] [--root DIR]
-  agent-ship correction add --text TEXT --scope event|lesson|handbook --source proposal:ID|contract:ID|task:ID|session:ID --corrected-by HUMAN [--project ID|--team] [--when TEXT --action TEXT] [--tag TAG ...] [--root DIR]
-  agent-ship learning extract [--since ISO] [--project ID] [--dry-run] [--root DIR]
-  agent-ship learning review [--outcome none|candidate --reason TEXT] [--project ID] [--root DIR]
-  agent-ship handbook propose --from-lesson ID [--root DIR]
-  agent-ship watchdog status|doctor [--root DIR]
-  agent-ship setup|init [--state-root DIR] [--shared] [--handbook FILE] [--lessons DIR] [--uninstall] [--purge] [--root DIR]
-  agent-ship team context [--auto] [--tag TAG ...] [--project ID] [--repo DIR] [--root DIR]
-  agent-ship lesson search [--tag TAG ...] [--project ID] [--root DIR]
-  agent-ship lesson show --id ID [--root DIR]
-  agent-ship lesson add --input FILE [--auto] [--demand TAG ...] [--root DIR]
-  agent-ship lesson review --id ID --status active|needs_review|retired --reviewed-by REF --note TEXT [--review-after DATE] [--root DIR]
-  agent-ship lesson check --source-task-id ID --outcome none|candidate --reason TEXT --reviewed-by REF [--candidate-id ID ...] [--trigger TYPE ...] [--root DIR]
-  agent-ship lesson pending [--source-task-id ID] [--handbook] [--root DIR]
-  agent-ship check --contract ID [--repo DIR] [--slice ID] [--base REF] [--head REF] [--staged] [--root DIR]
-  agent-ship check --hard-rules [--repo DIR] [--base REF] [--head REF] [--staged] [--root DIR]
-  agent-ship promote --kind hook|contract|verify --message TEXT
+  crewvane workspace status|scan [--probe all|omp|codex|dsh] [--root DIR]
+  crewvane workspace apply --input FILE [--root DIR]
+  crewvane workspace run [--until-idle] [--root DIR]
+  crewvane legacy uninstall [--project DIR] [--home DIR] [--dry-run]
+  crewvane migrate --project DIR [--dry-run]
+  crewvane intake add --text TEXT --project ID [--id ID] [--by REF] [--channel chat|cli|im|agent|ci] [--root DIR]
+  crewvane intake list [--state open|claimed|done|dropped|all] [--root DIR]
+  crewvane intake claim ID --by OWNER [--lane ID] [--root DIR]
+  crewvane intake update ID --state done|dropped [--root DIR]
+  crewvane status [--brief] [--root DIR]
+  crewvane status decisions [--root DIR]
+  crewvane captain heartbeat [--busy-until ISO] [--root DIR]
+  crewvane authority init --human REF --captain REF [--root DIR]
+  crewvane authority status [--root DIR]
+  crewvane contract freeze --contract ID --by HUMAN --accepted-text TEXT [--root DIR]
+  crewvane limits set --global-max-parallel N --by HUMAN [--root DIR]
+  crewvane role list|show [ID] [--root DIR]
+  crewvane guard tool --input FILE [--repo DIR] [--root DIR]
+  crewvane guard command --argv JSON [--root DIR]
+  crewvane slice open (same arguments as slice start; --repo required; prepares checkout/packet but does not spawn)
+  crewvane intake --text TEXT [--id ID] [--root DIR]
+  crewvane intake --direct --text TEXT --allowed GLOB --forbidden GLOB --accepted-by HUMAN --accepted-text TEXT [--id ID] [--root DIR]
+  crewvane guard [--contract ID] [--repo DIR] [--staged] [--root DIR]
+  crewvane doctor [--repo DIR] [--root DIR]
+  crewvane correction add --text TEXT --scope event|lesson|handbook --source proposal:ID|contract:ID|task:ID|session:ID --corrected-by HUMAN [--project ID|--team] [--when TEXT --action TEXT] [--tag TAG ...] [--root DIR]
+  crewvane learning extract [--since ISO] [--project ID] [--dry-run] [--root DIR]
+  crewvane learning review [--outcome none|candidate --reason TEXT] [--project ID] [--root DIR]
+  crewvane handbook propose --from-lesson ID [--root DIR]
+  crewvane watchdog status|doctor [--root DIR]
+  crewvane setup|init [--state-root DIR] [--shared] [--handbook FILE] [--lessons DIR] [--uninstall] [--purge] [--root DIR]
+  crewvane team context [--auto] [--tag TAG ...] [--project ID] [--repo DIR] [--root DIR]
+  crewvane lesson search [--tag TAG ...] [--project ID] [--root DIR]
+  crewvane lesson show --id ID [--root DIR]
+  crewvane lesson add --input FILE [--auto] [--demand TAG ...] [--root DIR]
+  crewvane lesson review --id ID --status active|needs_review|retired --reviewed-by REF --note TEXT [--review-after DATE] [--root DIR]
+  crewvane lesson check --source-task-id ID --outcome none|candidate --reason TEXT --reviewed-by REF [--candidate-id ID ...] [--trigger TYPE ...] [--root DIR]
+  crewvane lesson pending [--source-task-id ID] [--handbook] [--root DIR]
+  crewvane check --contract ID [--repo DIR] [--slice ID] [--base REF] [--head REF] [--staged] [--root DIR]
+  crewvane check --hard-rules [--repo DIR] [--base REF] [--head REF] [--staged] [--root DIR]
+  crewvane promote --kind hook|contract|verify --message TEXT
                        (--inbox ID | --source TEXT) [--glob PATH ...]
                        [--command-hint TEXT] [--id hr_...] [--tag TAG ...] [--root DIR]
-  agent-ship eval --fixture DIR [--json]
-  agent-ship watchdog [--stale-minutes N] [--root DIR]
-  agent-ship watchdog install|uninstall [--dry-run] [--root DIR]
-  agent-ship slice start --contract ID --slice ID --source-task-id ID
+  crewvane eval --fixture DIR [--json]
+  crewvane watchdog [--stale-minutes N] [--root DIR]
+  crewvane watchdog install|uninstall [--dry-run] [--root DIR]
+  crewvane slice start --contract ID --slice ID --source-task-id ID
                        --title TEXT --summary TEXT [--repo DIR] [--base REF] [--replace] [--allow-untimed] [--worker REF] [--proposal ID] [--tag TAG ...] [--project ID] [--root DIR]
-  agent-ship slice update --source-task-id ID --status STATUS [--summary TEXT] [--root DIR]
-  agent-ship status --stale [--stale-minutes N] [--root DIR]
-  agent-ship inbox add --title TEXT --summary TEXT --source-task-id ID
+  crewvane slice update --source-task-id ID --status STATUS [--summary TEXT] [--root DIR]
+  crewvane status --stale [--stale-minutes N] [--root DIR]
+  crewvane inbox add --title TEXT --summary TEXT --source-task-id ID
                        [--type needs_review|blocked|needs_approval]
                        [--priority normal|high] [--evidence URL ...]
                        [--pr URL] [--issue URL] [--path PATH]
                        [--id evt_...] [--root DIR]
-  agent-ship inbox list [--type TYPE] [--priority normal|high]
+  crewvane inbox list [--type TYPE] [--priority normal|high]
                        [--sort priority] [--all] [--json] [--root DIR]
-  agent-ship inbox decide ID accept|changes_requested|reject
+  crewvane inbox decide ID accept|changes_requested|reject
                        [--note TEXT] [--promote hook|contract|verify|none]
                        [--glob PATH ...] [--message TEXT] [--source TEXT]
                        [--command-hint TEXT] [--id hr_...] [--tag TAG ...] [--root DIR]
-  agent-ship notify dry-run --policy FILE --allowlist FILE
+  crewvane notify dry-run --policy FILE --allowlist FILE
                        (--latest | --event FILE) [--action ARGV] [--root DIR]
-  agent-ship notify run --policy FILE --allowlist FILE
+  crewvane notify run --policy FILE --allowlist FILE
                        (--latest | --event FILE) [--action ARGV] [--root DIR]
 
 lesson add --auto writes a candidate under <lessons>/auto/ and records a demand fingerprint
@@ -128,7 +134,7 @@ shared AGENTS.md rules section, team profile and handbook. setup never sets core
 notify dry-run prints a plan and does not start a command.
 notify run starts the allowlisted argv with no shell, and only when the plan allows it.
 A high-priority needs_review with no evidence URLs is not paged.
-promote writes .agent-ship/hard-rules.json on this clone only. It does not merge,
+promote writes .crewvane/hard-rules.json on this clone only. It does not merge,
 deploy, or add CI. inbox decide --promote defaults to none.
 eval compares a fixture's expected checkpoints with the current check, notify, and skill gates.
 Exit 0 when they match; non-zero on regression. Use it when changing ship-* skills or those gates.
@@ -432,7 +438,7 @@ async function inboxDecide(parsed: ParsedArgs, io: Io): Promise<number> {
 
 async function runPromote(parsed: ParsedArgs, io: Io): Promise<number> {
   if (parsed.positionals.length > 1) {
-    throw new Error("usage: agent-ship promote --kind hook|contract|verify --message TEXT (--inbox ID | --source TEXT)");
+    throw new Error("usage: crewvane promote --kind hook|contract|verify --message TEXT (--inbox ID | --source TEXT)");
   }
   if (parsed.values.has("promote")) throw new Error("promote takes --kind; --promote belongs on inbox decide");
   const root = one(parsed.values, "root") ?? process.cwd();
@@ -495,7 +501,7 @@ async function notifyCommand(parsed: ParsedArgs, io: Io, execute: boolean): Prom
 
 async function runSetup(parsed: ParsedArgs, io: Io): Promise<number> {
   if (parsed.positionals.length > 1) {
-    throw new Error("usage: agent-ship setup [--shared] [--uninstall] [--purge]");
+    throw new Error("usage: crewvane setup [--shared] [--uninstall] [--purge]");
   }
   const root = one(parsed.values, "root") ?? process.cwd();
   const report = await setupProject(root, {
@@ -550,7 +556,7 @@ async function runWatchdogCommand(parsed: ParsedArgs, io: Io): Promise<number> {
     throw new Error("--stale-minutes must be a positive number");
   }
   const at = new Date().toISOString();
-  const healthPath = join(root, ".agent-ship/watchdog-health.json");
+  const healthPath = join(root, ".crewvane/watchdog-health.json");
   let lastSuccess: string | undefined;
   try { const prior = JSON.parse(await readFile(healthPath, "utf8")) as { last_success_at?: string }; lastSuccess = prior.last_success_at; } catch { /* First run or damaged health record: replace with this result. */ }
   async function recordHealth(code: number) {
@@ -559,7 +565,7 @@ async function runWatchdogCommand(parsed: ParsedArgs, io: Io): Promise<number> {
     await rename(temporary, healthPath);
   }
   let report;
-  await mkdir(join(root, ".agent-ship"), { recursive: true });
+  await mkdir(join(root, ".crewvane"), { recursive: true });
   try {
     report = await runWatchdog(root, { staleMinutes });
     await recordHealth(0);
@@ -577,7 +583,7 @@ async function warnIfTimerInactive(root: string, io: Io): Promise<void> {
   if (slices.length === 0) return;
   const status = await watchdogStatus(root);
   if (status.registered && status.healthy !== false) return;
-  io.stderr(`warning: active slices are not reliably monitored: ${status.warning ?? "timer inactive"}. Run: agent-ship watchdog doctor\n`);
+  io.stderr(`warning: active slices are not reliably monitored: ${status.warning ?? "timer inactive"}. Run: crewvane watchdog doctor\n`);
 }
 
 function printTimer(result: { warning?: string }, io: Io): void {
@@ -585,7 +591,7 @@ function printTimer(result: { warning?: string }, io: Io): void {
 }
 
 async function runEval(parsed: ParsedArgs, io: Io): Promise<number> {
-  if (parsed.positionals.length > 1) throw new Error("usage: agent-ship eval --fixture DIR");
+  if (parsed.positionals.length > 1) throw new Error("usage: crewvane eval --fixture DIR");
   const report = await runEvalFixture(requireOne(parsed.values, "fixture"));
   io.stdout(parsed.flags.has("json") ? `${JSON.stringify(report, null, 2)}\n` : formatEvalReport(report));
   return report.ok ? 0 : 1;
@@ -635,6 +641,8 @@ async function readGuardInput(path: string): Promise<string> {
 }
 
 export async function main(argv: string[], io: Io = defaultIo): Promise<number> {
+  const workspace = await workspaceCommand(argv, io);
+  if (workspace !== null) return workspace;
   let parsed: ParsedArgs;
   try {
     parsed = parseArgs(argv);

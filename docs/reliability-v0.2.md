@@ -9,7 +9,7 @@
 自动探测只覆盖这些已知目录，不代表支持主机上任意 Agent。OMP 使用
 `~/.omp/agent/skills`，共享目录为 `~/.agents/skills`。
 
-默认 setup 保留 tracked `AGENTS.md`；规则写在 `.agent-ship/AGENTS.local.md` 时，
+默认 setup 保留 tracked `AGENTS.md`；规则写在 `.crewvane/AGENTS.local.md` 时，
 输出 `rules_auto_loaded: false` 和 warnings。当前会话显式读取该文件；下一会话
 需配置宿主加载入口，或在共享 adoption 获授权后使用 `setup --shared`。
 CLI 的 required_sources 也包含这份本地规则，但这不能证明宿主模型已经读过。
@@ -17,9 +17,9 @@ CLI 的 required_sources 也包含这份本地规则，但这不能证明宿主�
 ## 先登记，再在授权范围内执行
 
 ```sh
-agent-ship intake --text '给任务列表增加仅未完成过滤'
-agent-ship doctor
-agent-ship guard
+crewvane intake --text '给任务列表增加仅未完成过滤'
+crewvane doctor
+crewvane guard
 ```
 
 intake 创建幂等的 draft，保留原始请求；只读调查可以完善方案。没有匹配冻结
@@ -33,7 +33,7 @@ intake 创建幂等的 draft，保留原始请求；只读调查可以完善方�
 人明确要求直接执行时，可记录一个轻量但完整的冻结范围：
 
 ```sh
-agent-ship intake --direct --id direct_filter --text '完成过滤功能并通过验收' \
+crewvane intake --direct --id direct_filter --text '完成过滤功能并通过验收' \
   --allowed 'src/tasks/**' --forbidden '.env*' \
   --accepted-by '项目负责人' --accepted-text '明确授权直接完成上述范围'
 ```
@@ -63,9 +63,9 @@ slice start、check、待审输出提供相关经验并记录 lesson_used。注�
 ## 定时器注册与运行健康分别检查
 
 ```sh
-agent-ship watchdog status
-agent-ship watchdog doctor
-agent-ship watchdog uninstall
+crewvane watchdog status
+crewvane watchdog doctor
+crewvane watchdog uninstall
 ```
 
 slice start 在注册失败或已知运行失败时拒绝派工，失败不消耗 task id。显式

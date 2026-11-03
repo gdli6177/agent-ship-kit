@@ -4,7 +4,7 @@ description: >-
   Slash command /ship-notify. The skill name is ship-notify, matching that
   command, so hosts that support skills load this file when the human types
   /ship-notify. Plan or send a notification from a markdown policy and an
-  argv allowlist by calling agent-ship notify dry-run or notify run. Also
+  argv allowlist by calling crewvane notify dry-run or notify run. Also
   use when a needs_review, blocked, or needs_approval event should reach the
   human, or when editing notify policy.
 ---
@@ -22,7 +22,7 @@ for a high-priority `needs_review` that has evidence, or for `blocked` /
 
 ## Parallel lanes and authority (v0.2)
 
-Read `$HOME/.agent-ship-kit/current/docs/owner-lanes.md` (or the actual kit clone). One human-facing captain routes a durable `intake add/list/claim` queue; temporary owners hold independent lanes and coordinate scouts/workers/verifiers. Keep one current proposal **per lane**. The captain delegates repository inspection/tests/Git work and returns a concise conclusion/tradeoff/evidence/recommendation/id list. External channels enqueue only.
+Read `$HOME/.crewvane/current/docs/owner-lanes.md` (or the actual kit clone). One human-facing captain routes a durable `intake add/list/claim` queue; temporary owners hold independent lanes and coordinate scouts/workers/verifiers. Keep one current proposal **per lane**. The captain delegates repository inspection/tests/Git work and returns a concise conclusion/tradeoff/evidence/recommendation/id list. External channels enqueue only.
 
 The trusted host binds actors, initializes human/captain authority, connects `scripts/host-pre-tool.mjs`, and starts each captain turn with heartbeat outside model-controlled tools. Never choose another actor or reset your own budget. Registered human channel alone freezes/decides/changes limits; captain alone executes notification. Owners/workers only return lane artifacts/inbox. These application guards require host authentication and sandbox enforcement; local env names alone are not authenticated identities.
 
@@ -42,8 +42,8 @@ The example policy has an Instructions section the captain reads. Structured
 free-text section into an argv and pass `--action`. The allowlist and the
 empty-evidence refusal still apply.
 
-Policy: `.agent-ship/notify.policy.md` after `/ship-setup`, or `$HOME/.agent-ship-kit/current/templates/notify.policy.example.md`.
-Allowlist: `.agent-ship/notify.allowlist.json`, or `$HOME/.agent-ship-kit/current/templates/notify.allowlist.example.json`.
+Policy: `.crewvane/notify.policy.md` after `/ship-setup`, or `$HOME/.crewvane/current/templates/notify.policy.example.md`.
+Allowlist: `.crewvane/notify.allowlist.json`, or `$HOME/.crewvane/current/templates/notify.allowlist.example.json`.
 Prefer an exact subcommand such as `multica issue create --assignee me *`.
 Do not widen that to `multica *`.
 The parser and the match rules are normative in `docs/ARCHITECTURE.md`.
@@ -56,12 +56,12 @@ The parser and the match rules are normative in `docs/ARCHITECTURE.md`.
 
 ## Dry-run
 
-Run this in the project directory. Use `agent-ship` on `PATH`. If that command is not found, use `node $HOME/.agent-ship-kit/current/cli/bin/agent-ship.js` with the same arguments.
+Run this in the project directory. Use `crewvane` on `PATH`. If that command is not found, use `node $HOME/.crewvane/current/cli/bin/crewvane.js` with the same arguments.
 
 ```bash
-agent-ship notify dry-run --latest \
-  --policy .agent-ship/notify.policy.md \
-  --allowlist .agent-ship/notify.allowlist.json
+crewvane notify dry-run --latest \
+  --policy .crewvane/notify.policy.md \
+  --allowlist .crewvane/notify.allowlist.json
 ```
 
 Use `--event <file.json>` instead of `--latest` when the event is not the newest open inbox item. Add `--action 'multica issue create --assignee me --title from-captain'` only when the free-text section told you to plan an argv the rules did not already name.

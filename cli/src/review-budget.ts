@@ -206,7 +206,7 @@ export async function assessHumanReview(root: string, contractId: string, contra
       warnings.push(`proposal id ${proposalId} is not a file id; human review budget checked on the contract only`);
     } else {
       try {
-        const proposal = await readFile(join(root, ".agent-ship", "proposals", `${proposalId}.md`), "utf8");
+        const proposal = await readFile(join(root, ".crewvane", "proposals", `${proposalId}.md`), "utf8");
         const parsed = parseHumanReviewBudget(proposal, "proposal");
         if (!parsed.present) {
           warnings.push(`proposal ${proposalId} has no Human review budget section; older card, not a failure`);

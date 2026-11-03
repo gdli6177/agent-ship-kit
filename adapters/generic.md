@@ -72,10 +72,10 @@ that subscription.
 
 ## Watchdog schedule
 
-Something outside the captain runs `agent-ship watchdog` on a timer. The
+Something outside the captain runs `crewvane watchdog` on a timer. The
 adapter appends a `worker_progress` event when the slice makes real progress.
 No heartbeat before the stale window (default 30 minutes, or
-`stale_minutes` in `.agent-ship/limits.json`) becomes a `blocked` item with
+`stale_minutes` in `.crewvane/limits.json`) becomes a `blocked` item with
 `reason: stalled`.
 
 ## Not these calls

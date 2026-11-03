@@ -92,7 +92,7 @@ test("single handbook correction enters review queue; secrets are rejected befor
   assert.equal((await call(root, "lesson", "pending", "--handbook")).json().total_count, 1);
   const bad = await call(root, "correction", "add", "--text", "token=really-private-value", "--scope", "event", "--source", "proposal:proposal_test", "--corrected-by", "Test human");
   assert.equal(bad.code, 1);
-  assert.doesNotMatch(await readFile(join(root, ".agent-ship/events.jsonl"), "utf8"), /really-private-value/);
+  assert.doesNotMatch(await readFile(join(root, ".crewvane/events.jsonl"), "utf8"), /really-private-value/);
 }));
 
 test("a new proposal cannot borrow an older direct authorization", () => fixture(async root => {

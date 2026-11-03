@@ -31,7 +31,7 @@ allowlisted argv with no shell, and only when `allow` is true.
 This Instructions section is the slow path. The `## Rule:` blocks below are
 the fast path. A push stays under 100 words, asks for a decision, and names
 `/ship-inbox <id>`. Speculative drafts are off unless
-`.agent-ship/limits.json` sets `"speculative": true`. Even then the captain
+`.crewvane/limits.json` sets `"speculative": true`. Even then the captain
 does not dispatch or edit code without a frozen contract, and it only shows
 the owner a draft that already has evidence.
 

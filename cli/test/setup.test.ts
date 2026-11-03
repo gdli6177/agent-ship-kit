@@ -29,7 +29,7 @@ async function git(root: string, args: string[]): Promise<string> {
 }
 
 async function repo(): Promise<string> {
-  const root = await mkdtemp(join(tmpdir(), "agent-ship-setup-"));
+  const root = await mkdtemp(join(tmpdir(), "crewvane-setup-"));
   await git(root, ["init", "-b", "main"]);
   await git(root, ["config", "user.email", "test@example.com"]);
   await git(root, ["config", "user.name", "Test"]);
@@ -54,8 +54,8 @@ test("setup is local, idempotent, chains hooks, and uninstalls cleanly", async (
     assert.equal(report.shared, false);
     assert.equal(await readFile(join(root, ".gitignore"), "utf8"), ignoreBefore);
     const exclude = await readFile(join(root, ".git", "info", "exclude"), "utf8");
-    assert.match(exclude, /# agent-ship-exclude-start/);
-    assert.match(exclude, /\.agent-ship\//);
+    assert.match(exclude, /# crewvane-exclude-start/);
+    assert.match(exclude, /\.crewvane\//);
     assert.match(exclude, /\.env\*/);
     assert.match(exclude, /\*\.storage-state\.json/);
     assert.match(exclude, /^AGENTS\.md$/m);
@@ -64,12 +64,12 @@ test("setup is local, idempotent, chains hooks, and uninstalls cleanly", async (
     assert.equal(agents.split(RULES_END).length - 1, 1);
     const hook = await readFile(join(root, ".git", "hooks", "pre-commit"), "utf8");
     assert.match(hook, new RegExp(HOOK_START));
-    assert.match(hook, /agent-ship-chain/);
-    assert.equal(await readFile(join(root, ".git", "hooks", "pre-commit.agent-ship-chain"), "utf8"), foreign);
+    assert.match(hook, /crewvane-chain/);
+    assert.equal(await readFile(join(root, ".git", "hooks", "pre-commit.crewvane-chain"), "utf8"), foreign);
     await assert.rejects(git(root, ["config", "--local", "--get", "core.hooksPath"]));
     const status = await git(root, ["status", "--short"]);
     assert.equal(status.includes("AGENTS.md"), false);
-    assert.equal(status.includes(".agent-ship"), false);
+    assert.equal(status.includes(".crewvane"), false);
 
     const second = capture();
     assert.equal(await main(["init", "--root", root], second.io), 0);
@@ -87,10 +87,10 @@ test("setup is local, idempotent, chains hooks, and uninstalls cleanly", async (
     assert.match(await readFile(trace, "utf8"), /foreign-hook/);
 
     await writeFile(
-      join(root, ".agent-ship", "contracts", "contract_auth.md"),
+      join(root, ".crewvane", "contracts", "contract_auth.md"),
       "# Contract\n\n## Allowed paths\n\n- src/**\n\n## Forbidden paths\n\n- .env*\n",
     );
-    await writeFile(join(root, ".agent-ship", "active-contract"), "contract_auth\n");
+    await writeFile(join(root, ".crewvane", "active-contract"), "contract_auth\n");
     await writeFile(join(root, ".env"), "nope\n");
     await git(root, ["add", "-f", ".env"]);
     const blocked = spawnSync(join(root, ".git", "hooks", "pre-commit"), [], { cwd: root, encoding: "utf8" });
@@ -115,7 +115,7 @@ test("setup is local, idempotent, chains hooks, and uninstalls cleanly", async (
       cwd: root,
       encoding: "utf8",
       input: "refs/heads/local aaa refs/heads/main bbb\n",
-      env: { ...process.env, AGENT_SHIP_ALLOW_PROTECTED_PUSH: "1" },
+      env: { ...process.env, CREWVANE_ALLOW_PROTECTED_PUSH: "1" },
     });
     assert.equal(allowed.status, 0);
 
@@ -127,7 +127,7 @@ test("setup is local, idempotent, chains hooks, and uninstalls cleanly", async (
     assert.equal(await readFile(join(root, ".git", "hooks", "pre-commit"), "utf8"), foreign);
     await assert.rejects(readFile(join(root, "AGENTS.md"), "utf8"));
     const excludeAfter = await readFile(join(root, ".git", "info", "exclude"), "utf8");
-    assert.match(excludeAfter, /# agent-ship-exclude-start\n\.agent-ship\/\n# agent-ship-exclude-end/);
+    assert.match(excludeAfter, /# crewvane-exclude-start\n\.crewvane\/\n# crewvane-exclude-end/);
     assert.equal(excludeAfter.includes(".env*"), false);
     assert.equal(await readFile(join(root, ".gitignore"), "utf8"), ignoreBefore);
     await assert.rejects(git(root, ["config", "--local", "--get", "core.hooksPath"]));
@@ -147,11 +147,11 @@ test("uninstall leaves git status empty when data is kept and when it is purged"
       assert.equal((await git(root, ["status", "--porcelain"])).trim(), "");
       const exclude = await readFile(join(root, ".git", "info", "exclude"), "utf8");
       if (purge) {
-        await assert.rejects(readFile(join(root, ".agent-ship", "e2e", "index.md"), "utf8"));
-        assert.equal(exclude.includes("agent-ship-exclude-start"), false);
+        await assert.rejects(readFile(join(root, ".crewvane", "e2e", "index.md"), "utf8"));
+        assert.equal(exclude.includes("crewvane-exclude-start"), false);
       } else {
-        assert.match(await readFile(join(root, ".agent-ship", "e2e", "index.md"), "utf8"), /E2E index/);
-        assert.match(exclude, /# agent-ship-exclude-start\n\.agent-ship\/\n# agent-ship-exclude-end/);
+        assert.match(await readFile(join(root, ".crewvane", "e2e", "index.md"), "utf8"), /E2E index/);
+        assert.match(exclude, /# crewvane-exclude-start\n\.crewvane\/\n# crewvane-exclude-end/);
       }
     } finally {
       await rm(root, { recursive: true, force: true });
@@ -167,8 +167,8 @@ test("setup --shared writes gitignore and leaves info/exclude alone", async () =
     assert.equal(await main(["setup", "--shared", "--root", root], ran.io), 0);
     const gitignore = await readFile(join(root, ".gitignore"), "utf8");
     assert.match(gitignore, /node_modules\//);
-    assert.match(gitignore, /# agent-ship-gitignore-start/);
-    assert.match(gitignore, /\.agent-ship\//);
+    assert.match(gitignore, /# crewvane-gitignore-start/);
+    assert.match(gitignore, /\.crewvane\//);
     assert.match(gitignore, /\.env\*/);
     const exclude = await readFile(join(root, ".git", "info", "exclude"), "utf8");
     assert.equal(exclude, excludeBefore);
@@ -187,7 +187,7 @@ test("local setup does not edit a tracked AGENTS.md", async () => {
   try {
     assert.equal(await main(["setup", "--root", root], capture().io), 0);
     assert.equal(await readFile(join(root, "AGENTS.md"), "utf8"), "# Team rules\n\nKeep this shared.\n");
-    assert.match(await readFile(join(root, ".agent-ship", "AGENTS.local.md"), "utf8"), /captain conversation you are a router, not an executor/);
+    assert.match(await readFile(join(root, ".crewvane", "AGENTS.local.md"), "utf8"), /captain conversation you are a router, not an executor/);
     const status = await git(root, ["status", "--short"]);
     assert.equal(status.includes("AGENTS.md"), false);
   } finally {

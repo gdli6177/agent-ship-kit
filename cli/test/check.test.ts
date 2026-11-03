@@ -15,7 +15,7 @@ async function git(root: string, args: string[]): Promise<void> {
 }
 
 async function repo(): Promise<string> {
-  const root = await mkdtemp(join(tmpdir(), "agent-ship-check-"));
+  const root = await mkdtemp(join(tmpdir(), "crewvane-check-"));
   await git(root, ["init", "-b", "main"]);
   await git(root, ["config", "user.email", "test@example.com"]);
   await git(root, ["config", "user.name", "Test"]);
@@ -55,8 +55,8 @@ test("path rules flag forbidden matches and paths outside the allow list", () =>
 test("check compares the branch to base with plain git and fails closed", async () => {
   const root = await repo();
   try {
-    await mkdir(join(root, ".agent-ship", "contracts"), { recursive: true });
-    await writeFile(join(root, ".agent-ship", "contracts", "contract_auth.md"), contract);
+    await mkdir(join(root, ".crewvane", "contracts"), { recursive: true });
+    await writeFile(join(root, ".crewvane", "contracts", "contract_auth.md"), contract);
     await git(root, ["checkout", "-b", "ship/contract_auth/slice"]);
     await mkdir(join(root, "src"), { recursive: true });
     await writeFile(join(root, "src", "app.ts"), "export const ok = true;\n");

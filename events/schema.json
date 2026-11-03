@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://github.com/gdli6177/agent-ship-kit/blob/main/events/schema.json",
-  "title": "agent-ship-kit event",
+  "$id": "https://github.com/gdli6177/crewvane/blob/main/events/schema.json",
+  "title": "crewvane event",
   "description": "Acceptance and attention events emitted around the captain. An event never authorizes a merge to main or a production deploy. needs_review, blocked, and needs_approval are inbox items a human acts on. review_decided closes one of those items. The other types are lifecycle siblings that share this envelope.",
   "type": "object",
   "additionalProperties": false,
@@ -130,7 +130,7 @@
     "reason": {
       "type": "string",
       "enum": ["stalled", "drift", "other"],
-      "description": "Why a blocked item was filed. stalled means no heartbeat; drift means agent-ship check failed."
+      "description": "Why a blocked item was filed. stalled means no heartbeat; drift means crewvane check failed."
     },
     "status": {
       "type": "string",
@@ -225,7 +225,7 @@
       "links": {
         "pr": "https://example.com/pull/12",
         "issue": "https://example.com/issues/4",
-        "path": ".agent-ship/packets/task_auth_mw.md"
+        "path": ".crewvane/packets/task_auth_mw.md"
       },
       "contract_id": "contract_auth",
       "slice_id": "auth-middleware",

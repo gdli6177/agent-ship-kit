@@ -18,7 +18,7 @@ export function digest(text: string): string { return createHash("sha256").updat
 export function laneId(value?: string): string { return value ? safeId(value) : "default"; }
 export function pointer(name: string, lane?: string): string {
   const id = laneId(lane);
-  return `.agent-ship/${name}${id === "default" ? "" : `.${id}`}`;
+  return `.crewvane/${name}${id === "default" ? "" : `.${id}`}`;
 }
 export function sliceRows(markdown: string): { id: string; role: string }[] {
   const section = markdown.split(/^##[ \t]+/m).find(part => /^Slices\b/i.test(part)) ?? "";

@@ -27,7 +27,7 @@ import {
 const ID_PATTERN = /^evt_[A-Za-z0-9_-]+$/;
 
 export function inboxFile(root: string): string {
-  return join(root, ".agent-ship", "inbox.jsonl");
+  return join(root, ".crewvane", "inbox.jsonl");
 }
 
 export function newEventId(now = new Date()): string {
@@ -156,12 +156,12 @@ export async function listInbox(root: string, options: ListInboxOptions = {}): P
 
 async function appendRecord(root: string, record: InboxRecord): Promise<void> {
   const file = inboxFile(root);
-  await mkdir(join(root, ".agent-ship"), { recursive: true });
+  await mkdir(join(root, ".crewvane"), { recursive: true });
   await appendFile(file, `${JSON.stringify(record)}\n`, "utf8");
 }
 
 export async function addInboxItem(root: string, input: InboxAddInput, internalWatchdog = false): Promise<AttentionEvent> {
-  return withLock(join(root, ".agent-ship"), async () => {
+  return withLock(join(root, ".crewvane"), async () => {
     const title = requiredText(input.title, "title");
     const summary = assertSummary(input.summary);
     const sourceTaskId = requiredText(input.sourceTaskId, "source_task_id");
@@ -248,7 +248,7 @@ export async function decideInboxItem(
   decision: Decision,
   note?: string,
 ): Promise<ReviewDecidedEvent> {
-  return withLock(join(root, ".agent-ship"), async () => {
+  return withLock(join(root, ".crewvane"), async () => {
     await assertInboxActor(root, undefined, true);
     const id = requiredText(subjectId, "id");
     const all = await readInbox(root);

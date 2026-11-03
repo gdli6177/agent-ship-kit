@@ -48,7 +48,7 @@ export async function assertSingleRepository(root: string, patterns: string[]): 
     for (const entry of entries) {
       // Dependencies and Git internals cannot be contract source paths.
       if (entry.isSymbolicLink() && await exists(join(path, entry.name, ".git"))) throw new Error(`nested Git repository ${join(path, entry.name)}; use --repo`);
-      if (entry.isDirectory() && ![".git", "node_modules", ".agent-ship"].includes(entry.name)) await inspect(join(path, entry.name));
+      if (entry.isDirectory() && ![".git", "node_modules", ".crewvane"].includes(entry.name)) await inspect(join(path, entry.name));
     }
   }
   for (const pattern of patterns) {

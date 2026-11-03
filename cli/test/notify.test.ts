@@ -205,7 +205,7 @@ test("only notify run spawns, and it does so without a shell", async () => {
 
 test("event schema is JSON and describes needs_review", async () => {
   const schema = JSON.parse(await readFile(new URL("../../events/schema.json", import.meta.url), "utf8"));
-  assert.equal(schema.title, "agent-ship-kit event");
+  assert.equal(schema.title, "crewvane event");
   assert.ok(schema.properties.priority.enum.includes("high"));
   assert.ok(schema.properties.priority.enum.includes("normal"));
   assert.deepEqual(schema.properties.links.properties && Object.keys(schema.properties.links.properties).sort(), [

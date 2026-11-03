@@ -1,7 +1,7 @@
 ---
 name: ship-inbox
 description: >-
-  Review results in an agent-ship-kit captain conversation when the user
+  Review results in an crewvane captain conversation when the user
   says 看看结果、有什么要我确认、通过、要改 or 不要了. Resolve the current
   review item from context; ask only when the target is ambiguous. Also
   supports /ship-inbox with an optional event id and notification deep links.
@@ -18,11 +18,11 @@ link. The CLI subcommands stay `inbox list` and `inbox decide`.
 
 The captain files an item only after the verifier agrees. A worker's summary
 is not evidence until it points at something the human can open. Templates
-live in the kit at `$HOME/.agent-ship-kit/current/templates/`.
+live in the kit at `$HOME/.crewvane/current/templates/`.
 
 ## Parallel lanes and authority (v0.2)
 
-Read `$HOME/.agent-ship-kit/current/docs/owner-lanes.md` (or the actual kit clone). One human-facing captain routes a durable `intake add/list/claim` queue; temporary owners hold independent lanes and coordinate scouts/workers/verifiers. Keep one current proposal **per lane**. The captain delegates repository inspection/tests/Git work and returns a concise conclusion/tradeoff/evidence/recommendation/id list. External channels enqueue only.
+Read `$HOME/.crewvane/current/docs/owner-lanes.md` (or the actual kit clone). One human-facing captain routes a durable `intake add/list/claim` queue; temporary owners hold independent lanes and coordinate scouts/workers/verifiers. Keep one current proposal **per lane**. The captain delegates repository inspection/tests/Git work and returns a concise conclusion/tradeoff/evidence/recommendation/id list. External channels enqueue only.
 
 The trusted host binds actors, initializes human/captain authority, connects `scripts/host-pre-tool.mjs`, and starts each captain turn with heartbeat outside model-controlled tools. Never choose another actor or reset your own budget. Registered human channel alone freezes/decides/changes limits; captain alone executes notification. Owners/workers only return lane artifacts/inbox. These application guards require host authentication and sandbox enforcement; local env names alone are not authenticated identities.
 
@@ -42,7 +42,7 @@ expansion through a revised proposal and explicit approval, rather than
 treating review feedback as permission to edit the frozen contract.
 
 1. If the request identifies an item by id or unambiguously refers to the displayed card, load that open item. If it is missing or already decided, say so and stop; do not apply the decision to another item.
-2. Otherwise list open items (`agent-ship inbox list --sort priority`) and sort `priority: high` first. Show that list, then start at the top.
+2. Otherwise list open items (`crewvane inbox list --sort priority`) and sort `priority: high` first. Show that list, then start at the top.
 3. Present ONE compact card. Do not paste the worker chat or the whole packet. The card is the inline summary (at most 280 characters) plus the recall chain: contract → slice → worker/branch → PR → evidence, then the risks. Expand a section only when the owner asks.
 4. Wait. Map the reply:
    - `pass` or `通过` → `inbox decide <id> accept`
@@ -52,9 +52,9 @@ treating review feedback as permission to edit the frozen contract.
 
 ## Verifier first
 
-Do not file `needs_review` when the worker says it is done. Spawn the read-only verifier in `templates/verifier-prompt.md` with only the frozen contract and the branch. It re-runs acceptance commands, `agent-ship check --contract <id>`, and the relevant E2E smoke. If it disagrees, send the diff back to the worker. The owner does not see that loop.
+Do not file `needs_review` when the worker says it is done. Spawn the read-only verifier in `templates/verifier-prompt.md` with only the frozen contract and the branch. It re-runs acceptance commands, `crewvane check --contract <id>`, and the relevant E2E smoke. If it disagrees, send the diff back to the worker. The owner does not see that loop.
 
-Copy `templates/review-packet.md` to `.agent-ship/packets/<task_id>.md`.
+Copy `templates/review-packet.md` to `.crewvane/packets/<task_id>.md`.
 The event shape is `events/schema.json`. A finished slice is `needs_review`.
 Mid-task `blocked` and `needs_approval` items are filed by `ship-dispatch`,
 not as review packets. E2E smoke is an evidence row (`ship-e2e`), pointing at
@@ -82,7 +82,7 @@ a report, never at a storageState file.
 Fill every section of `templates/review-packet.md`.
 
 - Summary: what changed, at most 280 characters in the inline card.
-- Human review budget: copy `human_reviews_expected` and the purpose list from the frozen contract. Set `inbox_needs_review_count` to the number of `needs_review` rows for this contract (the same count `agent-ship check` reports, including decided rows) and `this_review_is_for` to the budget line this packet covers, such as 验收. Copy `must_human` and `already_automated` when the contract has them. The human compares the budget with the inbox count. Do not merge.
+- Human review budget: copy `human_reviews_expected` and the purpose list from the frozen contract. Set `inbox_needs_review_count` to the number of `needs_review` rows for this contract (the same count `crewvane check` reports, including decided rows) and `this_review_is_for` to the budget line this packet covers, such as 验收. Copy `must_human` and `already_automated` when the contract has them. The human compares the budget with the inbox count. Do not merge.
 - Evidence table: one row per acceptance line this slice owns. Kind, pointer, result.
 - Commands with exit codes, in a fence. "Tests passed" without a command and a pointer does not count.
 - What was not run.
@@ -94,10 +94,10 @@ Fill every section of `templates/review-packet.md`.
 
 ## Inbox CLI
 
-These are CLI subcommands, not the `/ship-inbox` name. Run them in the project directory. Use `agent-ship` on `PATH`. If that command is not found, use `node $HOME/.agent-ship-kit/current/cli/bin/agent-ship.js` with the same arguments.
+These are CLI subcommands, not the `/ship-inbox` name. Run them in the project directory. Use `crewvane` on `PATH`. If that command is not found, use `node $HOME/.crewvane/current/cli/bin/crewvane.js` with the same arguments.
 
 ```bash
-agent-ship inbox add \
+crewvane inbox add \
   --type needs_review \
   --title "<slice> is ready for review" \
   --summary "<one paragraph, at most 280 characters>" \
@@ -105,7 +105,7 @@ agent-ship inbox add \
   --source-task-id "<task id>" \
   --evidence "<url>" \
   --pr "<url>" \
-  --path ".agent-ship/packets/<task id>.md"
+  --path ".crewvane/packets/<task id>.md"
 ```
 
 Repeat `--evidence` for each pointer, including the E2E report when one ran.
@@ -125,7 +125,7 @@ Then use `ship-notify` for the dry-run. The push text includes `/ship-inbox <id>
 Record the answer on the packet and in the inbox:
 
 ```bash
-agent-ship inbox decide <id> accept|changes_requested|reject
+crewvane inbox decide <id> accept|changes_requested|reject
 ```
 
 That appends `review_decided` with `subject_id` set to the inbox item.
@@ -137,25 +137,25 @@ That appends `review_decided` with `subject_id` set to the inbox item.
 
 ## Promote repeated feedback 把反复出现的意见收成硬规则
 
-A `changes_requested` note that only lives in the inbox will be repeated by the next agent. When the human asks for the same constraint again, offer to promote it into a local hard rule. Do not promote on the first mention, and do not promote unless the human agrees. Promoting writes `.agent-ship/hard-rules.json` on this clone. The file is gitignored with the rest of `.agent-ship/`. It does not edit the frozen contract, does not merge, does not deploy, and does not add a CI job for other contributors. Only a machine that installed the kit runs the local hook.
+A `changes_requested` note that only lives in the inbox will be repeated by the next agent. When the human asks for the same constraint again, offer to promote it into a local hard rule. Do not promote on the first mention, and do not promote unless the human agrees. Promoting writes `.crewvane/hard-rules.json` on this clone. The file is gitignored with the rest of `.crewvane/`. It does not edit the frozen contract, does not merge, does not deploy, and does not add a CI job for other contributors. Only a machine that installed the kit runs the local hook.
 
 Kinds:
 
-- `hook` — path globs the local pre-commit hook and `agent-ship check` reject. Use this when the note says to stop touching files.
+- `hook` — path globs the local pre-commit hook and `crewvane check` reject. Use this when the note says to stop touching files.
 - `contract` — extra forbidden paths. `check` fails closed with the rule id, in the same way contract Forbidden paths do.
 - `verify` — a checklist line for the worker and the verifier. `check` lists it and does not fail the path gate. The verifier runs `command_hint` when the diff matches. The CLI does not run that hint.
 
 ```bash
-agent-ship inbox decide <id> changes_requested --note "<reason>"
+crewvane inbox decide <id> changes_requested --note "<reason>"
 
-agent-ship inbox decide <id> changes_requested \
+crewvane inbox decide <id> changes_requested \
   --note "<reason>" \
   --promote hook \
   --glob ".env*" \
   --message "Do not commit env files." \
   --tag no-env
 
-agent-ship promote \
+crewvane promote \
   --source "Do not commit env files." \
   --kind hook \
   --glob ".env*" \
@@ -166,7 +166,7 @@ agent-ship promote \
 
 The same inbox item and kind updates the existing rule. Pass `--id` to update a specific rule instead of adding a second copy.
 
-同样的审阅意见再次出现时，先问人是否收成硬规则，不要自行 promote。`--promote` 默认 `none`。`hook` 和 `contract` 会让本机 `check` 和 pre-commit 带规则 id 失败；`verify` 只进入核验清单。规则只写在本克隆的 `.agent-ship/hard-rules.json`，不进共享 CI，也不含密钥。
+同样的审阅意见再次出现时，先问人是否收成硬规则，不要自行 promote。`--promote` 默认 `none`。`hook` 和 `contract` 会让本机 `check` 和 pre-commit 带规则 id 失败；`verify` 只进入核验清单。规则只写在本克隆的 `.crewvane/hard-rules.json`，不进共享 CI，也不含密钥。
 
 ## Refusals
 

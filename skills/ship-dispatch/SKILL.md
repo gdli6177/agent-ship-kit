@@ -4,7 +4,7 @@ description: >-
   Slash command /ship-dispatch. The skill name is ship-dispatch, matching
   that command, so hosts that support skills load this file when the human
   types /ship-dispatch. Spawn on-demand workers for a frozen contract under
-  the global cap and max_parallel, and record the slice with agent-ship
+  the global cap and max_parallel, and record the slice with crewvane
   slice start. Also use for 开始、继续、做到哪了 in a captain conversation
   with an identified frozen contract, when a worker is blocked
   or needs approval, or when mapping spawn onto Herdr, Orca, Multica, or a
@@ -16,11 +16,11 @@ description: >-
 The captain is a router, not an executor. Dispatch is a gate in front of
 whatever orchestrator the human already uses. This skill does not schedule a
 fleet, does not keep a worker roster, and does not merge or deploy. Templates
-and adapters live in the kit at `$HOME/.agent-ship-kit/current/`.
+and adapters live in the kit at `$HOME/.crewvane/current/`.
 
 ## Parallel lanes and authority (v0.2)
 
-Read `$HOME/.agent-ship-kit/current/docs/owner-lanes.md` (or the actual kit clone). One human-facing captain routes a durable `intake add/list/claim` queue; temporary owners hold independent lanes and coordinate scouts/workers/verifiers. Keep one current proposal **per lane**. The captain delegates repository inspection/tests/Git work and returns a concise conclusion/tradeoff/evidence/recommendation/id list. External channels enqueue only.
+Read `$HOME/.crewvane/current/docs/owner-lanes.md` (or the actual kit clone). One human-facing captain routes a durable `intake add/list/claim` queue; temporary owners hold independent lanes and coordinate scouts/workers/verifiers. Keep one current proposal **per lane**. The captain delegates repository inspection/tests/Git work and returns a concise conclusion/tradeoff/evidence/recommendation/id list. External channels enqueue only.
 
 The trusted host binds actors, initializes human/captain authority, connects `scripts/host-pre-tool.mjs`, and starts each captain turn with heartbeat outside model-controlled tools. Never choose another actor or reset your own budget. Registered human channel alone freezes/decides/changes limits; captain alone executes notification. Owners/workers only return lane artifacts/inbox. These application guards require host authentication and sandbox enforcement; local env names alone are not authenticated identities.
 
@@ -62,7 +62,7 @@ internal logs or routine learning checks to them. Respect existing approvals;
 
 Every dispatched slice records `contract_id`, `slice_id`, and `thread_refs`
 (PR URL, issue, chat thread) on its `worker_dispatched` event in
-`.agent-ship/events.jsonl`. Follow-up events on a subscribed thread — PR
+`.crewvane/events.jsonl`. Follow-up events on a subscribed thread — PR
 review comments, CI results, chat replies — go straight to the owning worker.
 The captain handles only new or unowned events, and coordination that crosses
 slices. Append a `worker_progress` heartbeat when the worker reports real
@@ -89,8 +89,8 @@ If any line fails, do not spawn. Tell the human which line failed.
 ## Parallel caps
 
 - Global cap: use the shared CLI event/inbox running view for every contract under
-  `.agent-ship/contracts/` whose status is `queued` or `running`. The ceiling
-  is `global_max_parallel` in `.agent-ship/limits.json` when the human put a
+  `.crewvane/contracts/` whose status is `queued` or `running`. The ceiling
+  is `global_max_parallel` in `.crewvane/limits.json` when the human put a
   positive integer there, otherwise 3. Do not raise it yourself.
 - Contract cap: read `max_parallel` from this contract. If the field is
   missing, use 3 and say so. If it is higher than the global cap, treat the
@@ -115,7 +115,7 @@ Use one shared state `--root` for contracts, budgets and inbox, and a distinct
 `--repo` for each execution checkout. Allowed/Forbidden paths are relative to
 the execution repository. Never let parallel workers share a checkout or index.
 
-1. Read `.agent-ship/hard-rules.json` on the shared state root before writing the prompt. A missing file means there are no local hard rules. Build the worker prompt from its frozen slice, acceptance lines, Allowed
+1. Read `.crewvane/hard-rules.json` on the shared state root before writing the prompt. A missing file means there are no local hard rules. Build the worker prompt from its frozen slice, acceptance lines, Allowed
    paths, Forbidden paths, repository and branch, plus `hook` and `contract_forbidden` rules (treat their paths as forbidden and quote the rule id), applicable `verify_checklist` lines, applicable team/project rules and selected verified lessons. Do not attach captain chat,
    secrets, merge instructions or production deployment permission. Do not copy secret values into the prompt.
 2. Prepare the isolated checkout and branch using the orchestrator's supported
@@ -124,17 +124,17 @@ the execution repository. Never let parallel workers share a checkout or index.
    contract, slice membership, duplicate work and both parallel caps. The
    branch must exist. If admission fails, do not spawn anything.
 
-Run this in the project directory. Use `agent-ship` on `PATH`. If that command is not found, use `node $HOME/.agent-ship-kit/current/cli/bin/agent-ship.js` with the same arguments.
+Run this in the project directory. Use `crewvane` on `PATH`. If that command is not found, use `node $HOME/.crewvane/current/cli/bin/crewvane.js` with the same arguments.
 
 ```bash
-agent-ship slice start --root <shared_state_root> \
+crewvane slice start --root <shared_state_root> \
   --repo <execution_checkout> --contract <contract_id> --slice <slice_id> \
   --source-task-id <stable_kit_task_id> --title "<slice>" --summary "<one line>" \
   --branch ship/<contract_id>/<slice_id> --base <base_ref>
 ```
 
 4. Write the contract id to the execution checkout's
-   `.agent-ship/active-contract`. Install that checkout with `setup --root
+   `.crewvane/active-contract`. Install that checkout with `setup --root
    <checkout> --state-root <shared_state_root>` so its hook reads the shared
    contract and checks its own index.
    Check `timer.registered` and run `watchdog status` / `watchdog doctor` before
@@ -185,12 +185,12 @@ mid-task decision, it returns a short note to the captain through `collect`
 2. Files the inbox item:
 
 ```bash
-agent-ship inbox add \
+crewvane inbox add \
   --type blocked \
   --title "<one line>" \
   --summary "<what the owner must decide>" \
   --source-task-id "<task id>" \
-  --path ".agent-ship/contracts/<contract_id>.md"
+  --path ".crewvane/contracts/<contract_id>.md"
 ```
 
 Use `--type needs_approval` when the worker can continue after a yes or no
@@ -228,7 +228,7 @@ At wrap-up run learning extract and learning review for pre-dispatch corrections
 as well as dispatched tasks. Do not turn candidates into active rules yourself.
 
 1. Spawn a separate read-only verifier. Its only prompt is `templates/verifier-prompt.md` plus the frozen contract path and the branch name. Do not attach the worker chat.
-2. The verifier reads `.agent-ship/hard-rules.json`, re-runs the acceptance commands, `agent-ship check --contract <id>`, and any E2E smoke the contract requires. A `hard_rule` violation or a failed checklist hint is a disagreement.
+2. The verifier reads `.crewvane/hard-rules.json`, re-runs the acceptance commands, `crewvane check --contract <id>`, and any E2E smoke the contract requires. A `hard_rule` violation or a failed checklist hint is a disagreement.
 3. If the verifier disagrees, send that result back to the same worker. Do not tell the owner.
 4. After the verifier agrees on code and returns the learning assessment, the verifier records `lesson check` (none/candidate, reason, reviewed-by a verifier reference that is not the worker; candidate ids when needed). `none` is the normal audit line when there is nothing new to keep. Do not ask the human to perform or confirm that check. The CLI validates this round before needs_review when `learning_required` is true. Then fill the packet's Verifier section and hand off to `ship-inbox`, which files `needs_review`. The notify text includes `/ship-inbox <id>`.
 

@@ -6,10 +6,10 @@ import { test } from "node:test";
 import { pidAlive, readLockOwner, withLock } from "../src/storage.js";
 
 test("state and hook locks record the owner, reclaim a dead pid, and name a live one", async () => {
-  const dir = await mkdtemp(join(tmpdir(), "agent-ship-lock-"));
-  const previous = process.env.AGENT_SHIP_LOCK_TIMEOUT_MS;
-  process.env.AGENT_SHIP_LOCK_TIMEOUT_MS = "80";
-  const lock = join(dir, ".agent-ship-lock");
+  const dir = await mkdtemp(join(tmpdir(), "crewvane-lock-"));
+  const previous = process.env.CREWVANE_LOCK_TIMEOUT_MS;
+  process.env.CREWVANE_LOCK_TIMEOUT_MS = "80";
+  const lock = join(dir, ".crewvane-lock");
   try {
     await withLock(dir, async () => {
       const owner = await readLockOwner(lock);
@@ -40,8 +40,8 @@ test("state and hook locks record the owner, reclaim a dead pid, and name a live
     await assert.rejects(withLock(dir, async () => undefined), /pid liveness not checked \(different host\)[\s\S]*rm -rf /);
     assert.equal((await readLockOwner(lock))?.hostname, "other-host");
   } finally {
-    if (previous === undefined) delete process.env.AGENT_SHIP_LOCK_TIMEOUT_MS;
-    else process.env.AGENT_SHIP_LOCK_TIMEOUT_MS = previous;
+    if (previous === undefined) delete process.env.CREWVANE_LOCK_TIMEOUT_MS;
+    else process.env.CREWVANE_LOCK_TIMEOUT_MS = previous;
     await rm(dir, { recursive: true, force: true });
   }
 });

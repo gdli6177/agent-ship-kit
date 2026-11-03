@@ -14,7 +14,7 @@ description: >-
 # ship-e2e
 
 Browser acceptance for a slice the captain is already shipping. Delivery
-order is `templates/workflow.md` in the kit (`$HOME/.agent-ship-kit/current/templates/`).
+order is `templates/workflow.md` in the kit (`$HOME/.crewvane/current/templates/`).
 The login index template is `e2e.md`. The pattern to copy into the project
 under test is `e2e-testing.md`. Those files live in that same templates
 directory. A manual clone keeps them under `templates/`.
@@ -36,22 +36,22 @@ This skill does not merge, deploy, or collect passwords.
 
 ## Shared login
 
-1. Copy `$HOME/.agent-ship-kit/current/templates/e2e.md` to
-   `.agent-ship/e2e/index.md` if that index does not exist yet. Add a row for
+1. Copy `$HOME/.crewvane/current/templates/e2e.md` to
+   `.crewvane/e2e/index.md` if that index does not exist yet. Add a row for
    this project and environment. Do not reuse another project's row. On that
    same index, keep the login rows and fill the Features table: `id`, the
    route or UI entry, and a one-line assertion. A contract may check
    `feature:<id>` only for an id in that table. Do not open a second feature
    map.
 2. Add one `auth.setup.ts` for this project, following
-   `$HOME/.agent-ship-kit/current/templates/e2e-testing.md`. It writes `storageState` to the path on that
+   `$HOME/.crewvane/current/templates/e2e-testing.md`. It writes `storageState` to the path on that
    row. Smoke specs depend on the setup project and reuse the file. They do
    not log in again.
 3. Credentials are environment variables (`E2E_USERNAME`, `E2E_PASSWORD`,
    `E2E_BASE_URL`, `E2E_STORAGE_STATE`). Name them. Do not ask the human to
    paste the values into chat, and do not write the values into the repo,
    the skill, the contract, or the inbox.
-4. Confirm `.agent-ship/e2e/` and `*.storage-state.json` are gitignored
+4. Confirm `.crewvane/e2e/` and `*.storage-state.json` are gitignored
    before any login runs. If a state file shows up in `git status`, stop and
    unstage it. Do not open the file into context.
 

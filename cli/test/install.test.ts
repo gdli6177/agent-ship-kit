@@ -26,10 +26,10 @@ function baseEnv(home: string, extra: Record<string, string> = {}): NodeJS.Proce
     ...process.env,
     HOME: home,
     PATH: extra.PATH ?? toolPath,
-    AGENT_SHIP_REF: "",
-    AGENT_SHIP_HOME: "",
-    AGENT_SHIP_BIN_DIR: "",
-    AGENT_SHIP_TARBALL: extra.AGENT_SHIP_TARBALL ?? "",
+    CREWVANE_REF: "",
+    CREWVANE_HOME: "",
+    CREWVANE_BIN_DIR: "",
+    CREWVANE_TARBALL: extra.CREWVANE_TARBALL ?? "",
     npm_config_cache: extra.npm_config_cache ?? join(home, ".npm-cache"),
     npm_config_update_notifier: "false",
   };
@@ -64,18 +64,18 @@ test("install.sh does not invoke sudo and prints the one-liner", async () => {
   });
   assert.equal(executable.some((line) => /\bsudo\b/.test(line)), false);
   assert.match(text, /--no-update-notifier --no-fund --no-audit --silent/);
-  const home = await mkdtemp(join(tmpdir(), "agent-ship-help-"));
+  const home = await mkdtemp(join(tmpdir(), "crewvane-help-"));
   try {
     const help = await run([installSh, "--help"], baseEnv(home));
     assert.equal(help.code, 0, help.stderr);
-    assert.match(help.stdout, /curl -fsSL https:\/\/raw\.githubusercontent\.com\/gdli6177\/agent-ship-kit\/main\/install\.sh \| bash/);
+    assert.match(help.stdout, /curl -fsSL https:\/\/raw\.githubusercontent\.com\/gdli6177\/crewvane\/main\/install\.sh \| bash/);
   } finally {
     await rm(home, { recursive: true, force: true });
   }
 });
 
 test("install.sh rejects a parent-dir ref and an old Node", async () => {
-  const home = await mkdtemp(join(tmpdir(), "agent-ship-ref-"));
+  const home = await mkdtemp(join(tmpdir(), "crewvane-ref-"));
   const bin = join(home, "bin");
   await mkdir(bin);
   await writeFile(
@@ -95,19 +95,19 @@ esac
     const traversal = await run([installSh, "--ref", "feature/../x"], baseEnv(home));
     assert.notEqual(traversal.code, 0);
     assert.match(traversal.stderr, /ref/);
-    await assert.rejects(access(join(home, ".agent-ship-kit")));
+    await assert.rejects(access(join(home, ".crewvane")));
 
     const old = await run([installSh], baseEnv(home, { PATH: `${bin}:${toolPath}` }));
     assert.notEqual(old.code, 0);
     assert.match(old.stderr, /Node\.js 20/);
-    await assert.rejects(access(join(home, ".agent-ship-kit")));
+    await assert.rejects(access(join(home, ".crewvane")));
   } finally {
     await rm(home, { recursive: true, force: true });
   }
 });
 
 test("install.sh percent-encodes a slash ref for codeload", async () => {
-  const home = await mkdtemp(join(tmpdir(), "agent-ship-url-"));
+  const home = await mkdtemp(join(tmpdir(), "crewvane-url-"));
   const bin = join(home, "bin");
   const log = join(home, "curl.log");
   await mkdir(bin);
@@ -124,15 +124,15 @@ exit 1
     env.CURL_LOG = log;
     const result = await run([installSh, "--ref", "feature/thing"], env);
     assert.notEqual(result.code, 0);
-    assert.match(await readFile(log, "utf8"), /https:\/\/codeload\.github\.com\/gdli6177\/agent-ship-kit\/tar\.gz\/feature%2Fthing/);
-    await assert.rejects(access(join(home, ".agent-ship-kit")));
+    assert.match(await readFile(log, "utf8"), /https:\/\/codeload\.github\.com\/gdli6177\/crewvane\/tar\.gz\/feature%2Fthing/);
+    await assert.rejects(access(join(home, ".crewvane")));
   } finally {
     await rm(home, { recursive: true, force: true });
   }
 });
 
-test("install.sh installs from AGENT_SHIP_TARBALL and uninstalls only its skills", { timeout: 300_000 }, async () => {
-  const sandbox = await mkdtemp(join(tmpdir(), "agent-ship-install-"));
+test("install.sh installs from CREWVANE_TARBALL and uninstalls only its skills", { timeout: 300_000 }, async () => {
+  const sandbox = await mkdtemp(join(tmpdir(), "crewvane-install-"));
   const home = join(sandbox, "home");
   const cache = join(sandbox, "npm-cache");
   const tarball = join(sandbox, "kit.tar.gz");
@@ -142,35 +142,35 @@ test("install.sh installs from AGENT_SHIP_TARBALL and uninstalls only its skills
   await writeFile(join(unrelated, "SKILL.md"), "leave me alone\n");
   await exec(
     "tar",
-    ["-czf", tarball, "--exclude", "node_modules", "--exclude", ".git", "-C", repoRoot, "."],
+    ["-czf", tarball, "--exclude", "node_modules", "--exclude", "dist", "--exclude", "release", "--exclude", "artifacts", "--exclude", ".git", "-C", repoRoot, "."],
     { timeout: 60_000 },
   );
-  const env = baseEnv(home, { AGENT_SHIP_TARBALL: tarball, npm_config_cache: cache });
+  const env = baseEnv(home, { CREWVANE_TARBALL: tarball, npm_config_cache: cache });
   try {
     const installed = await run([installSh], env);
     assert.equal(installed.code, 0, `${installed.stdout}\n${installed.stderr}`);
     assert.match(installed.stderr, /not on PATH/);
     assert.match(installed.stdout, /\/ship-setup/);
-    assert.match(installed.stdout, /agent-ship-kit installed/);
+    assert.match(installed.stdout, /crewvane installed/);
 
-    const kitHome = join(home, ".agent-ship-kit");
+    const kitHome = join(home, ".crewvane");
     const kit = join(kitHome, "main");
-    const shim = join(home, ".local", "bin", "agent-ship");
+    const shim = join(home, ".local", "bin", "crewvane");
     const shimText = await readFile(shim, "utf8");
-    assert.match(shimText, /agent-ship-kit-shim/);
-    assert.match(shimText, /agent-ship-kit\/current\/cli\/bin\/agent-ship\.js/);
+    assert.match(shimText, /crewvane-shim/);
+    assert.match(shimText, /crewvane\/current\/cli\/bin\/crewvane\.js/);
     assert.equal(await readlink(join(kitHome, "current")), "main");
     const skill = await readFile(join(cursorSkills, "ship-setup", "SKILL.md"), "utf8");
-    assert.match(skill, /agent-ship setup/);
-    assert.match(skill, /\.agent-ship-kit\/current\//);
-    assert.doesNotMatch(skill, /\.agent-ship-kit\/main/);
-    assert.doesNotMatch(skill, /npm run agent-ship/);
+    assert.match(skill, /crewvane setup/);
+    assert.match(skill, /\.crewvane\/current\//);
+    assert.doesNotMatch(skill, /\.crewvane\/main/);
+    assert.doesNotMatch(skill, /npm run crewvane/);
     assert.equal(await readFile(join(unrelated, "SKILL.md"), "utf8"), "leave me alone\n");
     await assert.rejects(access(join(home, ".claude", "skills", "ship-setup", "SKILL.md")));
 
     const helpEnv = { ...env, PATH: `${join(home, ".local", "bin")}:${env.PATH}` };
     const help = await exec(shim, ["--help"], { env: helpEnv, encoding: "utf8", timeout: 60_000 });
-    assert.match(help.stdout, /agent-ship/);
+    assert.match(help.stdout, /crewvane/);
 
     const project = join(sandbox, "project");
     await mkdir(project);
@@ -187,7 +187,7 @@ test("install.sh installs from AGENT_SHIP_TARBALL and uninstalls only its skills
       encoding: "utf8",
       timeout: 60_000,
     });
-    assert.match(hookStyle.stdout, /agent-ship/);
+    assert.match(hookStyle.stdout, /crewvane/);
 
     await writeFile(join(cursorSkills, "ship-setup", "MARKER"), "stale\n");
     const again = await run([installSh], env);
@@ -197,7 +197,7 @@ test("install.sh installs from AGENT_SHIP_TARBALL and uninstalls only its skills
 
     const removed = await run([installSh, "--uninstall"], env);
     assert.equal(removed.code, 0, `${removed.stdout}\n${removed.stderr}`);
-    assert.match(removed.stdout, /agent-ship-kit removed/);
+    assert.match(removed.stdout, /crewvane removed/);
     await assert.rejects(access(shim));
     await assert.rejects(access(kitHome));
     await assert.rejects(access(join(cursorSkills, "ship-setup")));
@@ -208,7 +208,7 @@ test("install.sh installs from AGENT_SHIP_TARBALL and uninstalls only its skills
 });
 
 test("a slash ref installs through current, and switching refs removes the old kit", { timeout: 300_000 }, async () => {
-  const sandbox = await mkdtemp(join(tmpdir(), "agent-ship-switch-"));
+  const sandbox = await mkdtemp(join(tmpdir(), "crewvane-switch-"));
   const home = join(sandbox, "home");
   const cache = join(sandbox, "npm-cache");
   const tarball = join(sandbox, "kit.tar.gz");
@@ -218,44 +218,44 @@ test("a slash ref installs through current, and switching refs removes the old k
   await writeFile(join(unrelated, "SKILL.md"), "leave me alone\n");
   await exec(
     "tar",
-    ["-czf", tarball, "--exclude", "node_modules", "--exclude", ".git", "-C", repoRoot, "."],
+    ["-czf", tarball, "--exclude", "node_modules", "--exclude", "dist", "--exclude", "release", "--exclude", "artifacts", "--exclude", ".git", "-C", repoRoot, "."],
     { timeout: 60_000 },
   );
-  const env = baseEnv(home, { AGENT_SHIP_TARBALL: tarball, npm_config_cache: cache });
-  const kitHome = join(home, ".agent-ship-kit");
+  const env = baseEnv(home, { CREWVANE_TARBALL: tarball, npm_config_cache: cache });
+  const kitHome = join(home, ".crewvane");
   try {
     const slash = await run([installSh, "--ref", "feature/thing"], env);
     assert.equal(slash.code, 0, `${slash.stdout}\n${slash.stderr}`);
     assert.equal(await readlink(join(kitHome, "current")), "feature__thing");
-    await access(join(kitHome, "feature__thing", "cli", "bin", "agent-ship.js"));
+    await access(join(kitHome, "feature__thing", "cli", "bin", "crewvane.js"));
     await assert.rejects(access(join(kitHome, "feature", "thing")));
     const skill = await readFile(join(cursorSkills, "ship-contract", "SKILL.md"), "utf8");
-    assert.match(skill, /\.agent-ship-kit\/current\//);
+    assert.match(skill, /\.crewvane\/current\//);
     assert.doesNotMatch(skill, /feature__thing/);
-    const shim = await readFile(join(home, ".local", "bin", "agent-ship"), "utf8");
-    assert.match(shim, /agent-ship-kit\/current\/cli\/bin\/agent-ship\.js/);
+    const shim = await readFile(join(home, ".local", "bin", "crewvane"), "utf8");
+    assert.match(shim, /crewvane\/current\/cli\/bin\/crewvane\.js/);
     assert.doesNotMatch(shim, /feature__thing/);
 
     const helpEnv = { ...env, PATH: `${join(home, ".local", "bin")}:${env.PATH}` };
-    const help = await exec(join(home, ".local", "bin", "agent-ship"), ["--help"], {
+    const help = await exec(join(home, ".local", "bin", "crewvane"), ["--help"], {
       env: helpEnv,
       encoding: "utf8",
       timeout: 60_000,
     });
-    assert.match(help.stdout, /agent-ship/);
+    assert.match(help.stdout, /crewvane/);
 
     const switched = await run([installSh, "--ref", "v8.8.8"], env);
     assert.equal(switched.code, 0, `${switched.stdout}\n${switched.stderr}`);
     assert.equal(await readlink(join(kitHome, "current")), "v8.8.8");
     await access(join(kitHome, "v8.8.8", "package.json"));
     await assert.rejects(access(join(kitHome, "feature__thing")));
-    const shimAfter = await readFile(join(home, ".local", "bin", "agent-ship"), "utf8");
-    assert.match(shimAfter, /agent-ship-kit\/current\/cli\/bin\/agent-ship\.js/);
+    const shimAfter = await readFile(join(home, ".local", "bin", "crewvane"), "utf8");
+    assert.match(shimAfter, /crewvane\/current\/cli\/bin\/crewvane\.js/);
 
     const removed = await run([installSh, "--uninstall"], env);
     assert.equal(removed.code, 0, `${removed.stdout}\n${removed.stderr}`);
     await assert.rejects(access(kitHome));
-    await assert.rejects(access(join(home, ".local", "bin", "agent-ship")));
+    await assert.rejects(access(join(home, ".local", "bin", "crewvane")));
     await assert.rejects(access(join(cursorSkills, "ship-contract")));
     assert.equal(await readFile(join(unrelated, "SKILL.md"), "utf8"), "leave me alone\n");
   } finally {

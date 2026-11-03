@@ -37,7 +37,7 @@ test("parseArgs keeps repeated evidence and inline values", () => {
 });
 
 test("cli inbox add/list and notify dry-run against the example policy", async () => {
-  const root = await mkdtemp(join(tmpdir(), "agent-ship-cli-"));
+  const root = await mkdtemp(join(tmpdir(), "crewvane-cli-"));
   const policy = fileURLToPath(new URL("../../templates/notify.policy.example.md", import.meta.url));
   const allowlist = fileURLToPath(new URL("../../templates/notify.allowlist.example.json", import.meta.url));
   try {
@@ -103,7 +103,7 @@ test("cli inbox add/list and notify dry-run against the example policy", async (
 });
 
 test("cli warns on high priority without evidence and rejects unknown commands", async () => {
-  const root = await mkdtemp(join(tmpdir(), "agent-ship-cli-"));
+  const root = await mkdtemp(join(tmpdir(), "crewvane-cli-"));
   try {
     const warned = capture();
     const code = await main(
@@ -136,7 +136,7 @@ test("cli warns on high priority without evidence and rejects unknown commands",
 });
 
 test("cli decide hides the item and notify run refuses a high page without evidence", async () => {
-  const root = await mkdtemp(join(tmpdir(), "agent-ship-cli-"));
+  const root = await mkdtemp(join(tmpdir(), "crewvane-cli-"));
   const policy = fileURLToPath(new URL("../../templates/notify.policy.example.md", import.meta.url));
   const allowlist = fileURLToPath(new URL("../../templates/notify.allowlist.example.json", import.meta.url));
   try {
@@ -224,8 +224,8 @@ test("cli decide hides the item and notify run refuses a high page without evide
 });
 
 test("notify run executes an allowlisted argv and nothing else", async () => {
-  const root = await mkdtemp(join(tmpdir(), "agent-ship-run-"));
-  const previousActor = process.env.AGENT_SHIP_ACTOR;
+  const root = await mkdtemp(join(tmpdir(), "crewvane-run-"));
+  const previousActor = process.env.CREWVANE_ACTOR;
   const sentinel = join(root, "ran.txt");
   const script = join(root, "mark.js");
   await writeFile(script, "require('node:fs').writeFileSync(process.argv[2], 'ran');\n");
@@ -259,9 +259,9 @@ test("notify run executes an allowlisted argv and nothing else", async () => {
       ),
       0,
     );
-    delete process.env.AGENT_SHIP_ACTOR;
+    delete process.env.CREWVANE_ACTOR;
     assert.equal(await main(["authority", "init", "--root", root, "--human", "fixture-human", "--captain", "fixture-captain"], capture().io), 0);
-    process.env.AGENT_SHIP_ACTOR = "fixture-captain";
+    process.env.CREWVANE_ACTOR = "fixture-captain";
     const ran = capture();
     const code = await main(
       ["notify", "run", "--root", root, "--latest", "--policy", policy, "--allowlist", allowlist],
@@ -295,7 +295,7 @@ test("notify run executes an allowlisted argv and nothing else", async () => {
     assert.equal(JSON.parse(denied.stdout()).allow, false);
     assert.equal(await readFile(sentinel, "utf8"), "ran");
   } finally {
-    if (previousActor === undefined) delete process.env.AGENT_SHIP_ACTOR; else process.env.AGENT_SHIP_ACTOR = previousActor;
+    if (previousActor === undefined) delete process.env.CREWVANE_ACTOR; else process.env.CREWVANE_ACTOR = previousActor;
     await rm(root, { recursive: true, force: true });
   }
 });

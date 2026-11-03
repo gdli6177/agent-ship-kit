@@ -1,7 +1,7 @@
 ---
 name: ship-contract
 description: >-
-  Handle new feature, fix or change requests in an agent-ship-kit captain
+  Handle new feature, fix or change requests in an crewvane captain
   conversation, including 加一个功能、修一下这个问题、另开一个需求 and
   按这个方案开始、继续、接管、收口、上测试、上线、你来做、这个你处理. Draft a proposal, then freeze only after explicit human
   acceptance of its exact scope. Also supports /ship-contract and freeze.
@@ -13,13 +13,13 @@ The captain talks to the human. This skill turns that conversation into a
 proposal, then into a frozen contract. A proposal never dispatches a worker.
 
 Read `proposal-card.md` and `contract-card.md` from the installed kit at
-`$HOME/.agent-ship-kit/current/templates/` and copy them into the project. A
+`$HOME/.crewvane/current/templates/` and copy them into the project. A
 manual clone keeps the same files under `templates/`. Do not invent a second
 card format.
 
 ## Parallel lanes and authority (v0.2)
 
-Read `$HOME/.agent-ship-kit/current/docs/owner-lanes.md` (or the actual kit clone). One human-facing captain routes a durable `intake add/list/claim` queue; temporary owners hold independent lanes and coordinate scouts/workers/verifiers. Keep one current proposal **per lane**. The captain delegates repository inspection/tests/Git work and returns a concise conclusion/tradeoff/evidence/recommendation/id list. External channels enqueue only.
+Read `$HOME/.crewvane/current/docs/owner-lanes.md` (or the actual kit clone). One human-facing captain routes a durable `intake add/list/claim` queue; temporary owners hold independent lanes and coordinate scouts/workers/verifiers. Keep one current proposal **per lane**. The captain delegates repository inspection/tests/Git work and returns a concise conclusion/tradeoff/evidence/recommendation/id list. External channels enqueue only.
 
 The trusted host binds actors, initializes human/captain authority, connects `scripts/host-pre-tool.mjs`, and starts each captain turn with heartbeat outside model-controlled tools. Never choose another actor or reset your own budget. Registered human channel alone freezes/decides/changes limits; captain alone executes notification. Owners/workers only return lane artifacts/inbox. These application guards require host authentication and sandbox enforcement; local env names alone are not authenticated identities.
 
@@ -40,7 +40,7 @@ Use Lane/Owner headers, independent checkouts, optional slice role cards, and `-
 
 ## Intake and guard
 
-收到执行类请求先运行 `agent-ship intake --text "<原文>"`，复用明确需求的 id。
+收到执行类请求先运行 `crewvane intake --text "<原文>"`，复用明确需求的 id。
 只读调查可以完善方案；不得改产品、运行长测试、触发 CI 或派工。优先在本轮
 展示范围与验收，不把调查无限延伸成执行。恢复时先 doctor，不借用旧需求授权。
 
@@ -85,7 +85,7 @@ freeze, and do not spawn a worker.
 
 ## 规范与经验准备
 
-形成方案前，用 `agent-ship team context --auto --tag <task-topic> [--project <project-id>]`
+形成方案前，用 `crewvane team context --auto --tag <task-topic> [--project <project-id>]`
 获取引用，读取适用的团队手册和项目规则。只加载与需求匹配的已验证经验摘要；
 没有匹配时可以为零，必读规则不能因为经验预算而省略。
 将适用规则和经验编号作为切片输入；不复制全部历史，不附上船长对话。
@@ -93,8 +93,8 @@ freeze, and do not spawn a worker.
 
 ## Procedure
 
-1. Run intake first, then fill its registered proposal using `$HOME/.agent-ship-kit/current/templates/proposal-card.md`
-   at `.agent-ship/proposals/<proposal_id>.md`; preserve Proposal id, Request and Created at. Status stays `draft`. Fill Allowed paths and
+1. Run intake first, then fill its registered proposal using `$HOME/.crewvane/current/templates/proposal-card.md`
+   at `.crewvane/proposals/<proposal_id>.md`; preserve Proposal id, Request and Created at. Status stays `draft`. Fill Allowed paths and
    Forbidden paths. Put merge and production deploy in the out-of-scope list
    even if the human did not mention them. Fill Human review budget:
    `human_reviews_expected` is how many human reviews this line still needs,
@@ -109,7 +109,7 @@ freeze, and do not spawn a worker.
    Resolve and record the id yourself. Silence, casual acknowledgement,
    the captain deciding for itself, a worker or another agent cannot freeze.
 4. On freeze, copy the accepted text into
-   `.agent-ship/contracts/<contract_id>.md` using `$HOME/.agent-ship-kit/current/templates/contract-card.md`.
+   `.crewvane/contracts/<contract_id>.md` using `$HOME/.crewvane/current/templates/contract-card.md`.
    Prepare status `draft`. In managed authority mode the registered human channel runs `contract freeze` with the exact accepted text; do not self-sign by editing names. In legacy mode record the exact plan in `Accepted text`, the human
    in `Accepted by`, the time in `Accepted at`, and `Proposal id`. Also record
    who froze it and when, and copy Allowed paths, Forbidden paths, and the

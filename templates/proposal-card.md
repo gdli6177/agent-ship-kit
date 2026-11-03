@@ -70,7 +70,7 @@ Discussion mode: one current proposal per lane. After each round, fill "What cha
 
 ## Human review budget 人工审阅预算
 
-新方案必须有这一节。`human_reviews_expected` 是还要人看的次数，下面每一条写这次审阅看什么（例如 方案冻结、验收、合 PR）。条数必须等于次数。缺次数、占位符、或条数对不上，`agent-ship check` 失败。整节都没有的旧卡只警告，不因此失败。`must_human` 和 `already_automated` 可以不写；写了就不能留占位符。本工具不自动合并，也不代人点合并。
+新方案必须有这一节。`human_reviews_expected` 是还要人看的次数，下面每一条写这次审阅看什么（例如 方案冻结、验收、合 PR）。条数必须等于次数。缺次数、占位符、或条数对不上，`crewvane check` 失败。整节都没有的旧卡只警告，不因此失败。`must_human` 和 `already_automated` 可以不写；写了就不能留占位符。本工具不自动合并，也不代人点合并。
 
 human_reviews_expected: `<count>`
 

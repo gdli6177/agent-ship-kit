@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
-# One-command install for agent-ship-kit. No git clone and no sudo.
-#   curl -fsSL https://raw.githubusercontent.com/gdli6177/agent-ship-kit/main/install.sh | bash
+# One-command install for crewvane. No git clone and no sudo.
+#   curl -fsSL https://raw.githubusercontent.com/gdli6177/crewvane/main/install.sh | bash
 # Pin a tag:  curl -fsSL .../install.sh | bash -s -- --ref v0.1.0
-# Tests can set AGENT_SHIP_TARBALL to a local .tar.gz instead of downloading.
+# Tests can set CREWVANE_TARBALL to a local .tar.gz instead of downloading.
 set -euo pipefail
 
-REPO="gdli6177/agent-ship-kit"
+REPO="gdli6177/crewvane"
 DEFAULT_REF="main"
 SKILLS=(
   ship-setup
@@ -16,29 +16,29 @@ SKILLS=(
   ship-notify
   ship-e2e
 )
-SHIM_MARKER="agent-ship-kit-shim"
+SHIM_MARKER="crewvane-shim"
 
-REF="${AGENT_SHIP_REF:-$DEFAULT_REF}"
-KIT_HOME="${AGENT_SHIP_HOME:-$HOME/.agent-ship-kit}"
-BIN_DIR="${AGENT_SHIP_BIN_DIR:-$HOME/.local/bin}"
+REF="${CREWVANE_REF:-$DEFAULT_REF}"
+KIT_HOME="${CREWVANE_HOME:-$HOME/.crewvane}"
+BIN_DIR="${CREWVANE_BIN_DIR:-$HOME/.local/bin}"
 TARGETS=()
 AGENTS=()
 UNINSTALL=0
 
 usage() {
   cat <<'EOF'
-Install agent-ship-kit without cloning.
+Install crewvane without cloning.
 
-  curl -fsSL https://raw.githubusercontent.com/gdli6177/agent-ship-kit/main/install.sh | bash
+  curl -fsSL https://raw.githubusercontent.com/gdli6177/crewvane/main/install.sh | bash
 
 Options:
-  --ref <name>     Branch or tag to install (default: main, or AGENT_SHIP_REF).
+  --ref <name>     Branch or tag to install (default: main, or CREWVANE_REF).
                    Slashes are allowed, as in feature/foo. The directory name
                    uses __ in place of /.
   --agent <name>   cursor, claude, codex, qoder, kiro, omp, agents, or all. Repeatable.
   --target <dir>   Copy skills into this directory instead of detecting agents.
   --uninstall      Remove the shim, the skill directories this installer
-                   recorded, and the whole ~/.agent-ship-kit directory
+                   recorded, and the whole ~/.crewvane directory
                    (every ref and the current symlink).
   -h, --help       Show this help.
 
@@ -105,10 +105,10 @@ require_node() {
   fi
   local major
   if ! major="$(node -p 'process.versions.node.split(".")[0]')"; then
-    die "could not read the Node.js version. agent-ship needs Node.js 20 or newer."
+    die "could not read the Node.js version. crewvane needs Node.js 20 or newer."
   fi
   if [[ ! "$major" =~ ^[0-9]+$ ]] || [[ "$major" -lt 20 ]]; then
-    die "Node.js $(node -v 2>/dev/null || echo "$major") is too old. agent-ship needs Node.js 20 or newer."
+    die "Node.js $(node -v 2>/dev/null || echo "$major") is too old. crewvane needs Node.js 20 or newer."
   fi
 }
 
@@ -218,7 +218,7 @@ copy_skills() {
 write_shim() {
   local bin_js="$1"
   mkdir -p "$BIN_DIR"
-  SHIM_PATH="$BIN_DIR/agent-ship"
+  SHIM_PATH="$BIN_DIR/crewvane"
   {
     printf '%s\n' "#!/bin/sh"
     printf '%s\n' "# $SHIM_MARKER"
@@ -232,7 +232,7 @@ write_manifest() {
   local line
   MANIFEST="$KIT_HOME/manifest"
   {
-    printf '%s\n' "# agent-ship-kit-manifest"
+    printf '%s\n' "# crewvane-manifest"
     printf 'ref=%s\n' "$REF"
     printf 'dir=%s\n' "$(ref_dir_name "$REF")"
     printf 'kit=%s\n' "$kit"
@@ -302,10 +302,10 @@ kit_home_is_ours() {
     *"/.."*|*"../"*) return 1 ;;
   esac
   [[ -d "$KIT_HOME" ]] || return 1
-  if [[ "$(basename "$KIT_HOME")" == ".agent-ship-kit" ]]; then
+  if [[ "$(basename "$KIT_HOME")" == ".crewvane" ]]; then
     return 0
   fi
-  [[ -f "$KIT_HOME/manifest" ]] && grep -q -F "agent-ship-kit-manifest" "$KIT_HOME/manifest"
+  [[ -f "$KIT_HOME/manifest" ]] && grep -q -F "crewvane-manifest" "$KIT_HOME/manifest"
 }
 
 on_path() {
@@ -350,15 +350,15 @@ install_kit() {
   TMP_DIR="$(mktemp -d)"
   extract="$TMP_DIR/extract"
   mkdir -p "$extract"
-  if [[ -n "${AGENT_SHIP_TARBALL:-}" ]]; then
-    [[ -f "$AGENT_SHIP_TARBALL" ]] || die "AGENT_SHIP_TARBALL is not a file: $AGENT_SHIP_TARBALL"
-    echo "Installing agent-ship-kit from $AGENT_SHIP_TARBALL ($REF)"
-    tar -xzf "$AGENT_SHIP_TARBALL" -C "$extract"
+  if [[ -n "${CREWVANE_TARBALL:-}" ]]; then
+    [[ -f "$CREWVANE_TARBALL" ]] || die "CREWVANE_TARBALL is not a file: $CREWVANE_TARBALL"
+    echo "Installing crewvane from $CREWVANE_TARBALL ($REF)"
+    tar -xzf "$CREWVANE_TARBALL" -C "$extract"
   else
     command -v curl >/dev/null 2>&1 || die "curl is required"
     local url
     url="$(codeload_url "$REF")"
-    echo "Downloading agent-ship-kit ($REF)"
+    echo "Downloading crewvane ($REF)"
     curl -fsSL "$url" | tar -xz -C "$extract"
   fi
 
@@ -374,7 +374,7 @@ install_kit() {
       fi
     done
   fi
-  [[ -n "$src" ]] || die "downloaded archive does not look like agent-ship-kit"
+  [[ -n "$src" ]] || die "downloaded archive does not look like crewvane"
 
   resolve_targets
   [[ ${#TARGETS[@]} -gt 0 ]] || die "no skill directory to install into"
@@ -389,12 +389,12 @@ install_kit() {
   mkdir -p "$STAGE_DIR"
   cp -a "$src"/. "$STAGE_DIR"/
   rm -rf "$STAGE_DIR/node_modules" "$STAGE_DIR/cli/node_modules"
-  echo "Installing the agent-ship CLI (Node $(node -v))"
+  echo "Installing the crewvane CLI (Node $(node -v))"
   (
     cd "$STAGE_DIR" &&
       npm install --omit=dev --no-update-notifier --no-fund --no-audit --silent </dev/null
   ) || die "npm install failed"
-  chmod 755 "$STAGE_DIR/cli/bin/agent-ship.js"
+  chmod 755 "$STAGE_DIR/cli/bin/crewvane.js"
   rm -rf "$dest"
   mv "$STAGE_DIR" "$dest"
   STAGE_DIR=""
@@ -403,7 +403,7 @@ install_kit() {
 
   remove_recorded_kits "$dest"
   link_current "$dest"
-  write_shim "$KIT_HOME/current/cli/bin/agent-ship.js"
+  write_shim "$KIT_HOME/current/cli/bin/crewvane.js"
   copy_skills "$KIT_HOME/current"
   write_manifest "$dest"
 
@@ -413,7 +413,7 @@ install_kit() {
   fi
 
   echo
-  echo "agent-ship-kit installed"
+  echo "crewvane installed"
   echo "  ref:     $REF"
   echo "  kit:     $dest"
   echo "  current: $KIT_HOME/current"
@@ -433,7 +433,7 @@ remove_shim() {
     rm -f "$shim"
     echo "removed shim $shim"
   else
-    echo "warning: left $shim in place because it was not installed by agent-ship-kit" >&2
+    echo "warning: left $shim in place because it was not installed by crewvane" >&2
   fi
 }
 
@@ -450,7 +450,7 @@ remove_skill() {
 
 uninstall_kit() {
   local manifest="$KIT_HOME/manifest"
-  local shim="$BIN_DIR/agent-ship"
+  local shim="$BIN_DIR/crewvane"
   local skills=()
   local line skill
   if [[ -f "$manifest" ]]; then
@@ -476,7 +476,7 @@ uninstall_kit() {
     echo "warning: refused to delete $KIT_HOME" >&2
   fi
   echo
-  echo "agent-ship-kit removed"
+  echo "crewvane removed"
   echo
   echo "Next: nothing remains on PATH from this installer. Project repositories were not modified."
 }

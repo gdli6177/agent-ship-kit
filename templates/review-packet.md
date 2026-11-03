@@ -4,7 +4,7 @@ Contract id: `<contract_id>`
 Slice id: `<slice_id>`
 Task id: `<source_task_id>`
 Worker ref: `<worker_ref>`
-Packet path: `.agent-ship/packets/<source_task_id>.md`
+Packet path: `.crewvane/packets/<source_task_id>.md`
 
 船长根据工人交回的证据填写。工人不做决定，人做决定。这份包不合并、不部署。
 
@@ -26,7 +26,7 @@ Next hop 下一跳: contract `<contract_id>` → slice `<slice_id>` → worker `
 
 ## Human review budget 人工审阅预算
 
-从冻结合同抄预算。`inbox_needs_review_count` 写该合同目前的 `needs_review` 条数（与 `agent-ship check` 的同名字段相同，含已决定的），让人对照 `human_reviews_expected`。`this_review_is_for` 写这一包对应预算里的哪一条。不合并。
+从冻结合同抄预算。`inbox_needs_review_count` 写该合同目前的 `needs_review` 条数（与 `crewvane check` 的同名字段相同，含已决定的），让人对照 `human_reviews_expected`。`this_review_is_for` 写这一包对应预算里的哪一条。不合并。
 
 human_reviews_expected: `<count from the contract>`
 
@@ -73,7 +73,7 @@ Not run, and why:
 独立的只读核验，没有看过工人对话。不同意就不进收件箱，退回工人，不要打扰人。
 
 - Verifier ref:
-- `agent-ship check`: `<ok true/false，violations 摘要>`
+- `crewvane check`: `<ok true/false，violations 摘要>`
 - Acceptance commands rerun 重跑的验收命令:
 - E2E feature rerun 重跑的功能冒烟: `feature:<id>` → `<report path or URL，不要写 storageState>`
 - Agrees with the worker 与工人一致: yes / no
@@ -125,7 +125,7 @@ File a finished slice as `type: needs_review` (see `events/schema.json`):
   "links": {
     "pr": "<url>",
     "issue": "<url>",
-    "path": ".agent-ship/packets/<source_task_id>.md"
+    "path": ".crewvane/packets/<source_task_id>.md"
   },
   "contract_id": "<contract_id>",
   "slice_id": "<slice_id>"

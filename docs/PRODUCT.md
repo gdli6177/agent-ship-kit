@@ -4,7 +4,7 @@
 
 ## 它是什么
 
-agent-ship-kit 是并行 AI 编程交付的验收与注意力层。人从需求进入到交付，只和一位船长（captain）对话。工人（worker）没有事先排好的花名册，而是在合同冻结之后，按切片按需生成。工具放在 Herdr、Orca、Multica 或任何别的编排器上面，用一层薄适配器接进去。人也可以不用编排器，由船长为每份冻结合同另开一个代理会话。
+crewvane 是并行 AI 编程交付的验收与注意力层。人从需求进入到交付，只和一位船长（captain）对话。工人（worker）没有事先排好的花名册，而是在合同冻结之后，按切片按需生成。工具放在 Herdr、Orca、Multica 或任何别的编排器上面，用一层薄适配器接进去。人也可以不用编排器，由船长为每份冻结合同另开一个代理会话。
 
 它回答的是：什么可以开工、证据齐了没有、该不该打断人。它不回答：进程怎么调度、分支怎么合并、生产环境怎么发布。
 
@@ -17,7 +17,7 @@ agent-ship-kit 是并行 AI 编程交付的验收与注意力层。人从需求�
 - 把待审、卡住、中途要拍板放进本地收件箱（`needs_review`、`blocked`、`needs_approval`）
 - 普通待审默认拉取：人看收件箱，不推送。只有带证据的高优先级，或 `blocked` / `needs_approval`，才推送
 - 用策略和允许列表做通知。`notify dry-run` 只打印计划；`notify run` 在 `allow: true` 时按 argv 执行，不经过 shell
-- 把反复出现的审阅意见收成本地硬规则（`.agent-ship/hard-rules.json`）。只约束安装了本工具的克隆，不自动合并，也不给其他贡献者加 CI
+- 把反复出现的审阅意见收成本地硬规则（`.crewvane/hard-rules.json`）。只约束安装了本工具的克隆，不自动合并，也不给其他贡献者加 CI
 
 不做这些事：
 
@@ -37,8 +37,8 @@ agent-ship-kit 是并行 AI 编程交付的验收与注意力层。人从需求�
 | 适配器 | 把 `spawn` / `status` / `collect` 翻译成具体编排器的调用。见 `adapters/` |
 | 方案卡与合同 | `templates/proposal-card.md`、`templates/contract-card.md`。冻结合同不可就地修改 |
 | 证据包 | `templates/review-packet.md`。主张必须带可打开的指针 |
-| 收件箱 | `.agent-ship/inbox.jsonl`。`inbox list` 默认只显示还没 `inbox decide` 的项 |
-| 硬规则 | 本地 `.agent-ship/hard-rules.json`。`promote` 或 `inbox decide --promote` 写入。`hook` / `contract` 让 `check` 和 pre-commit 带规则 id 失败 |
+| 收件箱 | `.crewvane/inbox.jsonl`。`inbox list` 默认只显示还没 `inbox decide` 的项 |
+| 硬规则 | 本地 `.crewvane/hard-rules.json`。`promote` 或 `inbox decide --promote` 写入。`hook` / `contract` 让 `check` 和 pre-commit 带规则 id 失败 |
 | 通知 | 策略里有给人读的自由文本，也有 CLI 解析的规则。允许列表始终生效 |
 | 端到端登录 | 每个项目一份 Playwright `auth.setup.ts`，冒烟复用 gitignore 的 storageState。见 `templates/e2e.md` |
 
@@ -95,9 +95,9 @@ agent-ship-kit 是并行 AI 编程交付的验收与注意力层。人从需求�
 
 改冻结合同不是改原文件。船长停掉受影响的切片，新开合同号并指向旧号，等人重新冻结。没被新文本影响、已经做完的切片保留。
 
-工人说做完之后，船长另开一个只读核验，只给冻结合同和分支，不给工人对话。核验重跑验收、`agent-ship check` 和相关冒烟。不一致就退回工人，不把这圈交给人。一致之后才进收件箱。
+工人说做完之后，船长另开一个只读核验，只给冻结合同和分支，不给工人对话。核验重跑验收、`crewvane check` 和相关冒烟。不一致就退回工人，不把这圈交给人。一致之后才进收件箱。
 
-人用 `/ship-inbox` 按优先级看未决项并逐条审。通知里的链接是 `/ship-inbox <id>`，直接打开那一条。回复 `pass` / `通过`、`changes` / `要改` 加原因、或 `reject` / `拒绝`。斜杠命令就是同名技能；没有技能支持时按 `AGENTS.md` 里的文件路径做，终端里用 `agent-ship inbox list` 和 `inbox decide`。
+人用 `/ship-inbox` 按优先级看未决项并逐条审。通知里的链接是 `/ship-inbox <id>`，直接打开那一条。回复 `pass` / `通过`、`changes` / `要改` 加原因、或 `reject` / `拒绝`。斜杠命令就是同名技能；没有技能支持时按 `AGENTS.md` 里的文件路径做，终端里用 `crewvane inbox list` 和 `inbox decide`。
 
 状态词：方案是 `draft`（旧稿是 `superseded`）；合同是 `frozen`；工人是 `queued`、`running`、`needs_review`、`blocked`、`needs_approval`、`failed`、`cancelled`；人的决定是 `accept`、`changes_requested`、`reject`。`accept` 不是合并。
 

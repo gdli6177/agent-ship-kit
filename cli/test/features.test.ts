@@ -16,7 +16,7 @@ const loginOnlyIndex = `# E2E index
 
 | Project | Environment | Auth setup | storageState | Smoke |
 | --- | --- | --- | --- | --- |
-| A | staging | tests/e2e/a/auth.setup.ts | .agent-ship/e2e/A.staging.storage-state.json | tests/e2e/a/app.smoke.spec.ts |
+| A | staging | tests/e2e/a/auth.setup.ts | .crewvane/e2e/A.staging.storage-state.json | tests/e2e/a/app.smoke.spec.ts |
 `;
 
 const featuresIndex = `${loginOnlyIndex}
@@ -51,14 +51,14 @@ async function git(root: string, args: string[]): Promise<void> {
 }
 
 async function repo(): Promise<string> {
-  const root = await mkdtemp(join(tmpdir(), "agent-ship-features-"));
+  const root = await mkdtemp(join(tmpdir(), "crewvane-features-"));
   await git(root, ["init", "-b", "main"]);
   await git(root, ["config", "user.email", "test@example.com"]);
   await git(root, ["config", "user.name", "Test"]);
   await writeFile(join(root, "README.md"), "base\n");
   await git(root, ["add", "README.md"]);
   await git(root, ["commit", "-m", "base"]);
-  await mkdir(join(root, ".agent-ship", "contracts"), { recursive: true });
+  await mkdir(join(root, ".crewvane", "contracts"), { recursive: true });
   return root;
 }
 
@@ -106,12 +106,12 @@ test("the shipped e2e template exposes login and home", async () => {
 });
 
 test("missing index or missing Features table leaves feature refs unchecked", async () => {
-  const root = await mkdtemp(join(tmpdir(), "agent-ship-features-skip-"));
+  const root = await mkdtemp(join(tmpdir(), "crewvane-features-skip-"));
   try {
     const markdown = contract("- [ ] `feature:missing`");
     assert.deepEqual(await featureViolationsInContract(root, markdown), []);
-    await mkdir(join(root, ".agent-ship", "e2e"), { recursive: true });
-    await writeFile(join(root, ".agent-ship", "e2e", "index.md"), loginOnlyIndex);
+    await mkdir(join(root, ".crewvane", "e2e"), { recursive: true });
+    await writeFile(join(root, ".crewvane", "e2e", "index.md"), loginOnlyIndex);
     assert.deepEqual(await featureViolationsInContract(root, markdown), []);
     assert.deepEqual(await featureViolationsInContract(root, contract("- [ ] typecheck passes")), []);
   } finally {
@@ -122,10 +122,10 @@ test("missing index or missing Features table leaves feature refs unchecked", as
 test("check fails only for feature ids missing from a present Features table", async () => {
   const root = await repo();
   try {
-    await mkdir(join(root, ".agent-ship", "e2e"), { recursive: true });
-    await writeFile(join(root, ".agent-ship", "e2e", "index.md"), featuresIndex);
+    await mkdir(join(root, ".crewvane", "e2e"), { recursive: true });
+    await writeFile(join(root, ".crewvane", "e2e", "index.md"), featuresIndex);
     await writeFile(
-      join(root, ".agent-ship", "contracts", "contract_auth.md"),
+      join(root, ".crewvane", "contracts", "contract_auth.md"),
       contract("- [ ] `feature:login`\n- [ ] feature:missing"),
     );
 
@@ -136,15 +136,15 @@ test("check fails only for feature ids missing from a present Features table", a
     assert.deepEqual(badResult.violations, []);
     assert.deepEqual(badResult.feature_violations, [{ id: "missing", rule: "unknown_feature" }]);
 
-    await writeFile(join(root, ".agent-ship", "contracts", "contract_auth.md"), contract("- [ ] `feature:login`\n- [ ] `feature:home`"));
+    await writeFile(join(root, ".crewvane", "contracts", "contract_auth.md"), contract("- [ ] `feature:login`\n- [ ] `feature:home`"));
     const good = capture();
     assert.equal(await main(["check", "--root", root, "--contract", "contract_auth", "--base", "main"], good.io), 0);
     const goodResult = JSON.parse(good.stdout());
     assert.equal(goodResult.ok, true);
     assert.equal("feature_violations" in goodResult, false);
 
-    await writeFile(join(root, ".agent-ship", "e2e", "index.md"), loginOnlyIndex);
-    await writeFile(join(root, ".agent-ship", "contracts", "contract_auth.md"), contract("- [ ] `feature:missing`"));
+    await writeFile(join(root, ".crewvane", "e2e", "index.md"), loginOnlyIndex);
+    await writeFile(join(root, ".crewvane", "contracts", "contract_auth.md"), contract("- [ ] `feature:missing`"));
     const unchanged = capture();
     assert.equal(await main(["check", "--root", root, "--contract", "contract_auth", "--base", "main"], unchanged.io), 0);
     const unchangedResult = JSON.parse(unchanged.stdout());
@@ -158,9 +158,9 @@ test("check fails only for feature ids missing from a present Features table", a
 test("check reports path drift and an unknown feature id together", async () => {
   const root = await repo();
   try {
-    await mkdir(join(root, ".agent-ship", "e2e"), { recursive: true });
-    await writeFile(join(root, ".agent-ship", "e2e", "index.md"), featuresIndex);
-    await writeFile(join(root, ".agent-ship", "contracts", "contract_auth.md"), contract("- [ ] `feature:missing`"));
+    await mkdir(join(root, ".crewvane", "e2e"), { recursive: true });
+    await writeFile(join(root, ".crewvane", "e2e", "index.md"), featuresIndex);
+    await writeFile(join(root, ".crewvane", "contracts", "contract_auth.md"), contract("- [ ] `feature:missing`"));
     await git(root, ["checkout", "-b", "ship/contract_auth/slice"]);
     await writeFile(join(root, "notes.txt"), "outside\n");
     await git(root, ["add", "notes.txt"]);
@@ -180,9 +180,9 @@ test("check reports path drift and an unknown feature id together", async () => 
 test("watchdog names a missing feature id when that is why check failed", async () => {
   const root = await repo();
   try {
-    await mkdir(join(root, ".agent-ship", "e2e"), { recursive: true });
-    await writeFile(join(root, ".agent-ship", "e2e", "index.md"), featuresIndex);
-    await writeFile(join(root, ".agent-ship", "contracts", "contract_auth.md"), contract("- [ ] `feature:missing`"));
+    await mkdir(join(root, ".crewvane", "e2e"), { recursive: true });
+    await writeFile(join(root, ".crewvane", "e2e", "index.md"), featuresIndex);
+    await writeFile(join(root, ".crewvane", "contracts", "contract_auth.md"), contract("- [ ] `feature:missing`"));
     const now = new Date();
     await writeFile(
       eventsFile(root),
