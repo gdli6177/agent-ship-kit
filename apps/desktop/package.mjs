@@ -1,8 +1,6 @@
 import { createRequire } from "node:module";
 import { packager } from "@electron/packager";
-import { execFile } from "node:child_process";
 import {
-  chmod,
   cp,
   mkdtemp,
   readFile,
@@ -10,13 +8,10 @@ import {
   writeFile,
 } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { dirname, join, resolve } from "node:path";
-import { promisify } from "node:util";
+import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const here = dirname(fileURLToPath(import.meta.url)),
-  workspace = resolve(here, "../.."),
-  exec = promisify(execFile),
   electronVersion = createRequire(import.meta.url)("electron/package.json")
     .version,
   desktopPackage = JSON.parse(
@@ -28,40 +23,26 @@ const here = dirname(fileURLToPath(import.meta.url)),
 try {
   if (process.platform !== "darwin" || process.arch !== "arm64")
     throw new Error("Desktop packaging currently requires macOS arm64");
-  const pnpmArgs = [
-    "--filter",
-    "@crewvane/desktop",
-    "deploy",
-    "--legacy",
-    "--prod",
-    "--config.node-linker=hoisted",
-    stage,
-  ];
-  if (process.env.npm_execpath) {
-    await exec(process.execPath, [process.env.npm_execpath, ...pnpmArgs], {
-      cwd: workspace,
-      maxBuffer: 10 * 1024 * 1024,
-    });
-  } else {
-    await exec(process.platform === "win32" ? "pnpm.cmd" : "pnpm", pnpmArgs, {
-      cwd: workspace,
-      maxBuffer: 10 * 1024 * 1024,
-    });
+  if (signingIdentity) {
+    const identities = await execFile("security", ["find-identity", "-v", "-p", "codesigning"]);
+    if (!identities.stdout.includes(signingIdentity) && !identities.stdout.includes(`"${signingIdentity}"`))
+      throw new Error(`Configured Developer ID is not available: ${signingIdentity}`);
   }
+  // Electron/main, preload, CLI and renderer are bundled by build.mjs.
+  // Deploying the source package also copies its previous release directory,
+  // recursively shipping old applications/installers with every new build.
+  await import("./scripts/build-icons.mjs");
   await cp(join(here, "dist"), join(stage, "dist"), { recursive: true });
-  await chmod(
-    join(
-      stage,
-      "node_modules",
-      "node-pty",
-      "prebuilds",
-      `${process.platform}-${process.arch}`,
-      "spawn-helper",
-    ),
-    0o755,
-  ).catch((error) => {
-    if (error?.code !== "ENOENT") throw error;
+  const nativePackage = dirname(createRequire(import.meta.url).resolve("node-pty/package.json"));
+  await cp(nativePackage, join(stage, "node_modules/node-pty"), {
+    recursive: true,
+    filter: (path) => !/\/(?:src|deps|test|fixtures|obj\.target)(?:\/|$)/.test(path),
   });
+  const addonPackage = dirname(createRequire(join(nativePackage, "package.json")).resolve("node-addon-api/package.json"));
+  await cp(addonPackage, join(stage, "node_modules/node-addon-api"), { recursive: true });
+  await cp(join(here, "assets/brand/crewvane-icon.png"), join(stage, "dist/assets/crewvane-icon.png"));
+  const cliNode = join(stage, "cli-node");
+  await cp(process.execPath, cliNode);
   await writeFile(
     join(stage, "package.json"),
     JSON.stringify({
@@ -70,8 +51,8 @@ try {
       description: desktopPackage.description,
       productName: "Crewvane",
       main: "dist/main.cjs",
+      dependencies: { "node-pty": createRequire(import.meta.url)("node-pty/package.json").version },
       private: false,
-      dependencies: desktopPackage.dependencies,
     }),
   );
   const paths = await packager({
@@ -82,16 +63,10 @@ try {
     appBundleId: "dev.crewvane.desktop",
     platform: "darwin",
     arch: "arm64",
-    asar: { unpack: "**/node_modules/node-pty/**" },
-    ignore: [
-      /^\/electron(?:\/|$)/,
-      /^\/src(?:\/|$)/,
-      /^\/scripts(?:\/|$)/,
-      /^\/build\.mjs$/,
-      /^\/index\.html$/,
-      /^\/package\.mjs$/,
-      /^\/tsconfig\.json$/,
-    ],
+    icon: join(here, "assets/brand/crewvane-icon.icns"),
+    asar: { unpack: "{**/dist/cli/**,**/node_modules/node-pty/**}" },
+    extraResource: [cliNode],
+    ignore: [/^\/cli-node$/, /^\/dist\/.*\.map$/],
     overwrite: true,
     prune: true,
     appCategoryType: "public.app-category.developer-tools",

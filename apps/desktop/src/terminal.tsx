@@ -1,231 +1,90 @@
 import { useEffect, useRef, useState } from "react";
-import * as Dialog from "@radix-ui/react-dialog";
-import { FitAddon } from "@xterm/addon-fit";
 import { Terminal } from "@xterm/xterm";
-import { RefreshCw, TerminalSquare, X } from "lucide-react";
-import { api, type TerminalBackend } from "./api.js";
+import { FitAddon } from "@xterm/addon-fit";
+import { Maximize2, Minimize2, RefreshCw, X } from "lucide-react";
+import { api } from "./api.js";
 import "@xterm/xterm/css/xterm.css";
 
-export function TerminalDrawer({
-  open,
-  close,
-  workspace,
-  cwd,
-  theme,
-}: {
-  open: boolean;
-  close: () => void;
-  workspace?: string;
-  cwd?: string;
-  theme: "light" | "dark";
+export function HerdrTerminal({ session, title, theme, visible, onClose }: {
+  session: string; title: string; theme: string; visible: boolean; onClose: () => void;
 }) {
-  const [terminalElement, setTerminalElement] =
-      useState<HTMLDivElement | null>(null),
-    terminal = useRef<Terminal | null>(null),
-    fit = useRef<FitAddon | null>(null),
-    session = useRef<string | undefined>(undefined),
-    [backends, setBackends] = useState<TerminalBackend[]>([]),
-    [backend, setBackend] = useState(""),
-    [generation, setGeneration] = useState(0),
-    [status, setStatus] = useState("未连接"),
-    [error, setError] = useState("");
-
+  const container = useRef<HTMLDivElement>(null);
+  const term = useRef<Terminal | undefined>(undefined);
+  const visibleRef = useRef(visible);
+  visibleRef.current = visible;
+  const [error, setError] = useState(""), [expanded, setExpanded] = useState(false);
+  const [attempt, setAttempt] = useState(0);
   useEffect(() => {
-    if (!open) return;
-    void api
-      .terminalBackends()
-      .then((items) => {
-        setBackends(items);
-        const current = items.find((item) => item.id === backend);
-        if (current?.status !== "ready") {
-          const preferred = items.find(
-            (item) => item.id === "herdr" && item.status === "ready",
-          );
-          setBackend(
-            preferred?.id ??
-              items.find((item) => item.status === "ready")?.id ??
-              "",
-          );
-        }
-      })
-      .catch((reason) => setError(String(reason).replace(/^Error: /, "")));
-  }, [open, workspace]);
-
-  useEffect(() => {
-    if (!open || !terminalElement || !backend || !workspace) return;
-    const instance = new Terminal({
-      convertEol: true,
-      cursorBlink: true,
-      fontFamily:
-        '"SFMono-Regular", "Cascadia Code", "JetBrains Mono", monospace',
-      fontSize: 13,
-      lineHeight: 1.25,
-      scrollback: 5000,
-      theme:
-        theme === "dark"
-          ? {
-              background: "#0d1118",
-              foreground: "#dce3ee",
-              cursor: "#5aa2ff",
-              selectionBackground: "#29527c",
-              black: "#111820",
-              brightBlack: "#7c8a9e",
-            }
-          : {
-              background: "#f8fafc",
-              foreground: "#192230",
-              cursor: "#1669e8",
-              selectionBackground: "#c8dcff",
-              black: "#1f2937",
-              brightBlack: "#64748b",
-            },
+    const terminal = new Terminal({
+      cursorBlink: true, fontFamily: '"SFMono-Regular", Menlo, Consolas, monospace',
+      fontSize: 13, lineHeight: 1.25, scrollback: 3000,
+      allowProposedApi: false, screenReaderMode: true, cols: 120, rows: 32, theme: terminalTheme(theme),
     });
-    const fitAddon = new FitAddon();
-    instance.loadAddon(fitAddon);
-    instance.open(terminalElement);
-    fitAddon.fit();
-    instance.focus();
-    terminal.current = instance;
-    fit.current = fitAddon;
-    let disposed = false;
-    const unsubscribe = api.subscribe((event) => {
-      if (event.type === "terminal.data" && event.id === session.current)
-        instance.write(event.data);
-      if (event.type === "terminal.exit" && event.id === session.current) {
-        session.current = undefined;
-        setStatus(
-          event.exitCode === 0 ? "会话已结束" : `会话退出 (${event.exitCode})`,
-        );
-        instance.write(
-          `\r\n\x1b[38;2;133;147;166m[进程已退出，退出码 ${event.exitCode}]\x1b[0m\r\n`,
-        );
-      }
-    });
-    const input = instance.onData((data) => {
-      if (session.current) void api.terminalWrite(session.current, data);
-    });
-    const observer = new ResizeObserver(() => {
-      fit.current?.fit();
-      if (session.current)
-        void api.terminalResize(
-          session.current,
-          terminal.current?.cols ?? 80,
-          terminal.current?.rows ?? 24,
-        );
-    });
-    observer.observe(terminalElement);
-    setStatus("正在启动…");
-    setError("");
-    void api
-      .terminalStart({
-        backend,
-        cwd,
-        cols: instance.cols,
-        rows: instance.rows,
-      })
-      .then(({ id }) => {
-        if (disposed) {
-          void api.terminalStop(id);
-          return;
-        }
-        session.current = id;
-        setStatus(
-          backends.find((item) => item.id === backend)?.name ?? backend,
-        );
-      })
-      .catch((reason) => {
-        setStatus("启动失败");
-        setError(String(reason).replace(/^Error: /, ""));
-      });
-    return () => {
-      disposed = true;
-      observer.disconnect();
-      input.dispose();
-      unsubscribe();
-      if (session.current) void api.terminalStop(session.current);
-      session.current = undefined;
-      instance.dispose();
-      terminal.current = null;
-      fit.current = null;
+    const fit = new FitAddon();
+    terminal.loadAddon(fit);
+    terminal.open(container.current!);
+    term.current = terminal;
+    let active = true, hydrated = false, queued: { data: string; sequence: number }[] = [];
+    const report = (reason: unknown) => { if (active) setError(String(reason).replace(/^Error: /, "")); };
+    const resize = () => {
+      if (!active || !hydrated || !container.current?.clientWidth || !container.current.clientHeight) return;
+      fit.fit();
+      void api.resizeTerminal(session, terminal.cols, terminal.rows).catch(report);
     };
-  }, [open, backend, workspace, cwd, theme, generation, terminalElement]);
-
-  const active = backends.find((item) => item.id === backend);
+    const unsubscribe = api.subscribe((event) => {
+      if (event.session !== session) return;
+      if (event.type === "terminal-data") {
+        if (hydrated) terminal.write(event.data);
+        else queued.push({ data: event.data, sequence: event.sequence });
+      }
+      if (event.type === "terminal-exit") setError(event.error || "终端连接已断开。目标和会话记录仍然保留，可重新连接。");
+    });
+    setError("");
+    void api.terminalSnapshot().then((snapshot) => {
+      if (!active) return;
+      if (!snapshot || snapshot.session !== session) throw new Error("当前工作区没有已连接的 Herdr 终端");
+      terminal.resize(snapshot.cols, snapshot.rows);
+      terminal.write(snapshot.data, () => {
+        if (!active) return;
+        for (const chunk of queued) if (chunk.sequence > snapshot.sequence) terminal.write(chunk.data);
+        queued = [];
+        hydrated = true;
+        if (!snapshot.running) report(snapshot.error || "终端已断开，请重新连接");
+        resize();
+        if (visibleRef.current) terminal.focus();
+      });
+    }).catch(report);
+    const input = terminal.onData((data) => { void api.writeTerminal(session, data).catch(report); });
+    const observer = new ResizeObserver(resize);
+    observer.observe(container.current!);
+    return () => {
+      active = false;
+      observer.disconnect(); unsubscribe(); input.dispose(); terminal.dispose();
+      term.current = undefined;
+    };
+    // Theme is updated in-place below so changing it never reconnects a session.
+  }, [session, attempt]);
+  useEffect(() => { if (term.current) term.current.options.theme = terminalTheme(theme); }, [theme]);
+  useEffect(() => { if (visible) term.current?.focus(); else term.current?.blur(); }, [visible]);
   return (
-    <Dialog.Root open={open} onOpenChange={(next) => !next && close()}>
-      <Dialog.Portal>
-        <Dialog.Overlay className="drawer-backdrop" />
-        <Dialog.Content
-          className="terminal-drawer"
-          aria-describedby={undefined}
-        >
-          <div className="drawer-head">
-            <div className="drawer-title">
-              <span className="drawer-icon">
-                <TerminalSquare size={18} />
-              </span>
-              <div>
-                <Dialog.Title>执行终端</Dialog.Title>
-                <small>{status}</small>
-              </div>
-            </div>
-            <div className="terminal-controls">
-              <label>
-                <select
-                  aria-label="终端后端"
-                  title="终端后端"
-                  value={backend}
-                  onChange={(event) => setBackend(event.target.value)}
-                >
-                  {backends.map((item) => (
-                    <option
-                      key={item.id}
-                      value={item.id}
-                      disabled={item.status !== "ready"}
-                    >
-                      {item.name}
-                      {item.status === "ready" ? "" : " · 未安装"}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <button
-                type="button"
-                className="drawer-icon-btn"
-                aria-label="重启终端"
-                title="重启终端"
-                onClick={() => setGeneration((current) => current + 1)}
-              >
-                <RefreshCw size={16} />
-              </button>
-              <Dialog.Close asChild>
-                <button
-                  type="button"
-                  className="drawer-icon-btn"
-                  aria-label="关闭终端"
-                >
-                  <X size={18} />
-                </button>
-              </Dialog.Close>
-            </div>
-          </div>
-          <p className="terminal-boundary">
-            <strong>此终端用于观察与接管，Agent 协作由 Crewvane 协议完成。</strong>
-            <span>安装 Herdr 后优先使用；未安装时回退到 Shell 或 runtime CLI。</span>
-          </p>
-          {active && (
-            <p className="terminal-note" title={active.reason}>
-              {active.reason}
-            </p>
-          )}
-          {error && <div className="terminal-error">{error}</div>}
-          <div
-            ref={setTerminalElement}
-            className="terminal-surface"
-            aria-label="交互式终端"
-          />
-        </Dialog.Content>
-      </Dialog.Portal>
-    </Dialog.Root>
+    <section className={`terminal-panel ${expanded ? "expanded" : ""} ${visible ? "" : "terminal-hidden"}`} aria-label="Herdr 工作现场" aria-hidden={!visible} inert={!visible}>
+      <header className="terminal-heading">
+        <div><span className={`terminal-dot ${error ? "offline" : ""}`} /><strong>{title}</strong><small>HERDR · 会话持续保留</small></div>
+        <div>
+          <button className="icon-button" aria-label={expanded ? "还原现场面板" : "展开现场面板"} onClick={() => setExpanded(!expanded)}>{expanded ? <Minimize2 size={16} /> : <Maximize2 size={16} />}</button>
+          <button className="secondary terminal-hide" title="隐藏面板，Agent 继续执行" onClick={onClose}><X size={15} />隐藏终端</button>
+        </div>
+      </header>
+      {error && <div className="terminal-error" role="alert"><span>{error}</span><button className="secondary" onClick={async () => {
+        try { await api.openHerdr(); setAttempt((value) => value + 1); }
+        catch (reason) { setError(String(reason)); }
+      }}><RefreshCw size={14} />重新连接</button></div>}
+      <div className="terminal-surface" ref={container} />
+    </section>
   );
+}
+function terminalTheme(_theme: string) {
+  // Herdr and CLI agents render their own ANSI palette. Keep their canvas dark
+  // in both app themes so hard-coded light text remains readable.
+  return { background: "#111420", foreground: "#dce1f0", cursor: "#b4a2ff", selectionBackground: "#383250" };
 }

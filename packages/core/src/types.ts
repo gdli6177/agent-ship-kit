@@ -1,285 +1,56 @@
-/**
- * Runtime ids are extensible so a local ACP or Codex App Server CLI can be
- * registered without adding another brand-specific branch to the scheduler.
- */
-export type RuntimeId = string;
-export type RuntimeProtocol = "acp" | "codex-app-server" | "none";
-export type Role = "captain" | "lead" | "worker" | "verifier";
-export type Action = "read" | "write" | "verify" | "publish_pr";
-export type TaskStatus =
-  | "queued"
-  | "planning"
-  | "running"
-  | "waiting_human"
-  | "needs_reconcile"
-  | "failed"
-  | "cancelled"
-  | "completed";
-export interface ExecutionProfile {
-  id: string;
-  name: string;
-  runtime: RuntimeId;
-  model: string;
-  effort?: string;
-  fallback?: string[];
+export type GoalStatus = "active" | "waiting" | "review" | "completed" | "dropped";
+export type AttentionKind = "decision" | "review" | "follow_up" | "intervention";
+export type LiveState = "working" | "idle" | "done" | "blocked" | "unknown";
+export interface Project { id: string; name: string; path?: string; createdAt: string }
+export interface WorkflowStep { id: string; name: string; prompt: string }
+export interface Workflow { id: string; name: string; steps: WorkflowStep[] }
+export interface AgentPreferences { concierge: string; owner?: string; worker?: string }
+export interface Attention { kind: AttentionKind; summary: string; since: string; notifiedAt?: string; source?: "live" | "dispatch" | "watchdog" }
+export interface HerdrReference { session: string; workspaceId?: string; tabId?: string; paneId?: string; agent?: string }
+export interface LivePresence { state: LiveState; checkedAt: string; reachable?: boolean }
+export type WatchdogReason = "blocked" | "missing" | "stale";
+export interface WatchdogState {
+  reason: WatchdogReason; basis: string; detectedAt: string;
+  attemptedAt?: string; contactedAt?: string; escalatedAt?: string; lastError?: string;
 }
-export interface RuntimeModel {
-  id: string;
-  name: string;
-  efforts?: string[];
-}
-export interface RuntimeCapabilities {
-  dispatch: boolean;
-  stream: boolean;
-  cancel: boolean;
-  resume: boolean;
-  modelDiscovery: boolean;
-  interactiveTerminal: boolean;
-}
-export interface RuntimeInfo {
-  id: RuntimeId;
-  name: string;
-  executable?: string;
-  application?: string;
-  version?: string;
-  protocol?: RuntimeProtocol;
-  launchArgs?: string[];
-  interactiveArgs?: string[];
-  capabilities?: RuntimeCapabilities;
-  status: "missing" | "detected" | "ready" | "unavailable" | "discovery_only";
-  models: RuntimeModel[];
-  reason?: string;
-  checkedAt?: string;
-}
-export interface WorkflowStage {
-  id: string;
-  name: string;
-  goal: string;
-  role: "worker" | "verifier";
-  profile?: string;
-  inputs: string[];
-  outputs: string[];
-  completion: string;
-  parallel: number;
-  returnTo?: string;
-  retries: number;
-}
-export interface WorkflowTemplate {
-  id: string;
-  name: string;
-  version: number;
-  stages: WorkflowStage[];
-}
-export interface DelegationGrant {
-  id: string;
-  projectId: string;
-  approvedBy: string;
-  approvedAt: string;
-  revokedAt?: string;
-  actions: Action[];
-  profiles: string[];
-  allowedPaths: string[];
-  forbiddenPaths: string[];
-  maxParallel: number;
-  maxTaskMinutes: number;
-  credentials?: string[];
-}
-export interface CredentialReference {
-  id: string;
-  projectId: string;
-  label: string;
-  env: string;
-  checkIndex: number;
-  createdAt: string;
-}
-export interface Project {
-  id: string;
-  name: string;
-  path: string;
-  baseBranch: string;
-  checks: string[][];
-  roles: Partial<Record<Role, string>>;
-  defaultProfile?: string;
-  grant?: DelegationGrant;
-  shipPolicy: "external-approval";
-  credentials?: CredentialReference[];
-}
-export type RiskAction =
-  | "delete_data"
-  | "stop_service"
-  | "spend_money"
-  | "send_message"
-  | "product_direction"
-  | "rotate_secret"
-  | "change_permissions"
-  | "change_ship_policy";
-export interface StageResult {
-  knowledgeQuery?: string;
-  verifyCheck?: number;
-  action?: RiskAction;
-  status: "done" | "blocked" | "rework";
-  summary: string;
-  evidence: string[];
-  outputs: Record<string, string>;
-  question?: string;
-  recommendation?: string;
-  returnTo?: string;
-}
-export interface WorkflowRun {
-  template: WorkflowTemplate;
-  stage: number;
-  round: number;
-  results: {
-    stageId: string;
-    round: number;
-    workers: StageResult[];
-    commit: string;
-    valid: boolean;
-  }[];
-}
-export interface Task {
-  id: string;
-  projectId: string;
-  grantId: string;
-  title: string;
-  request: string;
-  createdAt: string;
-  status: TaskStatus;
-  workflow: WorkflowRun;
-  profile?: string;
-  branch: string;
-  baseCommit?: string;
-  checkout?: string;
-  summary?: string;
-  error?: string;
-  discussion?: boolean;
-  pr?: string;
-  publishIntent?: string;
-  cancelledAt?: string;
-  reviewRounds: number;
-  decisions: string[];
-  integrationHead?: string;
-  contextRevision?: number;
-  executedRevision?: number;
-  learning?: { outcome: "pending" | "none" | "candidate" | "failed"; reason: string; lessonIds: string[] };
-}
-export interface AgentInstance {
-  id: string;
-  taskId: string;
-  parent?: string;
-  role: Role;
-  profileId: string;
-  runtime: RuntimeId;
-  model: string;
-  sessionId?: string;
-  cwd: string;
-  pid?: number;
-  status:
-    | "reserved"
-    | "running"
-    | "completed"
-    | "failed"
-    | "cancelled"
-    | "needs_reconcile";
-  startedAt: string;
-  finishedAt?: string;
-  summary?: string;
-  contextSources?: { path: string; digest: string; bodyIncluded: boolean }[];
-  lessonIds?: string[];
-  hostChecks?: { head: string; checks: { index: number; output: string }[] };
-}
-export interface DecisionRequest {
-  id: string;
-  taskId: string;
-  projectId: string;
-  question: string;
-  rootCause: string;
-  evidence: string[];
-  tried: string[];
-  recommendation: string;
-  level: "lead" | "captain" | "human";
-  status: "open" | "resolved";
-  answer?: string;
-  answeredBy?: string;
-  createdAt: string;
-}
-export interface DecisionRecord {
-  id: string;
-  projectId: string;
-  rootCause: string;
-  question: string;
-  answer: string;
-  rejected: boolean;
-  source: string;
-  by: string;
-  at: string;
-  expiresAt?: string;
-}
-export type ChatRouteAction = "create" | "forward" | "status" | "reply" | "clarify";
-export interface ChatRouting {
-  status: "pending" | "clarifying" | "applied" | "failed";
-  action?: ChatRouteAction;
-  taskId?: string;
-  candidates?: string[];
-  resolvedBy?: string;
-  error?: string;
-}
-export interface ChatMessage {
-  id: string;
-  role: "human" | "captain";
-  text: string;
-  at: string;
-  taskId?: string;
-  projectId?: string;
-  replyTo?: string;
-  contextTaskId?: string;
-  clarifies?: string;
-  routing?: ChatRouting;
+export interface DeliveryCheck { name: string; command: string; result: "passed" | "failed"; note?: string }
+export interface Delivery { summary: string; location?: string; url?: string; checks: DeliveryCheck[]; submittedAt: string; submittedBy: string }
+export interface Activity { id: string; at: string; actor: string; kind: "created" | "progress" | "waiting" | "decision" | "delivery" | "accepted" | "rework" | "dropped" | "resolved" | "reminder" | "session" | "watchdog"; text: string }
+export interface Goal {
+  id: string; projectId: string; title: string; description: string;
+  mode: "concierge" | "manual"; status: GoalStatus;
+  steps: WorkflowStep[]; stageId?: string; next: string; owner: string;
+  waitingFor?: string; remindAt?: string; attention: Attention | null;
+  delivery?: Delivery; herdr?: HerdrReference; live?: LivePresence;
+  dispatch?: { status: "pending" | "sent" | "failed"; at: string; detail?: string };
+  watchdog?: WatchdogState;
+  activities: Activity[]; createdAt: string; updatedAt: string;
 }
 export interface WorkspaceState {
-  version: 1;
-  profiles: ExecutionProfile[];
-  runtimes: RuntimeInfo[];
-  projects: Project[];
-  workflows: WorkflowTemplate[];
-  tasks: Task[];
-  agents: AgentInstance[];
-  decisions: DecisionRequest[];
-  ledger: DecisionRecord[];
-  messages: ChatMessage[];
-  defaultProfile?: string;
-  maxParallel: number;
-  knowledgeRevision?: number;
-  credentialAccess?: { taskId: string; credentialIds: string[]; checkIndex: number; at: string }[];
+  version: 2; name: string; projects: Project[]; workflows: Workflow[]; goals: Goal[];
+  agents?: AgentPreferences;
+  concierge: HerdrReference & { status: "not_ready" | "ready" | "error"; detail?: string };
 }
-export interface RuntimeEvent {
-  type: "text" | "tool" | "permission" | "status";
-  sessionId?: string;
-  text: string;
-}
-export interface PermissionRequest {
-  method: string;
-  params: Record<string, unknown>;
-}
-export interface SessionOptions {
-  cwd: string;
-  model: string;
-  effort?: string;
-  role: Role;
-  resume?: string;
-  onEvent: (event: RuntimeEvent) => void;
-  permission: (request: PermissionRequest) => Promise<boolean>;
-}
-export interface RuntimeSession {
-  id: string;
-  pid: number;
-  models: RuntimeModel[];
-  prompt(text: string): Promise<string>;
-  cancel(): Promise<void>;
-  close(): Promise<void>;
-}
-export interface RuntimeAdapter {
-  id: RuntimeId;
-  probe(cwd: string): Promise<RuntimeInfo>;
-  open(options: SessionOptions): Promise<RuntimeSession>;
-}
+export type CrewvaneCommand =
+  | { type: "snapshot" }
+  | { type: "workspace.rename"; name: string }
+  | { type: "agents.configure"; preferences: AgentPreferences }
+  | { type: "project.add"; name: string; path?: string }
+  | { type: "project.remove"; projectId: string }
+  | { type: "workflow.save"; workflow: Workflow }
+  | { type: "goal.create"; input: { title: string; description?: string; projectId: string; workflowId?: string; mode: "concierge" | "manual"; next?: string; waitingFor?: string; remindAt?: string } }
+  | { type: "goal.update"; goalId: string; patch: { title?: string; description?: string; next?: string; owner?: string; stageId?: string; waitingFor?: string; remindAt?: string | null; status?: "active" | "waiting" } }
+  | { type: "goal.progress"; goalId: string; summary: string; next?: string; stageId?: string; actor?: string }
+  | { type: "goal.dispatch"; goalId: string; status: "pending" | "sent" | "failed"; detail?: string }
+  | { type: "goal.wait"; goalId: string; reason: string; owner?: string; remindAt?: string; actor?: string }
+  | { type: "goal.decide"; goalId: string; question: string; next?: string; actor?: string }
+  | { type: "goal.review"; goalId: string; delivery: Omit<Delivery, "submittedAt" | "submittedBy">; actor?: string }
+  | { type: "goal.accept" | "goal.drop" | "goal.resolve"; goalId: string; note?: string; actor?: string }
+  | { type: "goal.rework"; goalId: string; note: string; actor?: string }
+  | { type: "goal.remind"; goalId: string; at: string; note?: string }
+  | { type: "session.set"; goalId?: string; reference: HerdrReference }
+  | { type: "concierge.status"; status: "not_ready" | "ready" | "error"; detail?: string; reference?: HerdrReference }
+  | { type: "live.sync"; presences: Record<string, LivePresence> }
+  | { type: "watchdog.inspect"; at: string }
+  | { type: "watchdog.report"; goalId: string; at: string; basis: string; outcome: "contacted" | "failed"; detail?: string }
+  | { type: "notification.sent"; goalId: string; kind: AttentionKind; at: string };

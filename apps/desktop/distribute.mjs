@@ -24,6 +24,7 @@ const output = join(here, "release", "installers");
 const app = join(here, "release", "Crewvane-darwin-arm64", "Crewvane.app");
 const stem = `Crewvane-${metadata.version}-macOS-arm64`;
 const stage = await mkdtemp(join(tmpdir(), "crewvane-installer-"));
+await rm(output, { recursive: true, force: true });
 await mkdir(output, { recursive: true });
 try {
   await cp(app, join(stage, "Crewvane.app"), { recursive: true, verbatimSymlinks: true });

@@ -59,6 +59,11 @@ jobs:
           cat > notes.md <<'NOTES'
           Crewvane｜协航 macOS Apple Silicon 内测版
 
+          0.4：一位全局管家统筹所有项目与个人事项。注意力聚合决定、验收、到期跟进和需要介入的问题。
+          应用内 Herdr 终端支持隐藏与恢复；设置中可填写各角色的 CLI 启动命令及原生参数。
+          工序为名称与提示词组成的说明书；内置 Crewvane CLI 与桌面共用目标状态。
+          本版重做本地数据模型，不读取 0.3 的工作区状态；请选择新的工作区目录。
+
           下载 Assets 中的 .dmg，将 Crewvane.app 拖入 Applications；也可下载 .zip 解压安装。
           SHA256SUMS.txt 可用于校验下载文件。GitHub 自动生成的 Source code 是源码，不是安装包。
           v0.3.0 的应用包签名不完整，请使用 v0.3.1 或更新版本。

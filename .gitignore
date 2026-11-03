@@ -13,4 +13,5 @@ playwright/.auth/
 .crewvane/
 apps/desktop/dist/
 apps/desktop/release/
+cli/dist/
 artifacts/
