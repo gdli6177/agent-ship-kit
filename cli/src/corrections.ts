@@ -15,7 +15,7 @@ async function validateSource(root: string, source: string) {
   const match = /^(proposal|contract|task|session):([A-Za-z0-9][A-Za-z0-9_-]{0,79})$/.exec(source);
   if (!match) throw new Error("source must be proposal:ID, contract:ID, task:ID or session:ID");
   const [, kind, id] = match;
-  if (kind === "proposal" || kind === "contract") await readFile(join(root, `.agent-ship/${kind}s/${id}.md`), "utf8");
+  if (kind === "proposal" || kind === "contract") await readFile(join(root, `.crewvane/${kind}s/${id}.md`), "utf8");
   if (kind === "task" && !(await readEvents(root)).some(event => event.source_task_id === id)) throw new Error("unknown source task");
   return { kind: kind!, id: id! };
 }
@@ -38,7 +38,7 @@ export async function addCorrection(root: string, input: CorrectionInput) {
   if (evidence.length > 9) throw new Error("at most 9 evidence references");
   const event = await writeEvent(root, { type: "correction", title: "Human correction", summary: text, corrected_by: correctedBy, source: input.source, source_task_id: source.id, scope, project, tags, when, action, evidence_urls: evidence, trigger: "user_correction" });
   // Append a resolution annotation rather than guessing which old risk sentence to replace.
-  if (source.kind === "proposal") await appendFile(join(root, `.agent-ship/proposals/${source.id}.md`), `\n## Human correction ${event.id}\nStatus: resolved_by_human\nSource: ${event.id}\nCorrected by: ${correctedBy}\n${text}\nPrevious risks remain historical; use this correction when revising the plan.\n`);
+  if (source.kind === "proposal") await appendFile(join(root, `.crewvane/proposals/${source.id}.md`), `\n## Human correction ${event.id}\nStatus: resolved_by_human\nSource: ${event.id}\nCorrected by: ${correctedBy}\n${text}\nPrevious risks remain historical; use this correction when revising the plan.\n`);
   const extraction = scope === "event" ? null : await extractLearning(root, { eventId: event.id });
   return { event, extraction };
 }
@@ -50,9 +50,9 @@ export async function recordLessonUse(root: string, ids: string[], checkpoint: s
 
 export async function extractLearning(root: string, options: { since?: string; project?: string; dryRun?: boolean; eventId?: string } = {}) {
   if (options.since && !Number.isFinite(Date.parse(options.since))) throw new Error("invalid --since date");
-  return withLock(join(root, ".agent-ship"), async () => {
+  return withLock(join(root, ".crewvane"), async () => {
     const events = await readEvents(root);
-    const inbox = (await readFile(join(root, ".agent-ship/inbox.jsonl"), "utf8").catch((error: NodeJS.ErrnoException) => { if (error.code === "ENOENT") return ""; throw error; })).split("\n").filter(Boolean).map(line => JSON.parse(line) as Record<string, unknown>);
+    const inbox = (await readFile(join(root, ".crewvane/inbox.jsonl"), "utf8").catch((error: NodeJS.ErrnoException) => { if (error.code === "ENOENT") return ""; throw error; })).split("\n").filter(Boolean).map(line => JSON.parse(line) as Record<string, unknown>);
     const signals = [...events, ...inbox].filter(event => (event.type === "correction" && event.scope !== "event") || (event.type === "review_decided" && event.decision === "changes_requested" && typeof event.note === "string") || event.type === "scope_discovered");
     const directory = await lessonDirectory(root);
     const cards = await readLessons(root);
@@ -84,7 +84,7 @@ export async function extractLearning(root: string, options: { since?: string; p
         tags: Array.isArray(signal.tags) ? signal.tags.map(tag => safeText(String(tag), "tag", 120)) : [trigger],
         ...(project === null ? {} : { project: safeText(String(project), "project", 120) }),
         evidence: [], source_task_id: task, reuse_reason: "Evidence-backed correction or review signal; a maintainer must verify reuse value before activation.",
-        authored_by: "agent-ship-extractor", status: "candidate", updated_at: new Date().toISOString(), demands: [],
+        authored_by: "crewvane-extractor", status: "candidate", updated_at: new Date().toISOString(), demands: [],
       };
       next.evidence = [...new Set([...next.evidence, pointer])].slice(-10);
       next.demands ??= [{ source_task_id: next.source_task_id, tags: [] }];
@@ -102,7 +102,7 @@ export async function extractLearning(root: string, options: { since?: string; p
         if (existing) { await writeLesson(source, next); existing.lesson = next; }
         else { await writeFile(source, `${JSON.stringify(next, null, 2)}\n`, { flag: "wx" }); cards.push({ lesson: next, source, auto: true }); }
         const sequence = await nextSequence(root);
-        await appendFile(join(root, ".agent-ship/events.jsonl"), `${JSON.stringify({ id: `evt_extracted_${sequence}`, sequence, type: "learning_extracted", title: "Signal extracted", summary: "Candidate captured; no automatic activation.", source_task_id: task, signal_id: evidence, lesson_ids: [id], created_at: new Date().toISOString() })}\n`);
+        await appendFile(join(root, ".crewvane/events.jsonl"), `${JSON.stringify({ id: `evt_extracted_${sequence}`, sequence, type: "learning_extracted", title: "Signal extracted", summary: "Candidate captured; no automatic activation.", source_task_id: task, signal_id: evidence, lesson_ids: [id], created_at: new Date().toISOString() })}\n`);
         processed.add(evidence);
       }
       items.push({ id, source, duplicate: !!existing, event_id: evidence });
@@ -113,7 +113,7 @@ export async function extractLearning(root: string, options: { since?: string; p
 
 export async function reviewLearning(root: string, outcome?: string, reason?: string, project?: string) {
   const events = await readEvents(root);
-  const inbox = (await readFile(join(root, ".agent-ship/inbox.jsonl"), "utf8").catch((error: NodeJS.ErrnoException) => { if (error.code === "ENOENT") return ""; throw error; })).split("\n").filter(Boolean).map(line => JSON.parse(line) as Record<string, unknown>);
+  const inbox = (await readFile(join(root, ".crewvane/inbox.jsonl"), "utf8").catch((error: NodeJS.ErrnoException) => { if (error.code === "ENOENT") return ""; throw error; })).split("\n").filter(Boolean).map(line => JSON.parse(line) as Record<string, unknown>);
   const reviews = events.filter(event => event.type === "learning_reviewed");
   const pending = [...events, ...inbox].filter(event => {
     const signal = event.type === "correction" || event.type === "scope_discovered" || (event.type === "review_decided" && event.decision === "changes_requested" && typeof event.note === "string");

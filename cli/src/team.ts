@@ -1,7 +1,7 @@
 import { mkdir, readFile, realpath, rm, stat, writeFile } from "node:fs/promises";
 import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 
-export const TEAM_CONFIG = "agent-ship.team.json";
+export const TEAM_CONFIG = "crewvane.team.json";
 export const DEFAULT_HANDBOOK = "docs/agent-team/handbook.md";
 export const DEFAULT_LESSONS = "docs/agent-team/lessons";
 export interface TeamConfig {
@@ -24,7 +24,8 @@ export async function optionalText(path: string): Promise<string | null> {
   catch (error) { if ((error as NodeJS.ErrnoException).code === "ENOENT") return null; throw error; }
 }
 export async function boundedText(path: string, bytes = 16384): Promise<string> {
-  if ((await stat(path)).size > bytes) throw new Error("team/lesson document exceeds its size limit");
+  const size = (await stat(path)).size;
+  if (size > bytes) throw new Error(`team/lesson document exceeds its size limit: ${path} (${size} bytes; limit ${bytes} bytes)`);
   return readFile(path, "utf8");
 }
 export function parseJson(raw: string, label: string): unknown {
@@ -42,10 +43,10 @@ function parseConfig(value: unknown): TeamConfig {
   return c as unknown as TeamConfig;
 }
 export async function readTeam(root: string): Promise<TeamProfile | undefined> {
-  for (const source of [join(root, TEAM_CONFIG), join(root, ".agent-ship/team.json")]) {
+  for (const source of [join(root, TEAM_CONFIG), join(root, ".crewvane/team.json")]) {
     const raw = await optionalText(source);
     if (raw !== null) {
-      if (raw.length > 16384) throw new Error("team config exceeds its size limit");
+      if (Buffer.byteLength(raw, "utf8") > 16384) throw new Error(`team config exceeds its size limit: ${source} (${Buffer.byteLength(raw, "utf8")} bytes; limit 16384 bytes)`);
       return { config: parseConfig(parseJson(raw, "team config")), source };
     }
   }
@@ -82,17 +83,17 @@ async function createOnce(root: string, path: string, text: string) {
 }
 
 async function removeLocalTeamCopy(root: string): Promise<void> {
-  await rm(join(root, ".agent-ship", "team.json"), { force: true });
+  await rm(join(root, ".crewvane", "team.json"), { force: true });
 }
 
 export async function initializeTeam(root: string, options: { shared: boolean; kit: string; handbook?: string; lessons?: string }) {
   const shared = await optionalText(join(root, TEAM_CONFIG));
-  const local = await optionalText(join(root, ".agent-ship/team.json"));
+  const local = await optionalText(join(root, ".crewvane/team.json"));
   const existing = shared !== null ? parseConfig(parseJson(shared, "team config")) : local !== null ? parseConfig(parseJson(local, "team config")) : undefined;
   if (shared !== null || (!options.shared && existing)) {
     if ((options.handbook && options.handbook !== existing?.handbook) || (options.lessons && options.lessons !== existing?.lessons)) throw new Error("team sources already configured; edit the owner config explicitly instead of overwriting it");
     if (shared !== null) await removeLocalTeamCopy(root);
-    return [{ path: shared !== null ? TEAM_CONFIG : ".agent-ship/team.json", action: "unchanged" as const }];
+    return [{ path: shared !== null ? TEAM_CONFIG : ".crewvane/team.json", action: "unchanged" as const }];
   }
   let handbook = options.handbook ?? existing?.handbook ?? null;
   if (handbook !== null) {
@@ -109,10 +110,10 @@ export async function initializeTeam(root: string, options: { shared: boolean; k
     actions.push(await createOnce(root, handbook, await readFile(join(options.kit, "templates/team-handbook.md"), "utf8")));
   }
   const learning_required = options.shared ? true : (existing?.learning_required ?? false);
-  const config: TeamConfig = { version: 1, handbook, rules: existing?.rules ?? [], lessons: options.lessons ?? (options.shared && existing?.lessons === ".agent-ship/lessons" ? DEFAULT_LESSONS : existing?.lessons) ?? (options.shared ? DEFAULT_LESSONS : ".agent-ship/lessons"), learning_required, max_lessons: existing?.max_lessons ?? 3, summary_chars: existing?.summary_chars ?? 1200 };
+  const config: TeamConfig = { version: 1, handbook, rules: existing?.rules ?? [], lessons: options.lessons ?? (options.shared && existing?.lessons === ".crewvane/lessons" ? DEFAULT_LESSONS : existing?.lessons) ?? (options.shared ? DEFAULT_LESSONS : ".crewvane/lessons"), learning_required, max_lessons: existing?.max_lessons ?? 3, summary_chars: existing?.summary_chars ?? 1200 };
   parseConfig(config);
   if (options.shared && config.lessons === DEFAULT_LESSONS) actions.push(await createOnce(root, `${DEFAULT_LESSONS}/README.md`, await readFile(join(options.kit, "templates/lesson-index.md"), "utf8")));
-  const destination = options.shared ? TEAM_CONFIG : ".agent-ship/team.json";
+  const destination = options.shared ? TEAM_CONFIG : ".crewvane/team.json";
   actions.push(await createOnce(root, destination, `${JSON.stringify(config, null, 2)}\n`));
   if (options.shared) await removeLocalTeamCopy(root);
   return actions;
@@ -132,7 +133,7 @@ export async function requiredSources(root: string, repo = root): Promise<string
       sources.add(path);
     }
     if (await optionalText(join(location, "AGENTS.md")) !== null) sources.add(await realpath(join(location, "AGENTS.md")));
-    if (await optionalText(join(location, ".agent-ship/AGENTS.local.md")) !== null) sources.add(await realpath(join(location, ".agent-ship/AGENTS.local.md")));
+    if (await optionalText(join(location, ".crewvane/AGENTS.local.md")) !== null) sources.add(await realpath(join(location, ".crewvane/AGENTS.local.md")));
   }
   return [...sources];
 }

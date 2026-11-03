@@ -13,7 +13,7 @@ Browser login and smoke tests are not this file. Those live in
 Filled-in cards stay on the machine. The repo keeps templates, not runtime state.
 
 ```text
-.agent-ship/
+.crewvane/
   inbox.jsonl                 # attention events and review_decided lines
   proposals/<proposal_id>.md  # copy of templates/proposal-card.md
   contracts/<contract_id>.md  # copy of templates/contract-card.md
@@ -22,8 +22,8 @@ Filled-in cards stay on the machine. The repo keeps templates, not runtime state
   limits.json                 # optional { "global_max_parallel": N }; gitignored
 ```
 
-`inbox.jsonl`, the card directories, `.agent-ship/e2e/`, and `limits.json` are
-gitignored. `.agent-ship/.gitkeep` is the only committed marker.
+`inbox.jsonl`, the card directories, `.crewvane/e2e/`, and `limits.json` are
+gitignored. `.crewvane/.gitkeep` is the only committed marker.
 
 ## Identifiers
 
@@ -56,7 +56,7 @@ Slugs are lowercase ascii, digits, and hyphens.
 Two ceilings, both defaulting to 3. The captain does not raise either one.
 
 - **Global:** at most `global_max_parallel` workers in `queued` or `running`
-  across every contract. Default 3. If `.agent-ship/limits.json` exists and
+  across every contract. Default 3. If `.crewvane/limits.json` exists and
   its `global_max_parallel` is a positive integer, use that number when the
   human set it; otherwise use 3.
 - **Per contract:** `max_parallel` on the contract card. Default 3. It must
@@ -105,7 +105,7 @@ Changing a frozen contract does not edit that file. The captain stops the slices
 - One pull request per slice. Opening a PR is not merging it.
 - The review packet links that PR. The human merges, outside this kit, after
   `accept`.
-- The worker prompt includes Allowed paths, Forbidden paths, and any local hard rules in `.agent-ship/hard-rules.json`.
+- The worker prompt includes Allowed paths, Forbidden paths, and any local hard rules in `.crewvane/hard-rules.json`.
 
 ## Order of operations
 
@@ -118,9 +118,9 @@ Changing a frozen contract does not edit that file. The captain stops the slices
    open the worker session. `inbox decide` records the answer; the captain
    relays it.
 6. When a worker reports done, a separate read-only verifier sees only the
-   frozen contract, the branch, and `.agent-ship/hard-rules.json`
+   frozen contract, the branch, and `.crewvane/hard-rules.json`
    (`templates/verifier-prompt.md`). It re-runs
-   acceptance, `agent-ship check`, checklist hints, and relevant E2E smoke. Disagreement goes
+   acceptance, `crewvane check`, checklist hints, and relevant E2E smoke. Disagreement goes
    back to the worker, not to the owner.
 7. On agreement, the captain writes the review packet, including the verifier
    section and E2E rows, and `inbox add`s a `needs_review` event.
@@ -133,7 +133,7 @@ Changing a frozen contract does not edit that file. The captain stops the slices
    then hides that item.
 10. On `changes_requested`, continue the same task if the adapter allows it.
     A changed contract is a new contract id. When the same note comes back,
-    ask the human before `agent-ship promote` or `inbox decide --promote`.
+    ask the human before `crewvane promote` or `inbox decide --promote`.
     The default is not to promote. See `skills/ship-inbox`.
 11. Merge or release happens only when the human does it with their own tools.
 

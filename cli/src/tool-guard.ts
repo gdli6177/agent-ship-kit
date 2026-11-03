@@ -12,8 +12,8 @@ import { writeFile } from "node:fs/promises";
 export type GuardedTool = { tool: "shell"; argv: string[] } | { tool: "read" | "write"; path: string; content?: string };
 const captainCommands = new Set(["team context", "intake add", "intake list", "intake claim", "intake update", "role list", "role show", "status", "status decisions", "slice start", "slice open", "slice update", "inbox add", "inbox list", "notify dry-run", "notify run", "check", "doctor", "learning extract", "learning review", "correction add", "handbook propose", "authority status"]);
 function cliWords(argv: string[]): string[] | null {
-  if (argv[0] === "agent-ship") return argv.slice(1);
-  const runner = fileURLToPath(new URL("../bin/agent-ship.js", import.meta.url));
+  if (argv[0] === "crewvane") return argv.slice(1);
+  const runner = fileURLToPath(new URL("../bin/crewvane.js", import.meta.url));
   if (argv[0] === process.execPath && argv[1] === runner) return argv.slice(2);
   return null;
 }
@@ -23,8 +23,8 @@ export async function guardTool(root: string, input: GuardedTool, repo = root) {
   if (["unconfigured", "unbound", "unknown", "retired"].includes(actor.role)) return refuse("Configure authority and bind the authenticated actor in the host before enabling this hook.");
   if (!input || !["shell", "read", "write"].includes(input.tool)) return refuse("Unknown normalized tool event");
   if (actor.role === "captain") {
-    const budget = await withLock(join(root, ".agent-ship"), async () => {
-      const file = join(root, ".agent-ship/captain-state.json");
+    const budget = await withLock(join(root, ".crewvane"), async () => {
+      const file = join(root, ".crewvane/captain-state.json");
       const raw = await optionalText(file);
       const state = raw ? JSON.parse(raw) as { turn_started_at: string; tool_calls: number; captain_busy_until?: string } : { turn_started_at: new Date().toISOString(), tool_calls: 0 };
       if (Date.now() - Date.parse(state.turn_started_at) > 120000 || state.tool_calls >= 12) return false;
@@ -51,7 +51,7 @@ export async function guardTool(root: string, input: GuardedTool, repo = root) {
       if (command === "notify run" && actor.role === "captain") {
         for (const [flag, file] of [["policy", "notify.policy.md"], ["allowlist", "notify.allowlist.json"]]) {
           const values = words.flatMap((word, index) => word === `--${flag}` ? [words[index + 1]] : word.startsWith(`--${flag}=`) ? [word.slice(flag!.length + 3)] : []);
-          if (values.length !== 1 || !values[0] || resolve(repo, values[0]) !== join(resolve(root), ".agent-ship", file!)) return refuse("Captain notification must use the protected state-root policy and allowlist; artifacts cannot supply executable policy.");
+          if (values.length !== 1 || !values[0] || resolve(repo, values[0]) !== join(resolve(root), ".crewvane", file!)) return refuse("Captain notification must use the protected state-root policy and allowlist; artifacts cannot supply executable policy.");
         }
       }
       if (actor.role === "captain" && !(captainCommands.has(command) || captainCommands.has(group))) return refuse("Command is outside the captain whitelist; delegate to owner/scout/worker.");
@@ -67,12 +67,12 @@ export async function guardTool(root: string, input: GuardedTool, repo = root) {
   let target: string;
   try { target = await ownedDirectory(repo, resolve(repo, input.path)); } catch { return refuse("Path is outside this checkout or is sensitive"); }
   const path = relative(resolve(repo), target).replaceAll("\\", "/");
-  const artifact = /^\.agent-ship\/(proposals|contracts|packets)\//.test(path);
+  const artifact = /^\.crewvane\/(proposals|contracts|packets)\//.test(path);
   if (input.tool === "write") {
     if (actor.role === "human") return { allowed: true, actor: actor.ref, role: actor.role, reason: "Trusted human channel; CLI receipts must be refreshed after protected edits." };
     if (["scout", "verifier"].includes(actor.role)) return refuse("Read-only role cannot write files");
-    if (/^\.agent-ship\/(authority\.json|limits\.json|notify\.policy\.md|notify\.allowlist\.json|approvals)/.test(path)) return refuse("Protected policy must use its registered-human CLI command");
-    if (path.startsWith(".agent-ship/contracts/")) {
+    if (/^\.crewvane\/(authority\.json|limits\.json|notify\.policy\.md|notify\.allowlist\.json|approvals)/.test(path)) return refuse("Protected policy must use its registered-human CLI command");
+    if (path.startsWith(".crewvane/contracts/")) {
       const previous = await optionalText(target);
       if (field(previous ?? "", "Status") === "frozen" || field(input.content ?? "", "Status") === "frozen") return refuse("Use human contract freeze; frozen contracts cannot be rewritten");
     }
@@ -85,7 +85,7 @@ export async function guardTool(root: string, input: GuardedTool, repo = root) {
       const dispatch = (await readEvents(root)).filter(event => event.type === "worker_dispatched" && event.worker_ref === actor.ref).at(-1);
       const active = await (await import("./watchdog.js")).activeSlices(root);
       if (!dispatch || !active.some(slice => slice.source_task_id === dispatch.source_task_id) || resolve(String(dispatch.repo_root)) !== resolve(repo)) return refuse("Worker may only write its recorded execution checkout");
-      const markdown = await optionalText(join(root, `.agent-ship/contracts/${dispatch.contract_id}.md`));
+      const markdown = await optionalText(join(root, `.crewvane/contracts/${dispatch.contract_id}.md`));
       if (!markdown) return refuse("Frozen worker contract is missing");
       const paths = parseContractPaths(markdown);
       const roles = await contractRoles(root, markdown, String(dispatch.slice_id));
@@ -98,7 +98,7 @@ export async function guardTool(root: string, input: GuardedTool, repo = root) {
   }
   if (actor.role === "captain") {
     const sources = await requiredSources(root);
-    const metadata = artifact || ["AGENTS.md", "agent-ship.team.json", ".agent-ship/inbox.jsonl", ".agent-ship/intake.jsonl"].includes(path) || sources.includes(target);
+    const metadata = artifact || ["AGENTS.md", "crewvane.team.json", ".crewvane/inbox.jsonl", ".crewvane/intake.jsonl"].includes(path) || sources.includes(target);
     if (!metadata) return refuse("Captain consumes scout/owner summaries and standing rules, not repository source scans");
   }
   return { allowed: true, actor: actor.ref, role: actor.role, reason: "Read stays in this checkout and respects the role boundary." };

@@ -47,7 +47,7 @@ export function contractFile(root: string, contractId: string): string {
   if (!CONTRACT_ID.test(contractId)) {
     throw new Error("contract id must match [A-Za-z0-9._-]+");
   }
-  return join(root, ".agent-ship", "contracts", `${contractId}.md`);
+  return join(root, ".crewvane", "contracts", `${contractId}.md`);
 }
 
 async function git(root: string, args: string[]): Promise<string> {

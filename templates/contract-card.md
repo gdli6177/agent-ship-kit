@@ -28,7 +28,7 @@ Frozen at: `<ISO-8601>`
 
 ## Acceptance 验收
 
-验收可以列出 `feature:<id>`。id 来自 `.agent-ship/e2e/index.md` 的 Features 表。每个 id 单独取证，指针是报告，不是 storageState。
+验收可以列出 `feature:<id>`。id 来自 `.crewvane/e2e/index.md` 的 Features 表。每个 id 单独取证，指针是报告，不是 storageState。
 
 - [ ] `<check 检查>` — evidence 证据: `<url, command, or path>`
 - [ ] `<check>` — evidence 证据: `<url, command, or path>`
@@ -36,7 +36,7 @@ Frozen at: `<ISO-8601>`
 
 ## Human review budget 人工审阅预算
 
-从已接受的方案原样抄来，次数、审阅条目和可选备注都要一致。验收时用 `human_reviews_expected` 对照 `agent-ship check` 报告的 `inbox_needs_review_count`（该合同的 `needs_review` 条数，含已决定的）。对不上由人判断。本工具不自动合并，也不代人点合并。
+从已接受的方案原样抄来，次数、审阅条目和可选备注都要一致。验收时用 `human_reviews_expected` 对照 `crewvane check` 报告的 `inbox_needs_review_count`（该合同的 `needs_review` 条数，含已决定的）。对不上由人判断。本工具不自动合并，也不代人点合并。
 
 human_reviews_expected: `<count>`
 
@@ -89,7 +89,7 @@ max_parallel: 3
 
 ## Dispatch log 派工记录
 
-派工和状态写入 `.agent-ship/events.jsonl`，不追加到已冻结的文件（整个合同内容受批准摘要保护）。下表只在草稿阶段填写规划；实时记录看事件流。
+派工和状态写入 `.crewvane/events.jsonl`，不追加到已冻结的文件（整个合同内容受批准摘要保护）。下表只在草稿阶段填写规划；实时记录看事件流。
 
 | Slice id | Task id | Worker ref | Status | Dispatched at |
 | --- | --- | --- | --- | --- |

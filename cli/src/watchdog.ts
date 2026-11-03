@@ -82,11 +82,11 @@ interface SliceState {
 const TERMINAL = new Set(["needs_review", "blocked", "failed", "cancelled"]);
 
 export function eventsFile(root: string): string {
-  return join(root, ".agent-ship", "events.jsonl");
+  return join(root, ".crewvane", "events.jsonl");
 }
 
 export function timerHome(): string {
-  return process.env.AGENT_SHIP_TIMER_HOME ?? homedir();
+  return process.env.CREWVANE_TIMER_HOME ?? homedir();
 }
 
 export function projectSlug(root: string): string {
@@ -94,16 +94,16 @@ export function projectSlug(root: string): string {
 }
 
 export function cronFile(root: string): string {
-  return join(timerHome(), ".config", "agent-ship", "cron.d", `agent-ship-${projectSlug(root)}`);
+  return join(timerHome(), ".config", "crewvane", "cron.d", `crewvane-${projectSlug(root)}`);
 }
 
 export function launchdFile(root: string): string {
   return join(
     timerHome(),
     ".config",
-    "agent-ship",
+    "crewvane",
     "launchd",
-    `com.agent-ship.watchdog.${projectSlug(root)}.plist`,
+    `com.crewvane.watchdog.${projectSlug(root)}.plist`,
   );
 }
 
@@ -115,7 +115,7 @@ function watchdogCommand(root: string): { nodeBin: string; cli: string; workdir:
   const kit = kitRoot();
   return {
     nodeBin: process.execPath,
-    cli: join(kit, "cli", "bin", "agent-ship.js"),
+    cli: join(kit, "cli", "bin", "crewvane.js"),
     workdir: join(kit, "cli"),
   };
 }
@@ -125,8 +125,8 @@ export function cronMarker(root: string): { begin: string; end: string; line: st
   const command = watchdogCommand(root);
   const line = `*/5 * * * * ${shellQuote(command.nodeBin)} ${shellQuote(command.cli)} watchdog --root ${shellQuote(root)}`;
   return {
-    begin: `# agent-ship-watchdog-begin ${slug}`,
-    end: `# agent-ship-watchdog-end ${slug}`,
+    begin: `# crewvane-watchdog-begin ${slug}`,
+    end: `# crewvane-watchdog-end ${slug}`,
     line,
   };
 }
@@ -140,7 +140,7 @@ function xml(value: string): string { return value.replace(/&/g, "&amp;").replac
 
 function launchdText(root: string): string {
   const command = watchdogCommand(root);
-  const label = `com.agent-ship.watchdog.${projectSlug(root)}`;
+  const label = `com.crewvane.watchdog.${projectSlug(root)}`;
   return `<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
@@ -165,7 +165,7 @@ function launchdText(root: string): string {
 }
 
 export function timerPlatform(): "cron" | "launchd" | "unsupported" {
-  const override = process.env.AGENT_SHIP_TIMER_PLATFORM;
+  const override = process.env.CREWVANE_TIMER_PLATFORM;
   if (override === "cron" || override === "launchd" || override === "unsupported") return override;
   if (process.platform === "darwin") return "launchd";
   if (process.platform === "linux") return "cron";
@@ -173,7 +173,7 @@ export function timerPlatform(): "cron" | "launchd" | "unsupported" {
 }
 
 export function launchAgentsDir(): string {
-  return process.env.AGENT_SHIP_LAUNCH_AGENTS_DIR ?? join(timerHome(), "Library", "LaunchAgents");
+  return process.env.CREWVANE_LAUNCH_AGENTS_DIR ?? join(timerHome(), "Library", "LaunchAgents");
 }
 
 function userId(): number {
@@ -201,7 +201,7 @@ function runCommand(cmd: string, args: string[], stdin?: string): Promise<{ code
 }
 
 async function crontabList(): Promise<{ ok: boolean; text: string; warning?: string }> {
-  const bin = process.env.AGENT_SHIP_CRONTAB_CMD ?? "crontab";
+  const bin = process.env.CREWVANE_CRONTAB_CMD ?? "crontab";
   try {
     const result = await runCommand(bin, ["-l"]);
     if (result.code === 0) return { ok: true, text: result.stdout };
@@ -213,7 +213,7 @@ async function crontabList(): Promise<{ ok: boolean; text: string; warning?: str
 }
 
 async function crontabReplace(text: string): Promise<string | undefined> {
-  const bin = process.env.AGENT_SHIP_CRONTAB_CMD ?? "crontab";
+  const bin = process.env.CREWVANE_CRONTAB_CMD ?? "crontab";
   try {
     const result = await runCommand(bin, ["-"], text.endsWith("\n") || text === "" ? text : `${text}\n`);
     if (result.code !== 0) return `crontab - failed: ${result.stderr.trim() || result.stdout.trim()}`;
@@ -266,7 +266,7 @@ async function unregisterCron(root: string, dryRun: boolean): Promise<{ removed:
 }
 
 function plistLabel(root: string): string {
-  return `com.agent-ship.watchdog.${projectSlug(root)}`;
+  return `com.crewvane.watchdog.${projectSlug(root)}`;
 }
 
 function installedPlistPath(root: string): string {
@@ -274,7 +274,7 @@ function installedPlistPath(root: string): string {
 }
 
 async function launchctl(args: string[]): Promise<{ code: number; stdout: string; stderr: string }> {
-  const bin = process.env.AGENT_SHIP_LAUNCHCTL_CMD ?? "launchctl";
+  const bin = process.env.CREWVANE_LAUNCHCTL_CMD ?? "launchctl";
   try {
     const result = await runCommand(bin, args);
     return result;
@@ -332,7 +332,7 @@ export async function watchdogStatus(root: string): Promise<WatchdogStatus> {
   const platform = timerPlatform();
   const result: WatchdogStatus = { registered: false, platform, healthy: null, runs: null, last_exit_code: null, last_run_at: null, last_success_at: null, warning: null };
   let runtime: Record<string, unknown> = {};
-  const raw = await readOptionalText(join(root, ".agent-ship/watchdog-health.json"));
+  const raw = await readOptionalText(join(root, ".crewvane/watchdog-health.json"));
   if (raw) { try { runtime = JSON.parse(raw) as Record<string, unknown>; } catch { result.warning = "watchdog health record is invalid"; } }
   if (typeof runtime.last_run_at === "string") result.last_run_at = runtime.last_run_at;
   if (typeof runtime.last_success_at === "string") result.last_success_at = runtime.last_success_at;
@@ -369,7 +369,7 @@ export async function watchdogDoctor(root: string) {
     checks.push({ name, path, ok });
   }
   let tsx = true;
-  try { createRequire(join(kitRoot(), "cli/bin/agent-ship.js")).resolve("tsx/cli"); } catch { tsx = false; }
+  try { createRequire(join(kitRoot(), "cli/bin/crewvane.js")).resolve("tsx/cli"); } catch { tsx = false; }
   checks.push({ name: "tsx", path: kitRoot(), ok: tsx });
   return { ok: checks.every(c => c.ok) && status.registered && status.healthy !== false, status, checks, templates_are_registration_evidence: false };
 }
@@ -471,7 +471,7 @@ export async function readLimits(root: string): Promise<Limits> {
     global_max_parallel: 3,
   };
   try {
-    const parsed = JSON.parse(await readFile(join(root, ".agent-ship", "limits.json"), "utf8")) as {
+    const parsed = JSON.parse(await readFile(join(root, ".crewvane", "limits.json"), "utf8")) as {
       stale_minutes?: unknown;
       speculative?: unknown;
       global_max_parallel?: unknown;
@@ -760,7 +760,7 @@ export async function assertDispatchConsent(root: string, contractId: string, pr
   if (!acceptedAt || !Number.isFinite(Date.parse(acceptedAt))) throw new Error("contract must record a valid Accepted at");
   if (!recordedProposal) throw new Error("contract must record Proposal id");
   if (proposalId && proposalId !== recordedProposal) throw new Error(`proposal id mismatches ${recordedProposal}`);
-  const proposalPath = join(root, ".agent-ship", "proposals", `${recordedProposal}.md`);
+  const proposalPath = join(root, ".crewvane", "proposals", `${recordedProposal}.md`);
   try {
     const proposal = await readFile(proposalPath, "utf8");
     const proposalRecorded = contractField(proposal, "Proposal id");
@@ -827,7 +827,7 @@ export async function preflightSlice(root: string, input: SliceStartInput) {
 
 /** Record a dispatched slice and install the local timer when work is open. */
 export async function startSlice(root: string, input: SliceStartInput) {
-  return withLock(join(root, ".agent-ship"), async () => {
+  return withLock(join(root, ".crewvane"), async () => {
     const { summary, paths, lane, owner, roles, role, active } = await preflightSlice(root, input);
     const repo = await repositoryRoot(input.repoRoot ?? root, true);
     if (lane !== "default" && active.some(slice => slice.repo_root === repo && slice.lane_id !== lane)) throw new Error("different lanes require independent execution checkouts");
@@ -881,21 +881,21 @@ export async function startSlice(root: string, input: SliceStartInput) {
       sequence: await nextSequence(root),
       ...(Object.keys(threadRefs).length > 0 ? { thread_refs: threadRefs } : {}),
     };
-    await mkdir(join(root, ".agent-ship"), { recursive: true });
+    await mkdir(join(root, ".crewvane"), { recursive: true });
     await appendFile(eventsFile(root), `${JSON.stringify(event)}\n`, "utf8");
     if (context.lessons.length) await appendFile(eventsFile(root), `${JSON.stringify({ id: newEventId(), type: "lesson_used", title: "Dispatch guidance", summary: "Reviewed soft guidance supplied.", source_task_id: input.sourceTaskId, project: input.project ?? null, lesson_ids: context.lessons.map(l => l.id), checkpoint: "slice_start", sequence: await nextSequence(root), created_at: new Date().toISOString() })}\n`);
     const count = (await activeSlices(root)).length;
-    await mkdir(join(repo, ".agent-ship"), { recursive: true });
+    await mkdir(join(repo, ".crewvane"), { recursive: true });
     await writeFile(join(repo, pointer("active-contract", lane)), `${input.contractId}\n`);
-    await writeFile(join(repo, ".agent-ship/active-lane"), `${lane}\n`);
-    await writeFile(join(repo, ".agent-ship/state-root"), `${root}\n`);
+    await writeFile(join(repo, ".crewvane/active-lane"), `${lane}\n`);
+    await writeFile(join(repo, ".crewvane/state-root"), `${root}\n`);
     return { timer, role_warnings: roleWarnings(roles, paths.allowed), lane_id: lane, owner_ref: owner || null, role: { ...role.card, source: role.source, markdown: role.markdown }, monitored: event.monitored, monitoring_status: event.monitoring_status, active: count, context };
   });
 }
 
 export async function updateSlice(root: string, taskId: string, status: string, summary = "Worker status updated.", workerRef?: string, allowUntimed = false): Promise<{ active: number; timer: TimerInstall }> {
   if (!["running", "queued", "needs_review", "blocked", "needs_approval", "failed", "cancelled"].includes(status)) throw new Error("invalid slice status");
-  return withLock(join(root, ".agent-ship"), async () => {
+  return withLock(join(root, ".crewvane"), async () => {
     const slices = await allSlices(root);
     const current = slices.find((slice) => slice.source_task_id === taskId);
     if (!current) throw new Error(`unknown task ${taskId}`);

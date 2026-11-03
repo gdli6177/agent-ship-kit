@@ -28,7 +28,7 @@ async function git(root: string, args: string[]): Promise<void> {
 }
 
 async function repo(): Promise<string> {
-  const root = await mkdtemp(join(tmpdir(), "agent-ship-rules-"));
+  const root = await mkdtemp(join(tmpdir(), "crewvane-rules-"));
   await git(root, ["init", "-b", "main"]);
   await git(root, ["config", "user.email", "test@example.com"]);
   await git(root, ["config", "user.name", "Test"]);
@@ -39,7 +39,7 @@ async function repo(): Promise<string> {
 }
 
 async function withRoot(fn: (root: string) => Promise<void>): Promise<void> {
-  const root = await mkdtemp(join(tmpdir(), "agent-ship-rules-"));
+  const root = await mkdtemp(join(tmpdir(), "crewvane-rules-"));
   try {
     await fn(root);
   } finally {
@@ -186,8 +186,8 @@ test("promote writes a hard rule and updates the same inbox kind in place", asyn
 test("check fails with the hard rule id and a verify rule stays a checklist", async () => {
   const root = await repo();
   try {
-    await mkdir(join(root, ".agent-ship", "contracts"), { recursive: true });
-    await writeFile(join(root, ".agent-ship", "contracts", "contract_auth.md"), contract);
+    await mkdir(join(root, ".crewvane", "contracts"), { recursive: true });
+    await writeFile(join(root, ".crewvane", "contracts", "contract_auth.md"), contract);
     await addItem(root, "evt_rule_secret");
     assert.equal(
       await main(
@@ -301,7 +301,7 @@ test("decide without promote leaves the decision and writes no hard rule", async
     assert.equal(decision.note, "Stay read-only.");
     assert.equal(decided.stderr(), "");
     await assert.rejects(readFile(hardRulesPath(root), "utf8"));
-    await assert.rejects(readFile(join(root, ".agent-ship", "feedback-tags.json"), "utf8"));
+    await assert.rejects(readFile(join(root, ".crewvane", "feedback-tags.json"), "utf8"));
 
     const open = capture();
     assert.equal(await main(["inbox", "list", "--root", root, "--json"], open.io), 0);
@@ -428,7 +428,7 @@ test("a stored secret fails closed and pre-commit enforces hook rules without a 
   const root = await repo();
   try {
     assert.equal(await main(["setup", "--root", root], capture().io), 0);
-    await mkdir(join(root, ".agent-ship"), { recursive: true });
+    await mkdir(join(root, ".crewvane"), { recursive: true });
     await writeFile(
       hardRulesPath(root),
       `${JSON.stringify({

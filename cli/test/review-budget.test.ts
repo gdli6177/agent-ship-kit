@@ -23,7 +23,7 @@ const filled = `human_reviews_expected: 3
 - 合 PR
 
 must_human: 方案冻结、验收、合 PR 必须由人完成。不自动合并。
-already_automated: agent-ship check 已覆盖允许路径和禁止路径。
+already_automated: crewvane check 已覆盖允许路径和禁止路径。
 `;
 
 test("a filled budget parses, and optional notes may be omitted", () => {
@@ -34,7 +34,7 @@ test("a filled budget parses, and optional notes may be omitted", () => {
     human_reviews_expected: 3,
     reviews: ["方案冻结", "验收", "合 PR"],
     must_human: "方案冻结、验收、合 PR 必须由人完成。不自动合并。",
-    already_automated: "agent-ship check 已覆盖允许路径和禁止路径。",
+    already_automated: "crewvane check 已覆盖允许路径和禁止路径。",
   });
 
   const bare = parseHumanReviewBudget(section("human_reviews_expected: `0`\n"), "proposal");
@@ -92,14 +92,14 @@ async function git(root: string, args: string[]): Promise<void> {
 }
 
 async function repo(): Promise<string> {
-  const root = await mkdtemp(join(tmpdir(), "agent-ship-budget-"));
+  const root = await mkdtemp(join(tmpdir(), "crewvane-budget-"));
   await git(root, ["init", "-b", "main"]);
   await git(root, ["config", "user.email", "test@example.com"]);
   await git(root, ["config", "user.name", "Test"]);
   await writeFile(join(root, "README.md"), "base\n");
   await git(root, ["add", "README.md"]);
   await git(root, ["commit", "-m", "base"]);
-  await mkdir(join(root, ".agent-ship", "contracts"), { recursive: true });
+  await mkdir(join(root, ".crewvane", "contracts"), { recursive: true });
   return root;
 }
 
@@ -129,7 +129,7 @@ const paths = `
 test("older cards warn and still pass; a malformed new proposal fails the check", async () => {
   const root = await repo();
   try {
-    await writeFile(join(root, ".agent-ship", "contracts", "contract_auth.md"), `# Contract\n\nContract id: contract_auth\n${paths}`);
+    await writeFile(join(root, ".crewvane", "contracts", "contract_auth.md"), `# Contract\n\nContract id: contract_auth\n${paths}`);
     const older = capture();
     assert.equal(await main(["check", "--root", root, "--contract", "contract_auth", "--base", "main"], older.io), 0);
     const olderResult = JSON.parse(older.stdout());
@@ -139,10 +139,10 @@ test("older cards warn and still pass; a malformed new proposal fails the check"
     assert.equal("human_review_violations" in olderResult, false);
     assert.match(older.stderr(), /contract contract_auth has no Human review budget section; older card, not a failure/);
 
-    await mkdir(join(root, ".agent-ship", "proposals"), { recursive: true });
-    await writeFile(join(root, ".agent-ship", "proposals", "proposal_auth.md"), section("human_reviews_expected: `<count>`\n\n- 验收\n"));
+    await mkdir(join(root, ".crewvane", "proposals"), { recursive: true });
+    await writeFile(join(root, ".crewvane", "proposals", "proposal_auth.md"), section("human_reviews_expected: `<count>`\n\n- 验收\n"));
     await writeFile(
-      join(root, ".agent-ship", "contracts", "contract_auth.md"),
+      join(root, ".crewvane", "contracts", "contract_auth.md"),
       `# Contract\n\nContract id: contract_auth\nProposal id: proposal_auth\n${paths}`,
     );
     const bad = capture();
@@ -160,10 +160,10 @@ test("check compares a mirrored budget with the contract's inbox review count", 
   const root = await repo();
   try {
     const budget = `## Human review budget 人工审阅预算\n\n${filled}`;
-    await mkdir(join(root, ".agent-ship", "proposals"), { recursive: true });
-    await writeFile(join(root, ".agent-ship", "proposals", "proposal_auth.md"), `# Proposal\n\nProposal id: proposal_auth\n\n${budget}`);
+    await mkdir(join(root, ".crewvane", "proposals"), { recursive: true });
+    await writeFile(join(root, ".crewvane", "proposals", "proposal_auth.md"), `# Proposal\n\nProposal id: proposal_auth\n\n${budget}`);
     await writeFile(
-      join(root, ".agent-ship", "contracts", "contract_auth.md"),
+      join(root, ".crewvane", "contracts", "contract_auth.md"),
       `# Contract\n\nContract id: contract_auth\nProposal id: proposal_auth\n${budget}\n${paths}`,
     );
     const add = async (args: string[]) => {
@@ -185,7 +185,7 @@ test("check compares a mirrored budget with the contract's inbox review count", 
     assert.equal(result.human_review_warnings.length, 0);
 
     await writeFile(
-      join(root, ".agent-ship", "contracts", "contract_auth.md"),
+      join(root, ".crewvane", "contracts", "contract_auth.md"),
       `# Contract\n\nContract id: contract_auth\nProposal id: proposal_auth\n## Human review budget\n\nhuman_reviews_expected: 1\n\n- 验收\n${paths}`,
     );
     const drifted = capture();
@@ -202,7 +202,7 @@ test("watchdog reports a malformed human review budget as drift without calling 
   const root = await repo();
   try {
     await writeFile(
-      join(root, ".agent-ship", "contracts", "contract_auth.md"),
+      join(root, ".crewvane", "contracts", "contract_auth.md"),
       `# Contract\n\n## Human review budget\n\nhuman_reviews_expected: 1\n${paths}`,
     );
     const now = new Date();

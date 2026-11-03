@@ -1,4 +1,4 @@
-# agent-ship CLI
+# crewvane CLI
 
 
 v0.2: [reliability changes and trial](../docs/reliability-v0.2.md).
@@ -21,11 +21,11 @@ v0.2: [reliability changes and trial](../docs/reliability-v0.2.md).
 
 Local inbox and notify for the captain. Node 20 or newer. The only
 dependency is `tsx`, used to run TypeScript directly. `package.json` exposes
-the `agent-ship` bin. After the root `install.sh` run, that command is on
-`PATH` and the project directory is the default root. If `agent-ship` is not
-on `PATH`, use `node $HOME/.agent-ship-kit/current/cli/bin/agent-ship.js`.
+the `crewvane` bin. After the root `install.sh` run, that command is on
+`PATH` and the project directory is the default root. If `crewvane` is not
+on `PATH`, use `node $HOME/.crewvane/current/cli/bin/crewvane.js`.
 
-This CLI appends JSONL under `.agent-ship/`. `notify dry-run` prints a plan.
+This CLI appends JSONL under `.crewvane/`. `notify dry-run` prints a plan.
 `notify run` starts an allowlisted argv with no shell. It does not merge or
 deploy.
 
@@ -41,77 +41,77 @@ pnpm install
 `setup` and `init` are the same command. Default mode touches only this clone: `.git/hooks` (chaining any hook that was already there) and `.git/info/exclude`. It does not edit `.gitignore` and it does not set `core.hooksPath`.
 
 ```bash
-agent-ship setup
-agent-ship setup --shared
-agent-ship setup --uninstall
+crewvane setup
+crewvane setup --shared
+crewvane setup --uninstall
 ```
 
-`--shared` writes a marked block in `.gitignore` and merges the rules into `AGENTS.md` even when that file is tracked. Hooks remain uncommitted. `--uninstall` restores a chained hook and removes the rules block. Data under `.agent-ship/` is kept, and `.git/info/exclude` keeps a single `.agent-ship/` line so the directory does not show up as untracked. `--uninstall --purge` deletes `.agent-ship/` and that exclude line.
+`--shared` writes a marked block in `.gitignore` and merges the rules into `AGENTS.md` even when that file is tracked. Hooks remain uncommitted. `--uninstall` restores a chained hook and removes the rules block. Data under `.crewvane/` is kept, and `.git/info/exclude` keeps a single `.crewvane/` line so the directory does not show up as untracked. `--uninstall --purge` deletes `.crewvane/` and that exclude line.
 
 ## Watchdog
 
 ```bash
-agent-ship watchdog
-agent-ship status --stale
+crewvane watchdog
+crewvane status --stale
 ```
 
-Deterministic. No model. Reads heartbeats in `.agent-ship/events.jsonl`, the last commit time on the slice branch, and `check`. Files a `blocked` item only when a slice is stalled or drifting. If nothing is `queued` or `running`, it exits immediately and retains the local timer until explicit uninstall.
+Deterministic. No model. Reads heartbeats in `.crewvane/events.jsonl`, the last commit time on the slice branch, and `check`. Files a `blocked` item only when a slice is stalled or drifting. If nothing is `queued` or `running`, it exits immediately and retains the local timer until explicit uninstall.
 
 ```bash
-agent-ship slice start --contract contract_auth --slice auth \
+crewvane slice start --contract contract_auth --slice auth \
   --source-task-id task_1 --title "Auth slice" --summary "Opened."
-agent-ship watchdog install
-agent-ship watchdog uninstall
+crewvane watchdog install
+crewvane watchdog uninstall
 ```
 
-`slice start` records `worker_dispatched` on branch `ship/<contract>/<slice>` unless `--branch` is set, and registers the timer when a slice is open. On Linux and WSL, `watchdog install` adds a marked block to the user crontab. On macOS it writes `~/Library/LaunchAgents` and runs `launchctl bootstrap`. `--dry-run` does not register. Tests can point `AGENT_SHIP_CRONTAB_CMD` at a fake `crontab` and `AGENT_SHIP_TIMER_HOME` at a throwaway directory. Failed registration or known runtime failure rejects slice start before recording dispatch; --allow-untimed explicitly selects manual supervision. `watchdog` and `inbox list` also warn when slices are running and the timer is not active. An orchestrator scheduler or an assistant routine can run `watchdog` instead of the timer. Staleness uses heartbeats and commits on the slice branch only.
+`slice start` records `worker_dispatched` on branch `ship/<contract>/<slice>` unless `--branch` is set, and registers the timer when a slice is open. On Linux and WSL, `watchdog install` adds a marked block to the user crontab. On macOS it writes `~/Library/LaunchAgents` and runs `launchctl bootstrap`. `--dry-run` does not register. Tests can point `CREWVANE_CRONTAB_CMD` at a fake `crontab` and `CREWVANE_TIMER_HOME` at a throwaway directory. Failed registration or known runtime failure rejects slice start before recording dispatch; --allow-untimed explicitly selects manual supervision. `watchdog` and `inbox list` also warn when slices are running and the timer is not active. An orchestrator scheduler or an assistant routine can run `watchdog` instead of the timer. Staleness uses heartbeats and commits on the slice branch only.
 
 ## Check
 
 ```bash
-agent-ship check --contract contract_auth --base main
+crewvane check --contract contract_auth --base main
 ```
 
-Prints JSON and exits 1 when a path is forbidden, outside Allowed paths, or matched by a `hook` / `contract_forbidden` hard rule. The violation includes `rule_id`. `--staged` checks the index. `--hard-rules` checks hard rules without a contract, which is what pre-commit runs when no active contract is set and `.agent-ship/hard-rules.json` exists. No forge and no CI are required. A project may also run this command in CI; that is an extra, not the enforcement.
+Prints JSON and exits 1 when a path is forbidden, outside Allowed paths, or matched by a `hook` / `contract_forbidden` hard rule. The violation includes `rule_id`. `--staged` checks the index. `--hard-rules` checks hard rules without a contract, which is what pre-commit runs when no active contract is set and `.crewvane/hard-rules.json` exists. No forge and no CI are required. A project may also run this command in CI; that is an extra, not the enforcement.
 
 ## Hard rules
 
 ```bash
-agent-ship promote --kind hook --glob ".env*" \
+crewvane promote --kind hook --glob ".env*" \
   --message "Do not commit env files." \
   --source "Do not commit env files."
 
-agent-ship inbox decide evt_<id> changes_requested \
+crewvane inbox decide evt_<id> changes_requested \
   --note "Do not commit env files." \
   --promote hook --glob ".env*" --tag no-env
 ```
 
-Rules live in `.agent-ship/hard-rules.json` on this clone. `--promote` defaults to `none`. A repeated `--tag` or an identical `changes_requested` note prints `suggest promote` on stderr and does not write a rule until you pass `--promote` or `promote`. Secret-shaped text is rejected and not stored. `command_hint` is recorded for the verifier and is not executed. `verify` rules show up as `checklist` and do not fail the path check by themselves.
+Rules live in `.crewvane/hard-rules.json` on this clone. `--promote` defaults to `none`. A repeated `--tag` or an identical `changes_requested` note prints `suggest promote` on stderr and does not write a rule until you pass `--promote` or `promote`. Secret-shaped text is rejected and not stored. `command_hint` is recorded for the verifier and is not executed. `verify` rules show up as `checklist` and do not fail the path check by themselves.
 
-Use `agent-ship eval --fixture cli/test/eval-fixtures/verifier-gates` when changing `ship-*` skills or check/verifier gates: it prints a before/after checkpoint report and exits non-zero on regression.
+Use `crewvane eval --fixture cli/test/eval-fixtures/verifier-gates` when changing `ship-*` skills or check/verifier gates: it prints a before/after checkpoint report and exits non-zero on regression.
 
 ## Commands
 
-Run these in the project directory. The inbox is `.agent-ship/inbox.jsonl` there.
+Run these in the project directory. The inbox is `.crewvane/inbox.jsonl` there.
 
 ```bash
-agent-ship inbox add \
+crewvane inbox add \
   --title "Auth middleware ready" \
   --summary "Contract checks passed on the slice branch." \
   --priority high \
   --source-task-id task_auth_mw \
   --evidence https://ci.example/runs/1001 \
   --pr https://example.com/pull/12 \
-  --path .agent-ship/packets/task_auth_mw.md
+  --path .crewvane/packets/task_auth_mw.md
 
-agent-ship inbox list
-agent-ship inbox list --all --json
+crewvane inbox list
+crewvane inbox list --all --json
 
-agent-ship inbox decide evt_<id> accept --note "Evidence matches."
+crewvane inbox decide evt_<id> accept --note "Evidence matches."
 
-agent-ship notify dry-run --latest \
-  --policy "$HOME/.agent-ship-kit/current/templates/notify.policy.example.md" \
-  --allowlist "$HOME/.agent-ship-kit/current/templates/notify.allowlist.example.json"
+crewvane notify dry-run --latest \
+  --policy "$HOME/.crewvane/current/templates/notify.policy.example.md" \
+  --allowlist "$HOME/.crewvane/current/templates/notify.allowlist.example.json"
 ```
 
 `inbox add` defaults to `needs_review`. `--type blocked` and

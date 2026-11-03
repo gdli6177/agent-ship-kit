@@ -3,7 +3,7 @@
 How a project under this kit logs in once and reuses that session for short
 smoke tests. The index of projects and environments is [e2e.md](e2e.md).
 The captain's procedure is `skills/ship-e2e/SKILL.md`. This file is the
-pattern to copy into the project under test. agent-ship-kit does not ship a
+pattern to copy into the project under test. crewvane does not ship a
 Playwright dependency of its own.
 
 ## Shared login
@@ -52,7 +52,7 @@ captain may say which variable names are required. The captain does not ask
 for the values.
 
 Point `E2E_STORAGE_STATE` at the path in the index row, for example
-`.agent-ship/e2e/A.staging.storage-state.json`. That directory is gitignored.
+`.crewvane/e2e/A.staging.storage-state.json`. That directory is gitignored.
 
 ## One setup per project
 

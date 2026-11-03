@@ -1,0 +1,19 @@
+{
+  "viewport": {
+    "width": 1485,
+    "height": 1058
+  },
+  "narrowViewport": {
+    "width": 1050,
+    "height": 760
+  },
+  "executable": "node_modules/.pnpm/node_modules/electron/dist/Electron.app/Contents/MacOS/Electron",
+  "capturedAt": "2026-11-03T02:29:43.078Z",
+  "layout": {
+    "viewport": 1050,
+    "documentWidth": 1050,
+    "contentScroll": 685,
+    "contentClient": 685
+  },
+  "herdrVersion": "herdr 0.8.0"
+}

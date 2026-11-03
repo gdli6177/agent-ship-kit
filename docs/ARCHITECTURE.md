@@ -1,4 +1,59 @@
-# Architecture
+# Crewvane 桌面架构
+
+当前桌面与自主执行以 [V0.1 方案](product/crewvane-v0.1.md) 和 [使用说明](crewvane.md) 为准。
+`packages/core` 拥有记录、授权和工序；`packages/orchestrator` 拥有运行时、调度、决策和交付；
+`apps/desktop` 提供 Electron 主进程、独立 utility 进程与隔离的 React 界面。CLI 与桌面共用状态。
+
+## Desktop boundaries
+
+Crewvane owns persistent tasks, authorization, delegation, hierarchical escalation,
+decision reuse, workflow versions, evidence and the human attention queue. Agent
+protocols execute work; terminal backends only expose or observe sessions.
+
+- OMP and DSH use ACP. Codex uses Codex App Server. Cursor and Qoder are discovery-only
+  until their Agent CLI dispatch protocols are verified.
+- Herdr is an optional terminal/session backend. Settings detects it and offers a
+  one-click `brew install herdr`; the fixed executable and argv run without a shell.
+  When present, the embedded terminal prefers Herdr. Without it, agents still exchange
+  structured work through ACP or Codex App Server and Crewvane's persistent state.
+- Workspace-level `crewvane.runtimes.json` can add protocol-aware local CLIs. The
+  manifest stores executable names and argv arrays, not credentials or shell strings.
+- Captain messages are durable routing commands. The host validates the model's
+  proposed route and atomically records task creation, follow-up context and the
+  captain reply. Ambiguous routes stay open across restarts; follow-ups invalidate
+  stale stage evidence and require another independent verification.
+- Team handbook and explicitly configured Markdown sources have a combined 64 KB
+  injection budget. Large owner `AGENTS.md` files still get streaming digest receipts
+  without a body-injection limit. Completed, independently verified tasks can create
+  lesson candidates; a different human reviewer must approve them before reuse.
+- Test credentials live in Electron safeStorage under the OS keychain. Workspace
+  events contain only references and access metadata. The main process decrypts a
+  granted reference for the utility process's specified test command; the renderer,
+  model prompts, runtime events and evidence never receive the plaintext. The host
+  masks plaintext and encoded forms even when process output splits them across chunks.
+- `external-approval` is fixed. The product does not auto-merge or deploy.
+
+The UI and infrastructure deliberately reuse maintained components:
+
+| Need | Reuse |
+| --- | --- |
+| Desktop shell | Electron |
+| UI primitives | React, Radix UI Themes / Dialog |
+| Icons | Lucide |
+| Terminal UI | xterm.js |
+| PTY | node-pty |
+| Agent protocol | ACP, Codex App Server |
+| Optional terminal sessions | Herdr |
+| Test-secret encryption | Electron safeStorage / OS keychain |
+| Desktop E2E | Playwright |
+
+ACP and Codex App Server use a narrowly tested JSON-RPC subset. Adding
+`@agentclientprotocol/sdk` would not currently remove a Crewvane responsibility or
+materially reduce the implemented protocol surface.
+
+以下为仍可单独使用的手工合同 CLI 架构，不是桌面项目授权模式的执行协议。
+
+# 手工合同 CLI 架构
 
 
 v0.2: [reliability changes and trial](reliability-v0.2.md).
@@ -8,7 +63,7 @@ v0.2: [reliability changes and trial](reliability-v0.2.md).
 `base_ref` 是派工时固定的提交，`sequence` 用于同毫秒事件排序；旧事件仍兼容。
 CLI 预留名额在 adapter spawn 之前，inbox 的待审/阻塞/审批事件同时更新运行视图。
 
-agent-ship-kit is an acceptance-and-attention layer. A captain agent is the
+crewvane is an acceptance-and-attention layer. A captain agent is the
 only thing the human talks to. Workers are created when a contract is frozen
 and disappear when their slice is done. An orchestrator, if there is one,
 sits behind an adapter. The kit stores events, evidence pointers, and a
@@ -22,7 +77,7 @@ Prompt-only delegation is unreliable. A sentence that says "stay the coordinator
 
 Follow-up events on a subscribed thread (`thread_refs`: PR, issue, chat) go to the owning worker. The captain handles new or unowned events and coordination across slices.
 
-`worker_progress` in `.agent-ship/events.jsonl` is a heartbeat. `agent-ship watchdog` is a deterministic check, not a model call. It reads that heartbeat, the last commit on the slice's own branch (`slice start --branch`, default `ship/<contract>/<slice>`), and `agent-ship check`. A commit on another branch does not count. It files a `blocked` item (`reason` `stalled` or `drift`) only when one of those is wrong. With no queued or running slice it exits immediately and retains its timer until explicit uninstall. `slice start` registers that timer when the first slice opens: a marked user crontab line on Linux/WSL, or `launchctl bootstrap` of a plist in `~/Library/LaunchAgents` on macOS. Copies under `~/.config/agent-ship/` are not the activation and are never committed. If registration fails, slice start refuses admission unless --allow-untimed explicitly chooses manual supervision; later `watchdog` / `inbox list` runs warn while slices are active and the timer is not. The captain sees only the inbox item.
+`worker_progress` in `.crewvane/events.jsonl` is a heartbeat. `crewvane watchdog` is a deterministic check, not a model call. It reads that heartbeat, the last commit on the slice's own branch (`slice start --branch`, default `ship/<contract>/<slice>`), and `crewvane check`. A commit on another branch does not count. It files a `blocked` item (`reason` `stalled` or `drift`) only when one of those is wrong. With no queued or running slice it exits immediately and retains its timer until explicit uninstall. `slice start` registers that timer when the first slice opens: a marked user crontab line on Linux/WSL, or `launchctl bootstrap` of a plist in `~/Library/LaunchAgents` on macOS. Copies under `~/.config/crewvane/` are not the activation and are never committed. If registration fails, slice start refuses admission unless --allow-untimed explicitly chooses manual supervision; later `watchdog` / `inbox list` runs warn while slices are active and the timer is not. The captain sees only the inbox item.
 
 Inbox summaries are at most 280 characters and carry the recall chain: contract, slice, worker or branch, PR, evidence. `/ship-inbox` shows that card first. The packet is the spill, opened on request.
 
@@ -127,11 +182,11 @@ Optional cross-links on any type: `proposal_id`, `contract_id`, `slice_id`, `wor
 ## Storage
 
 ```text
-.agent-ship/inbox.jsonl
-.agent-ship/hard-rules.json
-.agent-ship/proposals/<proposal_id>.md
-.agent-ship/contracts/<contract_id>.md
-.agent-ship/packets/<task_id>.md
+.crewvane/inbox.jsonl
+.crewvane/hard-rules.json
+.crewvane/proposals/<proposal_id>.md
+.crewvane/contracts/<contract_id>.md
+.crewvane/packets/<task_id>.md
 ```
 
 The inbox is append-only JSONL, one event per line. `cli/src/inbox.ts` creates
@@ -143,35 +198,35 @@ Conventions for ids, branch names, freeze phrases, and the global worker cap: `t
 
 ## Local setup
 
-`agent-ship setup` (alias `init`, captain command `/ship-setup`) prepares one clone. It does not call a forge and it never sets `core.hooksPath`.
+`crewvane setup` (alias `init`, captain command `/ship-setup`) prepares one clone. It does not call a forge and it never sets `core.hooksPath`.
 
 Default is local:
 
-- Hooks live only in `.git/hooks`. An existing hook is saved as `pre-commit.agent-ship-chain` or `pre-push.agent-ship-chain` and run after the kit hook. Nothing under `.git/` is committed.
-- `.agent-ship/`, `.env*`, and `*.storage-state.json` are written to `.git/info/exclude`, not `.gitignore`.
-- The rules block is merged into an untracked `AGENTS.md`, which is then excluded. A tracked `AGENTS.md` is not edited; the block goes to `.agent-ship/AGENTS.local.md`.
+- Hooks live only in `.git/hooks`. An existing hook is saved as `pre-commit.crewvane-chain` or `pre-push.crewvane-chain` and run after the kit hook. Nothing under `.git/` is committed.
+- `.crewvane/`, `.env*`, and `*.storage-state.json` are written to `.git/info/exclude`, not `.gitignore`.
+- The rules block is merged into an untracked `AGENTS.md`, which is then excluded. A tracked `AGENTS.md` is not edited; the block goes to `.crewvane/AGENTS.local.md`.
 
-`agent-ship setup --shared` is the opt-in that writes a marked block in the shared `.gitignore` and merges the rules into `AGENTS.md` even when that file is already tracked. Hooks stay in `.git/hooks` either way.
+`crewvane setup --shared` is the opt-in that writes a marked block in the shared `.gitignore` and merges the rules into `AGENTS.md` even when that file is already tracked. Hooks stay in `.git/hooks` either way.
 
-`agent-ship setup --uninstall` removes the kit hook (restoring the chained file) and the rules block. `.agent-ship/` stays on disk, and `.git/info/exclude` keeps a marked `.agent-ship/` line so the leftover directory does not show as untracked. `--uninstall --purge` deletes `.agent-ship/` and that line.
+`crewvane setup --uninstall` removes the kit hook (restoring the chained file) and the rules block. `.crewvane/` stays on disk, and `.git/info/exclude` keeps a marked `.crewvane/` line so the leftover directory does not show as untracked. `--uninstall --purge` deletes `.crewvane/` and that line.
 
-`pre-commit` runs `agent-ship check --staged` for `.agent-ship/active-contract` when that file exists, then chains. `pre-push` refuses `main`, `master`, and names in `.agent-ship/protected-branches` unless a human sets `AGENT_SHIP_ALLOW_PROTECTED_PUSH=1`. The captain must not set it.
+`pre-commit` runs `crewvane check --staged` for `.crewvane/active-contract` when that file exists, then chains. `pre-push` refuses `main`, `master`, and names in `.crewvane/protected-branches` unless a human sets `CREWVANE_ALLOW_PROTECTED_PUSH=1`. The captain must not set it.
 
 ## Path check
 
-`agent-ship check --root <state> --contract <id> --slice <slice>` reads the shared contract and uses the recorded execution checkout, worker branch and pinned base commit. Unregistered single-repository checks may explicitly pass `--repo`, `--head` and `--base`. Ambiguous multi-repository/branch checks and scopes entering nested Git repositories are rejected. It lists paths with plain `git diff` and prints JSON. A changed path that matches Forbidden paths, or that matches none of the Allowed paths, fails the check. The same command loads `.agent-ship/hard-rules.json` from the state root. A `hook` or `contract_forbidden` glob match fails the check with `rule: "hard_rule"` and that rule's id. `verify_checklist` entries are returned as `checklist` and do not fail the path gate. `--hard-rules` runs only that file, with no contract. `--staged` is what the pre-commit hook uses: the active contract when one is set, otherwise `--hard-rules` when the file exists. The JSON belongs in the review packet's verifier section.
+`crewvane check --root <state> --contract <id> --slice <slice>` reads the shared contract and uses the recorded execution checkout, worker branch and pinned base commit. Unregistered single-repository checks may explicitly pass `--repo`, `--head` and `--base`. Ambiguous multi-repository/branch checks and scopes entering nested Git repositories are rejected. It lists paths with plain `git diff` and prints JSON. A changed path that matches Forbidden paths, or that matches none of the Allowed paths, fails the check. The same command loads `.crewvane/hard-rules.json` from the state root. A `hook` or `contract_forbidden` glob match fails the check with `rule: "hard_rule"` and that rule's id. `verify_checklist` entries are returned as `checklist` and do not fail the path gate. `--hard-rules` runs only that file, with no contract. `--staged` is what the pre-commit hook uses: the active contract when one is set, otherwise `--hard-rules` when the file exists. The JSON belongs in the review packet's verifier section.
 
-`agent-ship promote` and `inbox decide ... changes_requested --promote hook|contract|verify` write that file. `--promote` defaults to `none`. The file stays under gitignored `.agent-ship/`, so the gate is local to clones that installed the kit. It does not merge, deploy, or add CI for other contributors. Secret-shaped text is refused.
+`crewvane promote` and `inbox decide ... changes_requested --promote hook|contract|verify` write that file. `--promote` defaults to `none`. The file stays under gitignored `.crewvane/`, so the gate is local to clones that installed the kit. It does not merge, deploy, or add CI for other contributors. Secret-shaped text is refused.
 
-`agent-ship check` fails a new proposal or contract whose `## Human review budget` section is missing `human_reviews_expected` or malformed (the count must match the purpose list), and only warns when that section is absent so older cards still pass; `inbox_needs_review_count` is reported for comparison and the check never merges.
+`crewvane check` fails a new proposal or contract whose `## Human review budget` section is missing `human_reviews_expected` or malformed (the count must match the purpose list), and only warns when that section is absent so older cards still pass; `inbox_needs_review_count` is reported for comparison and the check never merges.
 
 This does not need GitHub, GitLab, or CI. An optional extra, on any host, is to run the same command on the branch. A green extra check does not replace the verifier or the human.
 
 ## Verifier
 
-After a worker reports done, its owner arranges a second agent with `templates/verifier-prompt.md`. That agent sees the frozen contract and the branch, not the worker chat. It re-runs acceptance commands, `agent-ship check`, and the relevant E2E smoke. Disagreement goes back to the worker. Agreement is what allows `needs_review`.
+After a worker reports done, its owner arranges a second agent with `templates/verifier-prompt.md`. That agent sees the frozen contract and the branch, not the worker chat. It re-runs acceptance commands, `crewvane check`, and the relevant E2E smoke. Disagreement goes back to the worker. Agreement is what allows `needs_review`.
 
-`agent-ship eval --fixture <dir>` (sample `cli/test/eval-fixtures/verifier-gates`) is the before/after check when changing `ship-*` skills or these gates; a non-zero exit is a regression.
+`crewvane eval --fixture <dir>` (sample `cli/test/eval-fixtures/verifier-gates`) is the before/after check when changing `ship-*` skills or these gates; a non-zero exit is a regression.
 
 ## Changing a frozen contract
 

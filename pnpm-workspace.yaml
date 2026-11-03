@@ -1,2 +1,9 @@
 packages:
   - cli
+  - packages/*
+  - apps/*
+
+onlyBuiltDependencies:
+  - electron
+  - esbuild
+  - node-pty

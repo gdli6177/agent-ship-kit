@@ -1,6 +1,6 @@
 # Adapters
 
-agent-ship-kit does not orchestrate workers. It describes three calls a
+crewvane does not orchestrate workers. It describes three calls a
 captain may make, and leaves the transport to a thin note. Swapping Herdr for
 Orca, Multica, or a plain extra agent session must not change the contract
 card, the inbox event, or the notify allowlist.
@@ -26,9 +26,9 @@ card, the inbox event, or the notify allowlist.
 6. Subscribe each slice's `thread_refs` (PR, issue, chat). Deliver follow-up
    events on those threads to the owning worker. Send the captain only new
    or unowned events, and anything that crosses slices.
-7. Run `agent-ship watchdog` on a schedule: cron, the orchestrator's
+7. Run `crewvane watchdog` on a schedule: cron, the orchestrator's
    scheduler, or the owner's assistant routine. Append `worker_progress`
-   heartbeats to `.agent-ship/events.jsonl` when the worker makes real
+   heartbeats to `.crewvane/events.jsonl` when the worker makes real
    progress. The watchdog is not the captain.
 
 ## Not this kit
@@ -36,7 +36,7 @@ card, the inbox event, or the notify allowlist.
 Persistent cloud runtimes, splitting compute from state, and device daemons
 belong to the orchestrator. An adapter maps `spawn`, `status`, `collect`,
 thread delivery, and a watchdog schedule onto that product. It does not
-reimplement them inside agent-ship-kit.
+reimplement them inside crewvane.
 
 ## No orchestrator
 

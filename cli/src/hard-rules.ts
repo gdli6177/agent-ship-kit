@@ -5,7 +5,7 @@ import { pathMatches, type PathViolation } from "./paths.js";
 import { withLock } from "./storage.js";
 import type { InboxRecord } from "./types.js";
 
-/** Local hard rules. The file is gitignored with the rest of `.agent-ship/`.
+/** Local hard rules. The file is gitignored with the rest of `.crewvane/`.
  * It binds clones that have the file and the kit hook. It is not shared CI.
  */
 export const HARD_RULES_FILE = "hard-rules.json";
@@ -84,7 +84,7 @@ interface FeedbackTags {
 }
 
 export function hardRulesPath(root: string): string {
-  return join(root, ".agent-ship", HARD_RULES_FILE);
+  return join(root, ".crewvane", HARD_RULES_FILE);
 }
 
 export function containsSecret(value: string): boolean {
@@ -292,7 +292,7 @@ export async function loadHardRules(root: string): Promise<HardRulesFile> {
 }
 
 async function writeStore(root: string, store: HardRulesFile): Promise<void> {
-  const directory = join(root, ".agent-ship");
+  const directory = join(root, ".crewvane");
   await mkdir(directory, { recursive: true });
   const file = hardRulesPath(root);
   const tmp = `${file}.${process.pid}.tmp`;
@@ -302,7 +302,7 @@ async function writeStore(root: string, store: HardRulesFile): Promise<void> {
 
 export async function promoteHardRule(root: string, input: PromoteInput, now = new Date()): Promise<PromoteResult> {
   const normalized = normalizePromoteInput(input);
-  return withLock(join(root, ".agent-ship"), async () => {
+  return withLock(join(root, ".crewvane"), async () => {
     if (normalized.inboxId) {
       const items = await readInbox(root);
       if (!items.some((item) => item.id === normalized.inboxId)) {
@@ -387,7 +387,7 @@ export function repeatedNoteCount(items: readonly InboxRecord[], note: string): 
 }
 
 function feedbackTagsPath(root: string): string {
-  return join(root, ".agent-ship", FEEDBACK_TAGS_FILE);
+  return join(root, ".crewvane", FEEDBACK_TAGS_FILE);
 }
 
 async function readFeedbackTags(root: string): Promise<FeedbackTags> {
@@ -421,14 +421,14 @@ async function readFeedbackTags(root: string): Promise<FeedbackTags> {
 export async function noteFeedbackTags(root: string, tags: readonly string[]): Promise<{ tag: string; count: number }[]> {
   const unique = dedupe(tags.map(assertTag));
   if (unique.length === 0) return [];
-  return withLock(join(root, ".agent-ship"), async () => {
+  return withLock(join(root, ".crewvane"), async () => {
     const store = await readFeedbackTags(root);
     const noted = unique.map((tag) => {
       const count = (store.counts[tag] ?? 0) + 1;
       store.counts[tag] = count;
       return { tag, count };
     });
-    const directory = join(root, ".agent-ship");
+    const directory = join(root, ".crewvane");
     await mkdir(directory, { recursive: true });
     const file = feedbackTagsPath(root);
     const tmp = `${file}.${process.pid}.tmp`;

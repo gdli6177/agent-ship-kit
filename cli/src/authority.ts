@@ -15,8 +15,8 @@ interface Authority {
   limits_digest: string;
   approvals: Record<string, Approval>;
 }
-const policyFile = (root: string) => join(root, ".agent-ship/authority.json");
-const limitsFile = (root: string) => join(root, ".agent-ship/limits.json");
+const policyFile = (root: string) => join(root, ".crewvane/authority.json");
+const limitsFile = (root: string) => join(root, ".crewvane/limits.json");
 async function limitsText(root: string) { return await optionalText(limitsFile(root)) ?? "absent:default-3"; }
 export async function readAuthority(root: string): Promise<Authority | null> {
   const raw = await optionalText(policyFile(root));
@@ -34,23 +34,23 @@ async function save(root: string, policy: Authority) {
 export async function initializeAuthority(root: string, human: string, captain: string) {
   human = safeText(human, "human ref", 120); captain = safeText(captain, "captain ref", 120);
   if (human === captain) throw new Error("human and captain identities must differ");
-  return withLock(join(root, ".agent-ship"), async () => {
+  return withLock(join(root, ".crewvane"), async () => {
     const existing = await readAuthority(root);
     if (existing) {
       if (!existing.humans.includes(human) || existing.captain !== captain) throw new Error("authority already configured; bootstrap cannot replace registered identities");
       return { configured: true, unchanged: true, humans: existing.humans, captain };
     }
-    const actor = process.env.AGENT_SHIP_ACTOR;
+    const actor = process.env.CREWVANE_ACTOR;
     if (actor && actor !== human) throw new Error("authority bootstrap belongs to the trusted human/operator channel");
     const events = await readEvents(root);
     if (events.some(event => event.owner_ref === human || event.worker_ref === human)) throw new Error("an existing owner/worker cannot be registered as the human");
     await save(root, { version: 1, humans: [human], captain, limits_digest: digest(await limitsText(root)), approvals: {} });
-    return { configured: true, unchanged: false, humans: [human], captain, boundary: "Host must bind AGENT_SHIP_ACTOR to the authenticated session. Same-OS-user filesystem access is outside this CLI boundary." };
+    return { configured: true, unchanged: false, humans: [human], captain, boundary: "Host must bind CREWVANE_ACTOR to the authenticated session. Same-OS-user filesystem access is outside this CLI boundary." };
   });
 }
 export async function actorIdentity(root: string) {
   const policy = await readAuthority(root);
-  const ref = process.env.AGENT_SHIP_ACTOR;
+  const ref = process.env.CREWVANE_ACTOR;
   if (!policy) return { ref: ref ?? null, role: "unconfigured", lane: null as string | null };
   if (!ref) return { ref: null, role: "unbound", lane: null as string | null };
   if (policy.humans.includes(ref)) return { ref, role: "human", lane: null as string | null };
@@ -59,7 +59,7 @@ export async function actorIdentity(root: string) {
   const ownership = events.filter(event => event.type === "intake_claimed" && event.owner_ref === ref);
   if (ownership.length) {
     const lane = typeof ownership.at(-1)?.lane_id === "string" ? String(ownership.at(-1)!.lane_id) : null;
-    const rawQueue = await optionalText(join(root, ".agent-ship/intake.jsonl"));
+    const rawQueue = await optionalText(join(root, ".crewvane/intake.jsonl"));
     const queue = (rawQueue ?? "").split("\n").filter(Boolean).map(line => JSON.parse(line) as { lane_id?: string; state?: string });
     const latest = queue.filter(entry => entry.lane_id === lane).at(-1);
     if (!latest || !["done", "dropped"].includes(latest.state ?? "")) return { ref, role: "owner", lane };
@@ -95,9 +95,9 @@ export async function authorityViolations(root: string, contract?: { id: string;
 export async function freezeContract(root: string, id: string, human: string, acceptedText: string) {
   safeId(id); safeText(human, "human", 120); acceptedText = safeText(acceptedText, "accepted text");
   await requireActor(root, ["human"], human);
-  return withLock(join(root, ".agent-ship"), async () => {
+  return withLock(join(root, ".crewvane"), async () => {
     const policy = (await readAuthority(root))!;
-    const path = join(root, `.agent-ship/contracts/${id}.md`);
+    const path = join(root, `.crewvane/contracts/${id}.md`);
     await ownedDirectory(root, path);
     let markdown = await readFile(path, "utf8");
     const owner = field(markdown, "Owner"), lane = field(markdown, "Lane");
@@ -129,7 +129,7 @@ export async function freezeContract(root: string, id: string, human: string, ac
 export async function setHumanLimits(root: string, human: string, cap: number) {
   if (!Number.isSafeInteger(cap) || cap < 1) throw new Error("parallel cap must be a positive integer");
   await requireActor(root, ["human"], human);
-  return withLock(join(root, ".agent-ship"), async () => {
+  return withLock(join(root, ".crewvane"), async () => {
     const policy = (await readAuthority(root))!;
     const previous = await optionalText(limitsFile(root));
     const value = previous ? JSON.parse(previous) as Record<string, unknown> : {};
@@ -140,7 +140,7 @@ export async function setHumanLimits(root: string, human: string, cap: number) {
     const sequence = await nextSequence(root);
     // Record structural provenance, not a claim of cryptographic human authentication.
     const { appendFile } = await import("node:fs/promises");
-    await appendFile(join(root, ".agent-ship/events.jsonl"), `${JSON.stringify({ id: `evt_limits_${sequence}`, sequence, type: "limits_approved", title: "Human concurrency decision", summary: `Global parallel cap set to ${cap}.`, source_task_id: "policy", approved_by: human, created_at: new Date().toISOString() })}\n`);
+    await appendFile(join(root, ".crewvane/events.jsonl"), `${JSON.stringify({ id: `evt_limits_${sequence}`, sequence, type: "limits_approved", title: "Human concurrency decision", summary: `Global parallel cap set to ${cap}.`, source_task_id: "policy", approved_by: human, created_at: new Date().toISOString() })}\n`);
     return { global_max_parallel: cap, approved_by: human };
   });
 }

@@ -6,7 +6,7 @@ import { test } from "node:test";
 import { addInboxItem, decideInboxItem, inboxFile, listInbox } from "../src/inbox.js";
 
 async function withRoot(fn: (root: string) => Promise<void>): Promise<void> {
-  const root = await mkdtemp(join(tmpdir(), "agent-ship-inbox-"));
+  const root = await mkdtemp(join(tmpdir(), "crewvane-inbox-"));
   try {
     await fn(root);
   } finally {
@@ -25,7 +25,7 @@ test("inbox add appends a needs_review line and list reads it back", async () =>
       evidenceUrls: ["https://ci.example/runs/1001"],
       links: {
         pr: "https://example.com/pull/12",
-        path: ".agent-ship/packets/task_auth_mw.md",
+        path: ".crewvane/packets/task_auth_mw.md",
       },
       createdAt: "2026-10-31T17:05:00.000Z",
     });

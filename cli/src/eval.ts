@@ -341,7 +341,7 @@ async function runCheckCase(fixtureDir: string, spec: CheckCase): Promise<EvalFi
   if (!/^[A-Za-z0-9._-]+$/.test(spec.contract_id)) {
     throw new Error("contract id must match [A-Za-z0-9._-]+");
   }
-  const root = await mkdtemp(join(tmpdir(), "agent-ship-eval-"));
+  const root = await mkdtemp(join(tmpdir(), "crewvane-eval-"));
   try {
     const contractPath = await locate(fixtureDir, spec.contract);
     const markdown = await readCapped(contractPath, spec.contract);
@@ -356,8 +356,8 @@ async function runCheckCase(fixtureDir: string, spec: CheckCase): Promise<EvalFi
     const headPaths = await writeTree(root, spec.head_files);
     await git(root, ["add", "-f", "--", ...headPaths]);
     if (!spec.staged) await git(root, ["commit", "--no-verify", "-m", "slice"]);
-    await mkdir(join(root, ".agent-ship", "contracts"), { recursive: true });
-    await writeFile(join(root, ".agent-ship", "contracts", `${spec.contract_id}.md`), markdown);
+    await mkdir(join(root, ".crewvane", "contracts"), { recursive: true });
+    await writeFile(join(root, ".crewvane", "contracts", `${spec.contract_id}.md`), markdown);
     const result = await checkContract(root, spec.contract_id, spec.staged ? { staged: true } : { base: "main" });
     const actual = {
       ok: result.ok,

@@ -23,7 +23,7 @@ function resolveTsxCli() {
 const tsxCli = resolveTsxCli();
 if (tsxCli === null) {
   process.stderr.write(
-    "agent-ship: cannot find the tsx runtime. Re-run the installer, or run npm install in the kit directory.\n",
+    "crewvane: cannot find the tsx runtime. Re-run the installer, or run npm install in the kit directory.\n",
   );
   process.exit(1);
 }
@@ -33,7 +33,7 @@ const child = spawn(process.execPath, [tsxCli, cliTs, ...process.argv.slice(2)],
 });
 
 child.on("error", (error) => {
-  process.stderr.write(`agent-ship: ${error.message}\n`);
+  process.stderr.write(`crewvane: ${error.message}\n`);
   process.exit(1);
 });
 

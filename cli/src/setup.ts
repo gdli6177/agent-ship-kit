@@ -9,25 +9,27 @@ import { initializeTeam, requiredSources } from "./team.js";
 
 const execFileAsync = promisify(execFile);
 
-export const RULES_START = "<!-- agent-ship:rules:start -->";
-export const RULES_END = "<!-- agent-ship:rules:end -->";
-export const HOOK_START = "# agent-ship-hook-start";
-export const HOOK_END = "# agent-ship-hook-end";
-export const EXCLUDE_START = "# agent-ship-exclude-start";
-export const EXCLUDE_END = "# agent-ship-exclude-end";
-export const GITIGNORE_START = "# agent-ship-gitignore-start";
-export const GITIGNORE_END = "# agent-ship-gitignore-end";
+export const RULES_START = "<!-- crewvane:rules:start -->";
+export const RULES_END = "<!-- crewvane:rules:end -->";
+export const HOOK_START = "# crewvane-hook-start";
+export const HOOK_END = "# crewvane-hook-end";
+export const EXCLUDE_START = "# crewvane-exclude-start";
+export const EXCLUDE_END = "# crewvane-exclude-end";
+export const GITIGNORE_START = "# crewvane-gitignore-start";
+export const GITIGNORE_END = "# crewvane-gitignore-end";
 
-const LOCAL_PATTERNS = [".agent-ship/", ".env*", "*.storage-state.json"];
+const LOCAL_PATTERNS = [".crewvane/", ".env*", "*.storage-state.json"];
 
 export function kitRoot(): string {
   return fileURLToPath(new URL("../../", import.meta.url));
 }
 
 export const RULES_BLOCK = `${RULES_START}
-## agent-ship rules
+## crewvane rules
 
-These rules stay in force for every agent in this checkout. \`/ship-setup\` rewrites this block in place; it does not append a second copy. Default setup is local to this clone and does not change a shared ignore file.
+Crewvane 宿主派发且带有 DelegationGrant 的已登记会话，按宿主传入的角色、工序与项目授权执行；授权内普通开发和验证无需重新冻结合同。宿主负责创建和跟踪会话，禁止运行时自行创建未登记子代理。只将直属上级和船长都无法解决的问题交给人。下面的手工合同规则仅在未使用宿主项目授权的手工 CLI 模式下适用。
+
+These manual-contract rules stay in force for manual CLI sessions in this checkout. \`/ship-setup\` rewrites this block in place; it does not append a second copy. Default setup is local to this clone and does not change a shared ignore file.
 
 - In the captain conversation you are a router, not an executor. Talk to the human, draft contracts, dispatch, route, and record. The captain does not edit product code or run long tasks. A worker explicitly assigned a frozen slice executes only that slice; a verifier remains read-only.
 - One human-facing captain; each independent demand has a temporary owner and lane. Read the installed kit's docs/owner-lanes.md before managing parallel demands. Owners coordinate scouts/workers/verifiers and return artifacts; they never become another captain.
@@ -37,32 +39,32 @@ These rules stay in force for every agent in this checkout. \`/ship-setup\` rewr
 - Only the registered human channel may \`contract freeze\`, \`inbox decide\` or \`limits set\`. Only the captain may execute \`notify run\`. Owners/workers return inbox/artifacts; roles/templates are portable, live instances are temporary.
 - Before dispatch request a scout card (conclusion, affected paths, acceptance commands, risks, evidence). Select each slice's role; missing/malformed role cards block dispatch. Role forbidden paths add to contract forbidden paths and never widen allowed scope.
 - Follow-ups on a subscribed thread go to the owning worker. You handle new or unowned events and cross-slice coordination.
-- Legacy single-lane execution requests, including 继续、接管、收口、上测试、上线、你来做, start with \`agent-ship intake --text "<request>"\`. Read-only investigation may clarify a plan; no product edits, long tests, CI execution or dispatch before acceptance. Present the proposal promptly; do not stretch investigation into execution.
-- Before execution run \`agent-ship guard\`. No frozen contract means STOP: show the registered proposal and ask for acceptance. \`intake --direct\` requires the human's explicit direct-execution instruction, allowed/forbidden scope and acceptance; never infer it from "continue". It does not modify hard rules.
+- Legacy single-lane execution requests, including 继续、接管、收口、上测试、上线、你来做, start with \`crewvane intake --text "<request>"\`. Read-only investigation may clarify a plan; no product edits, long tests, CI execution or dispatch before acceptance. Present the proposal promptly; do not stretch investigation into execution.
+- Before execution run \`crewvane guard\`. No frozen contract means STOP: show the registered proposal and ask for acceptance. \`intake --direct\` requires the human's explicit direct-execution instruction, allowed/forbidden scope and acceptance; never infer it from "continue". It does not modify hard rules.
 - Do not spawn a worker until the human freezes the contract.
 - Edit only Allowed paths on the frozen contract. Never touch Forbidden paths. Workers do the edits.
-- Read \`.agent-ship/hard-rules.json\` before dispatch or review. \`hook\` and \`contract_forbidden\` rules fail the local check with their rule id. Promote a repeated review note only after the human agrees. Never copy a secret into a rule.
+- Read \`.crewvane/hard-rules.json\` before dispatch or review. \`hook\` and \`contract_forbidden\` rules fail the local check with their rule id. Promote a repeated review note only after the human agrees. Never copy a secret into a rule.
 - At most 3 workers may be queued or running across all contracts.
 - A separate read-only verifier must agree before a \`needs_review\` inbox item is filed. The verifier does not see the worker chat.
-- On session start run \`agent-ship doctor\` and \`agent-ship team context --auto --project <project-id>\`. Read every required source body; paths and digests are a receipt, not proof of reading. Active lessons are bounded soft guidance; owner rules remain authoritative.
+- On session start run \`crewvane doctor\` and \`crewvane team context --auto --project <project-id>\`. Read every required source body; paths and digests are a receipt, not proof of reading. Active lessons are bounded soft guidance; owner rules remain authoritative.
 - Capture human corrections immediately with \`correction add\`, even before dispatch: one-time facts use event, reusable behavior uses lesson, definitions use handbook. Supply explicit project/team scope, evidence and when/action. Do not copy credentials. Reusable signals only create candidates; a maintainer must activate them. At wrap-up run \`learning extract\` and \`learning review\`, record none/candidate with a reason. Never edit handbook or hard rules automatically.
 - Check \`watchdog status\` and \`watchdog doctor\` after dispatch. Reject failed registration/runtime; \`--allow-untimed\` is only for explicitly chosen manual supervision. A registered job is not proof that a worker is healthy.
-- After independent verification, the captain records \`agent-ship lesson check\` with none/candidate, a reason and the verifier reference. Routine work may produce none. Candidates require evidence, scope, reuse value and deduplication before activation.
+- After independent verification, the captain records \`crewvane lesson check\` with none/candidate, a reason and the verifier reference. Routine work may produce none. Candidates require evidence, scope, reuse value and deduplication before activation.
 - Only the human merges or ships. Do not merge to main or master and do not deploy to production.
 - Never read, write, or repeat passwords, cookies, or storageState contents.
 - Manage the workflow for the human: new requests → ship-contract; explicit acceptance of the just-presented plan plus “start” → trusted human freeze, then ship-dispatch; progress questions → real adapter status and inbox; result review/decisions → ship-inbox. Resolve ids and next steps yourself. Ask only about material ambiguity, scope, permissions or human decisions, not routine mechanics. Never treat silence or casual acknowledgement as approval.
 - A clear “按这个方案开始 / Start with this plan” may freeze and authorize dispatch only when the exact presented proposal is unambiguous. Record its id, accepted text, human and time first. No repeated dispatch command is needed; freeze-only approval does not authorize starting.
 - Restore existing contracts, inbox and actual worker status on a new conversation; do not duplicate dispatch. A setup report or task record does not prove worker execution is available.
-- Each \`/ship-*\` command is an optional shortcut to the skill without the slash. Prefer natural language; do not make the human remember the sequence. Resolve skill files below under the installed kit at \`$HOME/.agent-ship-kit/current/\` (or the actual manual clone), not relative to this project. Deterministic steps call the \`agent-ship\` CLI.
-  - \`/ship-setup\` → \`skills/ship-setup/SKILL.md\` → \`agent-ship setup\`
+- Each \`/ship-*\` command is an optional shortcut to the skill without the slash. Prefer natural language; do not make the human remember the sequence. Resolve skill files below under the installed kit at \`$HOME/.crewvane/current/\` (or the actual manual clone), not relative to this project. Deterministic steps call the \`crewvane\` CLI.
+  - \`/ship-setup\` → \`skills/ship-setup/SKILL.md\` → \`crewvane setup\`
   - \`/ship-contract\` → \`skills/ship-contract/SKILL.md\`
-  - \`/ship-dispatch\` → \`skills/ship-dispatch/SKILL.md\` → \`agent-ship slice start\`
-  - \`/ship-inbox\` → \`skills/ship-inbox/SKILL.md\` → \`agent-ship inbox list --sort priority\`, then \`agent-ship inbox decide\`
+  - \`/ship-dispatch\` → \`skills/ship-dispatch/SKILL.md\` → \`crewvane slice start\`
+  - \`/ship-inbox\` → \`skills/ship-inbox/SKILL.md\` → \`crewvane inbox list --sort priority\`, then \`crewvane inbox decide\`
   - \`/ship-inbox <id>\` jumps to that open item. Notify deep-links use this form.
-  - \`/ship-notify\` → \`skills/ship-notify/SKILL.md\` → \`agent-ship notify dry-run\` or \`notify run\`
+  - \`/ship-notify\` → \`skills/ship-notify/SKILL.md\` → \`crewvane notify dry-run\` or \`notify run\`
   - \`/ship-e2e\` → \`skills/ship-e2e/SKILL.md\`
-  - \`/ship-watchdog\` → \`skills/ship-watchdog/SKILL.md\` → \`agent-ship watchdog\` (independent of the captain; a timer runs it)
-- Speculative drafts stay off unless \`.agent-ship/limits.json\` sets \`"speculative": true\`. Even then, do not dispatch or edit code without a frozen contract, and only show the owner a draft that has evidence.
+  - \`/ship-watchdog\` → \`skills/ship-watchdog/SKILL.md\` → \`crewvane watchdog\` (independent of the captain; a timer runs it)
+- Speculative drafts stay off unless \`.crewvane/limits.json\` sets \`"speculative": true\`. Even then, do not dispatch or edit code without a frozen contract, and only show the owner a draft that has evidence.
 
 人直接提需求、问进度和审结果，船长自行衔接技能并保管编号。明确“按这个方案开始”可确认刚展示的唯一方案并开工，不要求背命令。合同要人确认，禁止路径不能碰，同时最多 3 个工人；独立核验后才待审。反复的审阅意见在人同意后才能收成本地硬规则。船长不改产品代码，合并和发布只由人做，不碰密码。
 ${RULES_END}
@@ -140,8 +142,8 @@ function ignoreBlock(start: string, end: string, extra: string[]): string {
   return `${start}\n${[...LOCAL_PATTERNS, ...extra].join("\n")}\n${end}`;
 }
 
-/** Left behind after uninstall so a kept `.agent-ship/` directory stays untracked. */
-export const KEPT_EXCLUDE_BLOCK = `${EXCLUDE_START}\n.agent-ship/\n${EXCLUDE_END}`;
+/** Left behind after uninstall so a kept `.crewvane/` directory stays untracked. */
+export const KEPT_EXCLUDE_BLOCK = `${EXCLUDE_START}\n.crewvane/\n${EXCLUDE_END}`;
 
 async function readOptional(path: string): Promise<string | null> {
   try {
@@ -202,34 +204,34 @@ function hookScript(kind: "pre-commit" | "pre-push"): string {
 ${HOOK_START}
 root=$(git rev-parse --show-toplevel) || exit 1
 contract=""
-id_file="$root/.agent-ship/active-contract"
-if [ -f "$root/.agent-ship/active-lane" ]; then
-  lane=$(tr -d '\\r\\n' < "$root/.agent-ship/active-lane") || exit 1
+id_file="$root/.crewvane/active-contract"
+if [ -f "$root/.crewvane/active-lane" ]; then
+  lane=$(tr -d '\\r\\n' < "$root/.crewvane/active-lane") || exit 1
   case "$lane" in
     ""|default) ;;
-    *[!A-Za-z0-9_-]*) echo "agent-ship: invalid active lane" >&2; exit 1 ;;
-    *) id_file="$root/.agent-ship/active-contract.$lane" ;;
+    *[!A-Za-z0-9_-]*) echo "crewvane: invalid active lane" >&2; exit 1 ;;
+    *) id_file="$root/.crewvane/active-contract.$lane" ;;
   esac
 fi
 if [ -f "$id_file" ]; then
   contract=$(tr -d ' \\t\\r\\n' < "$id_file")
 fi
 state="$root"
-if [ -f "$root/.agent-ship/state-root" ]; then
-  state=$(tr -d '\\r\\n' < "$root/.agent-ship/state-root") || exit 1
+if [ -f "$root/.crewvane/state-root" ]; then
+  state=$(tr -d '\\r\\n' < "$root/.crewvane/state-root") || exit 1
   if [ -z "$state" ]; then
     state="$root"
   fi
 fi
-if [ -f "$root/.agent-ship/guard-required" ]; then
-  kit=$(tr -d '\\r\\n' < "$root/.agent-ship/kit-root") || exit 1
-  nodebin=$(tr -d '\\r\\n' < "$root/.agent-ship/node-bin") || exit 1
+if [ -f "$root/.crewvane/guard-required" ]; then
+  kit=$(tr -d '\\r\\n' < "$root/.crewvane/kit-root") || exit 1
+  nodebin=$(tr -d '\\r\\n' < "$root/.crewvane/node-bin") || exit 1
   (cd "$kit/cli" && "$nodebin" --import tsx src/cli.ts guard --staged --root "$state" --repo "$root") || exit $?
 fi
-rules="$state/.agent-ship/hard-rules.json"
+rules="$state/.crewvane/hard-rules.json"
 if [ -n "$contract" ] || [ -f "$rules" ]; then
-  kit=$(tr -d '\\r\\n' < "$root/.agent-ship/kit-root") || exit 1
-  nodebin=$(tr -d '\\r\\n' < "$root/.agent-ship/node-bin") || exit 1
+  kit=$(tr -d '\\r\\n' < "$root/.crewvane/kit-root") || exit 1
+  nodebin=$(tr -d '\\r\\n' < "$root/.crewvane/node-bin") || exit 1
   if [ -n "$contract" ]; then
     (cd "$kit/cli" && "$nodebin" --import tsx src/cli.ts check --staged --root "$state" --repo "$root" --contract "$contract") || exit $?
   else
@@ -237,7 +239,7 @@ if [ -n "$contract" ] || [ -f "$rules" ]; then
   fi
 fi
 ${HOOK_END}
-chain="$0.agent-ship-chain"
+chain="$0.crewvane-chain"
 if [ -f "$chain" ]; then
   if [ -x "$chain" ]; then
     exec "$chain" "$@"
@@ -250,16 +252,16 @@ exit 0
   return `#!/bin/sh
 ${HOOK_START}
 input=$(cat)
-case "\${AGENT_SHIP_ALLOW_PROTECTED_PUSH:-}" in
+case "\${CREWVANE_ALLOW_PROTECTED_PUSH:-}" in
   1|true) ;;
   *)
     root=$(git rev-parse --show-toplevel) || exit 1
     extra=""
-    if [ -f "$root/.agent-ship/protected-branches" ]; then
-      extra=$(sed 's/#.*//' "$root/.agent-ship/protected-branches" | tr '\\n' ' ')
+    if [ -f "$root/.crewvane/protected-branches" ]; then
+      extra=$(sed 's/#.*//' "$root/.crewvane/protected-branches" | tr '\\n' ' ')
     fi
     status=0
-    tmp=$(git rev-parse --git-path "agent-ship-pre-push.$$") || exit 1
+    tmp=$(git rev-parse --git-path "crewvane-pre-push.$$") || exit 1
     printf '%s\\n' "$input" > "$tmp"
     while read -r _local_ref _local_sha remote_ref _remote_sha; do
       [ -n "$remote_ref" ] || continue
@@ -276,14 +278,14 @@ case "\${AGENT_SHIP_ALLOW_PROTECTED_PUSH:-}" in
     done < "$tmp"
     rm -f "$tmp"
     if [ "$status" -ne 0 ]; then
-      echo "agent-ship: refusing push to a protected branch (main, master, or .agent-ship/protected-branches)." >&2
-      echo "A human may override with AGENT_SHIP_ALLOW_PROTECTED_PUSH=1. The captain must not set it." >&2
+      echo "crewvane: refusing push to a protected branch (main, master, or .crewvane/protected-branches)." >&2
+      echo "A human may override with CREWVANE_ALLOW_PROTECTED_PUSH=1. The captain must not set it." >&2
       exit 1
     fi
     ;;
 esac
 ${HOOK_END}
-chain="$0.agent-ship-chain"
+chain="$0.crewvane-chain"
 if [ -f "$chain" ]; then
   if [ -n "$input" ]; then
     printf '%s\\n' "$input" | {
@@ -306,7 +308,7 @@ exit 0
 
 async function installHook(root: string, kind: "pre-commit" | "pre-push"): Promise<SetupAction> {
   const hookPath = await gitPath(root, `hooks/${kind}`);
-  const chainPath = `${hookPath}.agent-ship-chain`;
+  const chainPath = `${hookPath}.crewvane-chain`;
   const desired = hookScript(kind);
   const existing = await readOptional(hookPath);
   if (existing && !existing.includes(HOOK_START) && (await readOptional(chainPath)) === null) {
@@ -328,7 +330,7 @@ async function installHook(root: string, kind: "pre-commit" | "pre-push"): Promi
 
 async function uninstallHook(root: string, kind: "pre-commit" | "pre-push"): Promise<SetupAction> {
   const hookPath = await gitPath(root, `hooks/${kind}`);
-  const chainPath = `${hookPath}.agent-ship-chain`;
+  const chainPath = `${hookPath}.crewvane-chain`;
   const existing = await readOptional(hookPath);
   if (!existing || !existing.includes(HOOK_START)) {
     return { path: `.git/hooks/${kind}`, action: "unchanged" };
@@ -348,10 +350,10 @@ async function uninstallHook(root: string, kind: "pre-commit" | "pre-push"): Pro
 async function manageHooks(root: string, uninstall: boolean): Promise<{ actions: SetupAction[]; retained: boolean }> {
   const hooks = dirname(await gitPath(root, "hooks/pre-commit"));
   return withLock(hooks, async () => {
-    const registry = join(hooks, "agent-ship-roots.json");
+    const registry = join(hooks, "crewvane-roots.json");
     const raw = await readOptional(registry);
     const value: unknown = raw === null ? [] : JSON.parse(raw);
-    if (!Array.isArray(value) || !value.every((item) => typeof item === "string")) throw new Error("invalid agent-ship hook registry");
+    if (!Array.isArray(value) || !value.every((item) => typeof item === "string")) throw new Error("invalid crewvane hook registry");
     const roots = new Set<string>(value);
     if (uninstall) roots.delete(root); else roots.add(root);
     if (uninstall && roots.size > 0) {
@@ -385,11 +387,11 @@ async function applyRules(root: string, shared: boolean): Promise<SetupAction[]>
   const agentsPath = join(root, "AGENTS.md");
   const tracked = await isTracked(root, "AGENTS.md");
   if (!shared && tracked) {
-    const localPath = join(root, ".agent-ship", "AGENTS.local.md");
+    const localPath = join(root, ".crewvane", "AGENTS.local.md");
     const previous = await readOptional(localPath);
     const action = await writeText(localPath, `${RULES_BLOCK}\n`, previous);
     actions.push({
-      path: ".agent-ship/AGENTS.local.md",
+      path: ".crewvane/AGENTS.local.md",
       action: previous === null ? "created" : action,
     });
     actions.push({
@@ -399,12 +401,12 @@ async function applyRules(root: string, shared: boolean): Promise<SetupAction[]>
     return actions;
   }
   if (shared) {
-    const localPath = join(root, ".agent-ship/AGENTS.local.md");
+    const localPath = join(root, ".crewvane/AGENTS.local.md");
     const local = await readOptional(localPath);
     if (local?.includes(RULES_START)) {
       const retained = removeMarked(local, RULES_START, RULES_END).text;
-      if (retained.trim()) { await writeText(localPath, retained, local); actions.push({ path: ".agent-ship/AGENTS.local.md", action: "updated" }); }
-      else { await rm(localPath); actions.push({ path: ".agent-ship/AGENTS.local.md", action: "removed" }); }
+      if (retained.trim()) { await writeText(localPath, retained, local); actions.push({ path: ".crewvane/AGENTS.local.md", action: "updated" }); }
+      else { await rm(localPath); actions.push({ path: ".crewvane/AGENTS.local.md", action: "removed" }); }
     }
   }
   const previous = await readOptional(agentsPath);
@@ -434,13 +436,13 @@ async function applySharedIgnore(root: string): Promise<SetupAction> {
 
 async function selfCheck(root: string, shared: boolean, rulesInAgents: boolean, gitignoreBefore: string | null): Promise<SetupCheck[]> {
   const checks: SetupCheck[] = [];
-  const rulesFile = rulesInAgents ? join(root, "AGENTS.md") : join(root, ".agent-ship", "AGENTS.local.md");
+  const rulesFile = rulesInAgents ? join(root, "AGENTS.md") : join(root, ".crewvane", "AGENTS.local.md");
   const rules = (await readOptional(rulesFile)) ?? "";
   const starts = rules.split(RULES_START).length - 1;
   checks.push({
     name: "agents-rules",
     ok: starts === 1 && rules.includes(RULES_END),
-    detail: rulesInAgents ? "AGENTS.md" : ".agent-ship/AGENTS.local.md",
+    detail: rulesInAgents ? "AGENTS.md" : ".crewvane/AGENTS.local.md",
   });
   if (shared) {
     const ignore = (await readOptional(join(root, ".gitignore"))) ?? "";
@@ -464,10 +466,10 @@ async function selfCheck(root: string, shared: boolean, rulesInAgents: boolean, 
       detail: "local setup preserves the existing shared ignore file, including inherited blocks",
     });
   }
-  const indexOk = (await readOptional(join(root, ".agent-ship", "e2e", "index.md"))) !== null;
+  const indexOk = (await readOptional(join(root, ".crewvane", "e2e", "index.md"))) !== null;
   checks.push({ name: "e2e-index", ok: indexOk, detail: indexOk ? "present" : "missing" });
-  const policyOk = (await readOptional(join(root, ".agent-ship", "notify.policy.md"))) !== null;
-  const allowOk = (await readOptional(join(root, ".agent-ship", "notify.allowlist.json"))) !== null;
+  const policyOk = (await readOptional(join(root, ".crewvane", "notify.policy.md"))) !== null;
+  const allowOk = (await readOptional(join(root, ".crewvane", "notify.allowlist.json"))) !== null;
   checks.push({ name: "notify-templates", ok: policyOk && allowOk, detail: "local copies" });
   for (const kind of ["pre-commit", "pre-push"]) {
     const text = await readOptional(await gitPath(root, `hooks/${kind}`));
@@ -504,7 +506,7 @@ export async function setupProject(root: string, options: SetupOptions = {}): Pr
   // A subdirectory resolves to this worktree's top-level, not another linked worktree.
   root = await repositoryRoot(root);
   if (await hooksPathConfigured(root)) {
-    return { ok: false, root, shared, uninstalled: false, actions: [], checks: [{ name: "hooks-path", ok: false, detail: "core.hooksPath is set; compose agent-ship with the owner hook before setup (no files changed)" }] };
+    return { ok: false, root, shared, uninstalled: false, actions: [], checks: [{ name: "hooks-path", ok: false, detail: "core.hooksPath is set; compose crewvane with the owner hook before setup (no files changed)" }] };
   }
   if (options.uninstall || options.purge) return uninstallProject(root, options.purge === true);
   const gitignoreBefore = await readOptional(join(root, ".gitignore"));
@@ -513,12 +515,12 @@ export async function setupProject(root: string, options: SetupOptions = {}): Pr
   actions.push(...await initializeTeam(root, { shared, kit, handbook: options.handbook, lessons: options.lessons }));
   await requiredSources(root);
 
-  await mkdir(join(root, ".agent-ship", "proposals"), { recursive: true });
-  await mkdir(join(root, ".agent-ship", "contracts"), { recursive: true });
-  await mkdir(join(root, ".agent-ship", "packets"), { recursive: true });
-  await mkdir(join(root, ".agent-ship", "e2e"), { recursive: true });
+  await mkdir(join(root, ".crewvane", "proposals"), { recursive: true });
+  await mkdir(join(root, ".crewvane", "contracts"), { recursive: true });
+  await mkdir(join(root, ".crewvane", "packets"), { recursive: true });
+  await mkdir(join(root, ".crewvane", "e2e"), { recursive: true });
   for (const dir of ["proposals", "contracts", "packets"]) {
-    const rel = `.agent-ship/${dir}/.gitkeep`;
+    const rel = `.crewvane/${dir}/.gitkeep`;
     const previous = await readOptional(join(root, rel));
     if (previous === null) {
       await writeFile(join(root, rel), "");
@@ -528,11 +530,11 @@ export async function setupProject(root: string, options: SetupOptions = {}): Pr
     }
   }
 
-  actions.push(await copyTemplate(kit, root, "templates/notify.policy.example.md", ".agent-ship/notify.policy.md"));
+  actions.push(await copyTemplate(kit, root, "templates/notify.policy.example.md", ".crewvane/notify.policy.md"));
   actions.push(
-    await copyTemplate(kit, root, "templates/notify.allowlist.example.json", ".agent-ship/notify.allowlist.json"),
+    await copyTemplate(kit, root, "templates/notify.allowlist.example.json", ".crewvane/notify.allowlist.json"),
   );
-  actions.push(await copyTemplate(kit, root, "templates/e2e.md", ".agent-ship/e2e/index.md"));
+  actions.push(await copyTemplate(kit, root, "templates/e2e.md", ".crewvane/e2e/index.md"));
 
   actions.push(...(await applyRules(root, shared)));
 
@@ -544,13 +546,13 @@ export async function setupProject(root: string, options: SetupOptions = {}): Pr
     actions.push(await applyExclude(root, includeAgents));
   }
 
-  await writeFile(join(root, ".agent-ship", "kit-root"), `${kit}\n`);
-  await writeFile(join(root, ".agent-ship", "node-bin"), `${process.execPath}\n`);
-  await writeFile(join(root, ".agent-ship", "state-root"), `${stateRoot}\n`);
-  actions.push({ path: ".agent-ship/kit-root", action: "updated" });
-  actions.push({ path: ".agent-ship/node-bin", action: "updated" });
+  await writeFile(join(root, ".crewvane", "kit-root"), `${kit}\n`);
+  await writeFile(join(root, ".crewvane", "node-bin"), `${process.execPath}\n`);
+  await writeFile(join(root, ".crewvane", "state-root"), `${stateRoot}\n`);
+  actions.push({ path: ".crewvane/kit-root", action: "updated" });
+  actions.push({ path: ".crewvane/node-bin", action: "updated" });
 
-  await writeFile(join(root, ".agent-ship/guard-required"), "1\n");
+  await writeFile(join(root, ".crewvane/guard-required"), "1\n");
   actions.push(...(await manageHooks(root, false)).actions);
 
   const inAgents = ((await readOptional(join(root, "AGENTS.md"))) ?? "").includes(RULES_START);
@@ -563,7 +565,7 @@ export async function setupProject(root: string, options: SetupOptions = {}): Pr
     actions,
     checks,
     rules_auto_loaded: inAgents,
-    warnings: inAgents ? [] : ["Rules are in .agent-ship/AGENTS.local.md and are not automatically loaded by the host. Read it explicitly in this session; use setup --shared only with shared-adoption authorization, or configure the host bridge yourself."],
+    warnings: inAgents ? [] : ["Rules are in .crewvane/AGENTS.local.md and are not automatically loaded by the host. Read it explicitly in this session; use setup --shared only with shared-adoption authorization, or configure the host bridge yourself."],
   };
 }
 
@@ -605,16 +607,16 @@ async function uninstallProject(root: string, purge: boolean): Promise<SetupRepo
   } else {
     actions.push({ path: "AGENTS.md", action: "unchanged" });
   }
-  const localRules = join(root, ".agent-ship", "AGENTS.local.md");
+  const localRules = join(root, ".crewvane", "AGENTS.local.md");
   if ((await readOptional(localRules)) !== null) {
     await rm(localRules, { force: true });
-    actions.push({ path: ".agent-ship/AGENTS.local.md", action: "removed" });
+    actions.push({ path: ".crewvane/AGENTS.local.md", action: "removed" });
   }
 
-  const dataDir = join(root, ".agent-ship");
+  const dataDir = join(root, ".crewvane");
   if (purge && (await directoryExists(dataDir))) {
     await rm(dataDir, { recursive: true, force: true });
-    actions.push({ path: ".agent-ship/", action: "removed" });
+    actions.push({ path: ".crewvane/", action: "removed" });
   }
 
   try {
@@ -651,11 +653,11 @@ async function uninstallProject(root: string, purge: boolean): Promise<SetupRepo
   }
 
   if (!purge) {
-    await rm(join(root, ".agent-ship", "kit-root"), { force: true });
-    await rm(join(root, ".agent-ship", "node-bin"), { force: true });
-    await rm(join(root, ".agent-ship", "state-root"), { force: true });
-    await rm(join(root, ".agent-ship", "active-contract"), { force: true });
-    await rm(join(root, ".agent-ship", "guard-required"), { force: true });
+    await rm(join(root, ".crewvane", "kit-root"), { force: true });
+    await rm(join(root, ".crewvane", "node-bin"), { force: true });
+    await rm(join(root, ".crewvane", "state-root"), { force: true });
+    await rm(join(root, ".crewvane", "active-contract"), { force: true });
+    await rm(join(root, ".crewvane", "guard-required"), { force: true });
   }
 
   const hooksPath = await hooksPathConfigured(root);
@@ -666,7 +668,7 @@ async function uninstallProject(root: string, purge: boolean): Promise<SetupRepo
     {
       name: "hooks-removed",
       ok: hookRemoval.retained || (!(pre ?? "").includes(HOOK_START) && !(push ?? "").includes(HOOK_END)),
-      detail: hookRemoval.retained ? "shared hooks retained for other checkouts" : "agent-ship hooks cleared; chained hooks restored when present",
+      detail: hookRemoval.retained ? "shared hooks retained for other checkouts" : "crewvane hooks cleared; chained hooks restored when present",
     },
     {
       name: "rules-removed",
@@ -683,7 +685,7 @@ async function uninstallProject(root: string, purge: boolean): Promise<SetupRepo
       ok: purge
         ? !(await directoryExists(dataDir))
         : !(await directoryExists(dataDir)) ||
-          ((await readOptional(await excludeFile(root).catch(() => ""))) ?? "").includes(".agent-ship/"),
+          ((await readOptional(await excludeFile(root).catch(() => ""))) ?? "").includes(".crewvane/"),
       detail: purge ? "directory removed" : "kept directory stays excluded",
     },
   ];

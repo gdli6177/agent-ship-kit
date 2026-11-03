@@ -57,7 +57,7 @@ test("eval fixture matches the check, notify, e2e, and skill baselines", async (
 });
 
 test("eval exits non-zero and prints before/after when a checkpoint regresses", async () => {
-  const root = await mkdtemp(join(tmpdir(), "agent-ship-eval-"));
+  const root = await mkdtemp(join(tmpdir(), "crewvane-eval-"));
   try {
     await cp(sample, root, { recursive: true });
     const manifestPath = join(root, "fixture.json");
@@ -87,7 +87,7 @@ test("eval exits non-zero and prints before/after when a checkpoint regresses", 
 });
 
 test("eval keeps going after one checkpoint errors", async () => {
-  const root = await mkdtemp(join(tmpdir(), "agent-ship-eval-"));
+  const root = await mkdtemp(join(tmpdir(), "crewvane-eval-"));
   try {
     await writeFile(
       join(root, "fixture.json"),
@@ -124,10 +124,10 @@ test("eval keeps going after one checkpoint errors", async () => {
 
 test("eval rejects a missing fixture, a bad manifest, and a drifted skill phrase", async () => {
   const missing = capture();
-  assert.equal(await main(["eval", "--fixture", join(tmpdir(), "no-such-agent-ship-fixture")], missing.io), 1);
+  assert.equal(await main(["eval", "--fixture", join(tmpdir(), "no-such-crewvane-fixture")], missing.io), 1);
   assert.match(missing.stderr(), /fixture not found/);
 
-  const bad = await mkdtemp(join(tmpdir(), "agent-ship-eval-"));
+  const bad = await mkdtemp(join(tmpdir(), "crewvane-eval-"));
   try {
     await writeFile(join(bad, "fixture.json"), JSON.stringify({ name: "bad", cases: [{ id: "x", kind: "model" }] }));
     const unknown = capture();
@@ -135,7 +135,7 @@ test("eval rejects a missing fixture, a bad manifest, and a drifted skill phrase
     assert.match(unknown.stderr(), /unknown checkpoint kind: model/);
     assert.equal(unknown.stdout(), "");
 
-    const skill = await mkdtemp(join(tmpdir(), "agent-ship-eval-"));
+    const skill = await mkdtemp(join(tmpdir(), "crewvane-eval-"));
     try {
       await writeFile(
         join(skill, "fixture.json"),

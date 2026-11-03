@@ -11,10 +11,10 @@ import { optionalText } from "./team.js";
 export { safeText, safeId } from "./records.js";
 import { safeText, safeId, field, laneId, pointer } from "./records.js";
 export async function writeEvent(root: string, payload: Record<string, unknown>) {
-  return withLock(join(root, ".agent-ship"), async () => {
+  return withLock(join(root, ".crewvane"), async () => {
     const sequence = await nextSequence(root);
     const event = { ...payload, id: `evt_${payload.type}_${sequence}`, sequence, created_at: new Date().toISOString() };
-    await appendFile(join(root, ".agent-ship/events.jsonl"), `${JSON.stringify(event)}\n`);
+    await appendFile(join(root, ".crewvane/events.jsonl"), `${JSON.stringify(event)}\n`);
     return event;
   });
 }
@@ -32,7 +32,7 @@ export async function intake(root: string, input: { text: string; id?: string; d
   const owner = input.owner ? safeText(input.owner, "owner", 120) : undefined;
   if (input.direct && await readAuthority(root)) throw new Error("managed authority uses a draft contract and human contract freeze; --direct cannot self-sign an approval");
   const id = safeId(input.id ?? `proposal_${createHash("sha256").update(request).digest("hex").slice(0, 12)}`);
-  const directory = join(root, ".agent-ship/proposals");
+  const directory = join(root, ".crewvane/proposals");
   const file = join(directory, `${id}.md`);
   if (lane !== "default") {
     if (!owner) throw new Error("a named lane requires its claimed owner");
@@ -44,7 +44,7 @@ export async function intake(root: string, input: { text: string; id?: string; d
   if (input.direct && (!allowed.length || !forbidden.length || !input.acceptedBy || !input.acceptedText)) throw new Error("--direct requires --allowed, --forbidden, --accepted-by and --accepted-text recording explicit human authorization");
   const acceptedBy = input.direct ? safeText(input.acceptedBy!, "accepted-by", 120) : "";
   const acceptedText = input.direct ? safeText(input.acceptedText!, "accepted-text") : "";
-  return withLock(join(root, ".agent-ship"), async () => {
+  return withLock(join(root, ".crewvane"), async () => {
     await mkdir(directory, { recursive: true });
     const previous = await optionalText(file);
     if (previous && field(previous, "Status") === "superseded") throw new Error("superseded proposals cannot become current again; use a new id");
@@ -61,7 +61,7 @@ export async function intake(root: string, input: { text: string; id?: string; d
         if (JSON.stringify(paths.allowed) !== JSON.stringify(allowed) || JSON.stringify(paths.forbidden) !== JSON.stringify(forbidden) || !existing.includes(`Accepted text: ${acceptedText}\n`) || !existing.includes(`Accepted by: ${acceptedBy}\n`)) throw new Error("direct contract already exists with different authorization; use a new id");
       } else {
         const at = new Date().toISOString();
-        await mkdir(join(root, ".agent-ship/contracts"), { recursive: true });
+        await mkdir(join(root, ".crewvane/contracts"), { recursive: true });
         await writeFile(contractPath, `# Explicit direct contract\nStatus: frozen\nFrozen by: ${acceptedBy}\nFrozen at: ${at}\nProposal id: ${id}\nAccepted by: ${acceptedBy}\nAccepted at: ${at}\nAccepted text: ${acceptedText}\n## Allowed paths\n${allowed.map(p => `- ${p}`).join("\n")}\n## Forbidden paths\n${forbidden.map(p => `- ${p}`).join("\n")}\n## Acceptance\n- ${request}\n## Slices\n| direct | Explicit human scope | Acceptance passes |\n`, { flag: "wx" });
       }
       await writeFile(join(root, pointer("active-contract", lane)), `${contract}\n`);
@@ -76,7 +76,7 @@ export async function intake(root: string, input: { text: string; id?: string; d
     await writeFile(join(root, pointer("active-proposal", lane)), `${id}\n`);
     if (!previous) {
       const sequence = await nextSequence(root);
-      await appendFile(join(root, ".agent-ship/events.jsonl"), `${JSON.stringify({ id: `evt_intake_${sequence}`, sequence, type: "proposal_ready", lane_id: lane, ...(owner ? { owner_ref: owner } : {}), title: "Request registered", summary: request.slice(0, 280), request, proposal_id: id, source_task_id: id, created_at: new Date().toISOString() })}\n`);
+      await appendFile(join(root, ".crewvane/events.jsonl"), `${JSON.stringify({ id: `evt_intake_${sequence}`, sequence, type: "proposal_ready", lane_id: lane, ...(owner ? { owner_ref: owner } : {}), title: "Request registered", summary: request.slice(0, 280), request, proposal_id: id, source_task_id: id, created_at: new Date().toISOString() })}\n`);
     }
     return { lane_id: lane, owner_ref: owner ?? null, proposal_id: id, path: file, status: input.direct ? "frozen" : "draft", contract_id: contract, unchanged: previous !== null, next: input.direct ? "Explicit direct scope recorded; run guard before execution." : "Read-only investigation only; present the plan and wait for explicit acceptance." };
   });
@@ -85,7 +85,7 @@ export async function intake(root: string, input: { text: string; id?: string; d
 export async function guard(root: string, options: { repo?: string; contract?: string; staged?: boolean; lane?: string } = {}) {
   root = await repositoryRoot(root);
   const repo = await repositoryRoot(options.repo ?? root);
-  let lane = laneId(options.lane ?? (await optionalText(join(repo, ".agent-ship/active-lane")))?.trim());
+  let lane = laneId(options.lane ?? (await optionalText(join(repo, ".crewvane/active-lane")))?.trim());
   if (options.contract && !options.lane) lane = laneId(field(await readFile(contractFile(root, options.contract), "utf8"), "Lane"));
   const id = options.contract ?? (await optionalText(join(repo, pointer("active-contract", lane))))?.trim();
   const proposal = (await optionalText(join(root, pointer("active-proposal", lane))))?.trim() ?? (await optionalText(join(repo, pointer("active-proposal", lane))))?.trim() ?? null;
@@ -100,13 +100,13 @@ export async function guard(root: string, options: { repo?: string; contract?: s
       changed.push(entry.slice(3));
       if (/R|C/.test(entry.slice(0, 2))) { const original = entries[++i]; if (original) changed.push(original); }
     }
-    changed = changed.filter(path => !path.startsWith(".agent-ship/"));
+    changed = changed.filter(path => !path.startsWith(".crewvane/"));
   }
   if (options.staged && !id) {
     const hard = await checkHardRules(root, { staged: true, repoRoot: repo });
     for (const violation of hard.violations) problems.push(`${violation.path}: ${violation.rule} ${"rule_id" in violation ? violation.rule_id : hard.hard_rule_ids.join(",")}`);
   }
-  if (!id) problems.push("No frozen contract. Run agent-ship intake, present a plan and record explicit human acceptance before execution.");
+  if (!id) problems.push("No frozen contract. Run crewvane intake, present a plan and record explicit human acceptance before execution.");
   else {
     const markdown = await readFile(contractFile(root, id), "utf8");
     const contractField = (name: string) => field(markdown, name);
@@ -129,13 +129,14 @@ export async function doctor(root: string, repo = root) {
   const findings: string[] = [];
   for (const kind of ["pre-commit", "pre-push"]) {
     const hook = await optionalText(await gitPath(repo, `hooks/${kind}`));
-    if (!hook?.includes("# agent-ship-hook-start")) findings.push(`${kind} hook missing`);
+    if (!hook?.includes("# crewvane-hook-start")) findings.push(`${kind} hook missing`);
   }
   if ((await gitOutput(repo, ["config", "--get", "core.hooksPath"]).catch(() => "")).trim()) findings.push("core.hooksPath overrides local hooks");
-  if (await optionalText(join(repo, ".agent-ship/AGENTS.local.md"))) findings.push("Local rules are not automatically loaded; explicitly read .agent-ship/AGENTS.local.md or use setup --shared.");
+  if (await optionalText(join(repo, ".crewvane/AGENTS.local.md"))) findings.push("Local rules are not automatically loaded; explicitly read .crewvane/AGENTS.local.md or use setup --shared.");
+  try { await (await import("./learning.js")).teamContext(root, { repo }); } catch (error) { findings.push(String(error)); }
   const proposals = [];
-  for (const name of (await readdir(join(root, ".agent-ship/proposals")).catch(() => [])).filter(n => n.endsWith(".md"))) {
-    const body = await optionalText(join(root, ".agent-ship/proposals", name));
+  for (const name of (await readdir(join(root, ".crewvane/proposals")).catch(() => [])).filter(n => n.endsWith(".md"))) {
+    const body = await optionalText(join(root, ".crewvane/proposals", name));
     const created = /^Created at: (.+)$/m.exec(body ?? "")?.[1];
     proposals.push({ id: name.slice(0, -3), status: /^Status: (.+)$/m.exec(body ?? "")?.[1] ?? "unknown", age_minutes: created ? Math.floor((Date.now() - Date.parse(created)) / 60000) : null });
   }

@@ -21,7 +21,7 @@ async function useFakeCrontab(timerHome: string): Promise<() => void> {
     cmd,
     `#!/usr/bin/env node
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
-const store = process.env.AGENT_SHIP_CRONTAB_FILE;
+const store = process.env.CREWVANE_CRONTAB_FILE;
 const args = process.argv.slice(2);
 if (args.includes("-l")) {
   if (!existsSync(store)) {
@@ -41,27 +41,27 @@ process.exit(2);
 `,
   );
   await chmod(cmd, 0o755);
-  const prevCmd = process.env.AGENT_SHIP_CRONTAB_CMD;
-  const prevFile = process.env.AGENT_SHIP_CRONTAB_FILE;
-  const prevPlatform = process.env.AGENT_SHIP_TIMER_PLATFORM;
-  process.env.AGENT_SHIP_CRONTAB_CMD = cmd;
-  process.env.AGENT_SHIP_CRONTAB_FILE = file;
-  process.env.AGENT_SHIP_TIMER_PLATFORM = "cron";
+  const prevCmd = process.env.CREWVANE_CRONTAB_CMD;
+  const prevFile = process.env.CREWVANE_CRONTAB_FILE;
+  const prevPlatform = process.env.CREWVANE_TIMER_PLATFORM;
+  process.env.CREWVANE_CRONTAB_CMD = cmd;
+  process.env.CREWVANE_CRONTAB_FILE = file;
+  process.env.CREWVANE_TIMER_PLATFORM = "cron";
   return () => {
-    if (prevCmd === undefined) delete process.env.AGENT_SHIP_CRONTAB_CMD;
-    else process.env.AGENT_SHIP_CRONTAB_CMD = prevCmd;
-    if (prevFile === undefined) delete process.env.AGENT_SHIP_CRONTAB_FILE;
-    else process.env.AGENT_SHIP_CRONTAB_FILE = prevFile;
-    if (prevPlatform === undefined) delete process.env.AGENT_SHIP_TIMER_PLATFORM;
-    else process.env.AGENT_SHIP_TIMER_PLATFORM = prevPlatform;
+    if (prevCmd === undefined) delete process.env.CREWVANE_CRONTAB_CMD;
+    else process.env.CREWVANE_CRONTAB_CMD = prevCmd;
+    if (prevFile === undefined) delete process.env.CREWVANE_CRONTAB_FILE;
+    else process.env.CREWVANE_CRONTAB_FILE = prevFile;
+    if (prevPlatform === undefined) delete process.env.CREWVANE_TIMER_PLATFORM;
+    else process.env.CREWVANE_TIMER_PLATFORM = prevPlatform;
   };
 }
 
 test("watchdog is a no-op with no active slices and retains its timer until explicit uninstall", async () => {
-  const root = await mkdtemp(join(tmpdir(), "agent-ship-noop-"));
-  const timerHome = await mkdtemp(join(tmpdir(), "agent-ship-timer-"));
-  const previous = process.env.AGENT_SHIP_TIMER_HOME;
-  process.env.AGENT_SHIP_TIMER_HOME = timerHome;
+  const root = await mkdtemp(join(tmpdir(), "crewvane-noop-"));
+  const timerHome = await mkdtemp(join(tmpdir(), "crewvane-timer-"));
+  const previous = process.env.CREWVANE_TIMER_HOME;
+  process.env.CREWVANE_TIMER_HOME = timerHome;
   const restoreCron = await useFakeCrontab(timerHome);
   try {
     const installed = await installWatchdogTimer(root);
@@ -82,8 +82,8 @@ test("watchdog is a no-op with no active slices and retains its timer until expl
     const again = await uninstallWatchdogTimer(root);
     assert.equal(again.action, "removed");
   } finally {
-    if (previous === undefined) delete process.env.AGENT_SHIP_TIMER_HOME;
-    else process.env.AGENT_SHIP_TIMER_HOME = previous;
+    if (previous === undefined) delete process.env.CREWVANE_TIMER_HOME;
+    else process.env.CREWVANE_TIMER_HOME = previous;
     restoreCron();
     await rm(root, { recursive: true, force: true });
     await rm(timerHome, { recursive: true, force: true });
@@ -91,12 +91,12 @@ test("watchdog is a no-op with no active slices and retains its timer until expl
 });
 
 test("crontab install keeps other lines and dry-run does not register", async () => {
-  const root = await mkdtemp(join(tmpdir(), "agent-ship-cron-"));
-  const timerHome = await mkdtemp(join(tmpdir(), "agent-ship-timer-"));
-  const previous = process.env.AGENT_SHIP_TIMER_HOME;
-  process.env.AGENT_SHIP_TIMER_HOME = timerHome;
+  const root = await mkdtemp(join(tmpdir(), "crewvane-cron-"));
+  const timerHome = await mkdtemp(join(tmpdir(), "crewvane-timer-"));
+  const previous = process.env.CREWVANE_TIMER_HOME;
+  process.env.CREWVANE_TIMER_HOME = timerHome;
   const restoreCron = await useFakeCrontab(timerHome);
-  const store = process.env.AGENT_SHIP_CRONTAB_FILE ?? "";
+  const store = process.env.CREWVANE_CRONTAB_FILE ?? "";
   try {
     await writeFile(store, "0 1 * * * echo keep-me\n");
     const preview = await installWatchdogTimer(root, { dryRun: true });
@@ -108,18 +108,18 @@ test("crontab install keeps other lines and dry-run does not register", async ()
     assert.equal(installed.registered, true);
     const once = await readFile(store, "utf8");
     assert.match(once, /echo keep-me/);
-    assert.equal(once.split("agent-ship-watchdog-begin").length - 1, 1);
+    assert.equal(once.split("crewvane-watchdog-begin").length - 1, 1);
     await installWatchdogTimer(root);
-    assert.equal((await readFile(store, "utf8")).split("agent-ship-watchdog-begin").length - 1, 1);
+    assert.equal((await readFile(store, "utf8")).split("crewvane-watchdog-begin").length - 1, 1);
 
     const removed = await uninstallWatchdogTimer(root);
     assert.equal(removed.action, "removed");
     const after = await readFile(store, "utf8");
     assert.match(after, /echo keep-me/);
-    assert.equal(after.includes("agent-ship-watchdog-begin"), false);
+    assert.equal(after.includes("crewvane-watchdog-begin"), false);
   } finally {
-    if (previous === undefined) delete process.env.AGENT_SHIP_TIMER_HOME;
-    else process.env.AGENT_SHIP_TIMER_HOME = previous;
+    if (previous === undefined) delete process.env.CREWVANE_TIMER_HOME;
+    else process.env.CREWVANE_TIMER_HOME = previous;
     restoreCron();
     await rm(root, { recursive: true, force: true });
     await rm(timerHome, { recursive: true, force: true });
@@ -127,10 +127,10 @@ test("crontab install keeps other lines and dry-run does not register", async ()
 });
 
 test("the first slice installs the local timer and a fresh commit is progress", async () => {
-  const root = await mkdtemp(join(tmpdir(), "agent-ship-slice-"));
-  const timerHome = await mkdtemp(join(tmpdir(), "agent-ship-timer-"));
-  const previous = process.env.AGENT_SHIP_TIMER_HOME;
-  process.env.AGENT_SHIP_TIMER_HOME = timerHome;
+  const root = await mkdtemp(join(tmpdir(), "crewvane-slice-"));
+  const timerHome = await mkdtemp(join(tmpdir(), "crewvane-timer-"));
+  const previous = process.env.CREWVANE_TIMER_HOME;
+  process.env.CREWVANE_TIMER_HOME = timerHome;
   const restoreCron = await useFakeCrontab(timerHome);
   try {
     await exec("git", ["init", "-b", "main"], { cwd: root });
@@ -139,8 +139,8 @@ test("the first slice installs the local timer and a fresh commit is progress", 
     await writeFile(join(root, "README.md"), "base\n");
     await exec("git", ["add", "README.md"], { cwd: root });
     await exec("git", ["commit", "-m", "base"], { cwd: root });
-    await mkdir(join(root, ".agent-ship", "contracts"), { recursive: true });
-    await writeFile(join(root, ".agent-ship", "contracts", "contract_auth.md"), "Status: frozen\nFrozen by: Test human\nFrozen at: 2026-10-31T10:00:00Z\n## Allowed paths\n- src/**\n## Forbidden paths\n- secrets/**\n## Slices\nmax_parallel: 3\n| auth | slice | checks |\n| other | slice | checks |\n");
+    await mkdir(join(root, ".crewvane", "contracts"), { recursive: true });
+    await writeFile(join(root, ".crewvane", "contracts", "contract_auth.md"), "Status: frozen\nFrozen by: Test human\nFrozen at: 2026-10-31T10:00:00Z\n## Allowed paths\n- src/**\n## Forbidden paths\n- secrets/**\n## Slices\nmax_parallel: 3\n| auth | slice | checks |\n| other | slice | checks |\n");
     const started = await startSlice(root, {
       title: "Auth slice",
       summary: "Opened.",
@@ -167,8 +167,8 @@ test("the first slice installs the local timer and a fresh commit is progress", 
     assert.equal(report.flagged.length, 0);
     assert.equal((await listInbox(root, { openOnly: true })).length, 0);
   } finally {
-    if (previous === undefined) delete process.env.AGENT_SHIP_TIMER_HOME;
-    else process.env.AGENT_SHIP_TIMER_HOME = previous;
+    if (previous === undefined) delete process.env.CREWVANE_TIMER_HOME;
+    else process.env.CREWVANE_TIMER_HOME = previous;
     restoreCron();
     await rm(root, { recursive: true, force: true });
     await rm(timerHome, { recursive: true, force: true });
@@ -176,7 +176,7 @@ test("the first slice installs the local timer and a fresh commit is progress", 
 });
 
 test("a recent commit on another branch does not reset staleness", async () => {
-  const root = await mkdtemp(join(tmpdir(), "agent-ship-other-"));
+  const root = await mkdtemp(join(tmpdir(), "crewvane-other-"));
   const old = new Date(Date.now() - 3 * 60 * 60 * 1000).toISOString();
   try {
     await exec("git", ["init", "-b", "main"], { cwd: root });
@@ -199,7 +199,7 @@ test("a recent commit on another branch does not reset staleness", async () => {
     await writeFile(join(root, "other.txt"), "fresh elsewhere\n");
     await exec("git", ["add", "other.txt"], { cwd: root });
     await exec("git", ["commit", "-m", "other"], { cwd: root });
-    await mkdir(join(root, ".agent-ship"), { recursive: true });
+    await mkdir(join(root, ".crewvane"), { recursive: true });
     await writeFile(
       eventsFile(root),
       line({
@@ -225,12 +225,12 @@ test("a recent commit on another branch does not reset staleness", async () => {
 });
 
 test("watchdog flags a slice with no heartbeat and ignores a fresh one", async () => {
-  const root = await mkdtemp(join(tmpdir(), "agent-ship-watch-"));
+  const root = await mkdtemp(join(tmpdir(), "crewvane-watch-"));
   const now = new Date("2026-10-31T18:00:00.000Z");
   const staleAt = "2026-10-31T16:00:00.000Z";
   const freshAt = "2026-10-31T17:50:00.000Z";
   try {
-    await mkdir(join(root, ".agent-ship"), { recursive: true });
+    await mkdir(join(root, ".crewvane"), { recursive: true });
     await writeFile(
       eventsFile(root),
       line({
@@ -293,18 +293,18 @@ test("watchdog flags a slice with no heartbeat and ignores a fresh one", async (
 });
 
 test("watchdog flags drift when the contract check fails", async () => {
-  const root = await mkdtemp(join(tmpdir(), "agent-ship-drift-"));
+  const root = await mkdtemp(join(tmpdir(), "crewvane-drift-"));
   const now = new Date();
   try {
     await exec("git", ["init", "-b", "main"], { cwd: root });
     await exec("git", ["config", "user.email", "test@example.com"], { cwd: root });
     await exec("git", ["config", "user.name", "Test"], { cwd: root });
-    await mkdir(join(root, ".agent-ship", "contracts"), { recursive: true });
+    await mkdir(join(root, ".crewvane", "contracts"), { recursive: true });
     await writeFile(join(root, "README.md"), "base\n");
     await exec("git", ["add", "README.md"], { cwd: root });
     await exec("git", ["commit", "-m", "base"], { cwd: root });
     await writeFile(
-      join(root, ".agent-ship", "contracts", "contract_auth.md"),
+      join(root, ".crewvane", "contracts", "contract_auth.md"),
       "# Contract\n\n## Allowed paths\n\n- src/**\n\n## Forbidden paths\n\n- secrets/**\n",
     );
     await exec("git", ["checkout", "-b", "ship/contract_auth/auth"], { cwd: root });
@@ -340,10 +340,10 @@ test("watchdog flags drift when the contract check fails", async () => {
 });
 
 test("limits.json can set the stale window", async () => {
-  const root = await mkdtemp(join(tmpdir(), "agent-ship-limits-"));
+  const root = await mkdtemp(join(tmpdir(), "crewvane-limits-"));
   try {
-    await mkdir(join(root, ".agent-ship"), { recursive: true });
-    await writeFile(join(root, ".agent-ship", "limits.json"), JSON.stringify({ stale_minutes: 5, speculative: false }));
+    await mkdir(join(root, ".crewvane"), { recursive: true });
+    await writeFile(join(root, ".crewvane", "limits.json"), JSON.stringify({ stale_minutes: 5, speculative: false }));
     const created = new Date(Date.now() - 10 * 60 * 1000).toISOString();
     await writeFile(
       eventsFile(root),

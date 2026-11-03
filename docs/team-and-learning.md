@@ -6,20 +6,20 @@
 ## Setup 的行为
 
 ```sh
-agent-ship setup
-agent-ship setup --shared
+crewvane setup
+crewvane setup --shared
 ```
 
-普通 setup 只在 `.agent-ship/team.json` 建立本地引用，`learning_required` 默认为 false，不创建共享手册，也不给每次交付加经验检查。
-`--shared` 会创建可版本管理的 `agent-ship.team.json`（`learning_required` 默认为 true），并在没有手册时创建
+普通 setup 只在 `.crewvane/team.json` 建立本地引用，`learning_required` 默认为 false，不创建共享手册，也不给每次交付加经验检查。
+`--shared` 会创建可版本管理的 `crewvane.team.json`（`learning_required` 默认为 true），并在没有手册时创建
 `docs/agent-team/handbook.md`。默认经验目录只放说明索引，不预填“经验”。
-`--shared` 成功后删除 `.agent-ship/team.json`，避免本地旧副本和共享配置各说一套。
+`--shared` 成功后删除 `.crewvane/team.json`，避免本地旧副本和共享配置各说一套。
 
 已有配置优先；没有配置时依次发现默认手册、`TEAM.md`、`docs/TEAM.md`、`docs/team/handbook.md`。
 也可明确引用已有来源：
 
 ```sh
-agent-ship setup --shared --handbook docs/engineering/team.md --lessons docs/engineering/lessons
+crewvane setup --shared --handbook docs/engineering/team.md --lessons docs/engineering/lessons
 ```
 
 显式手册必须已经存在。重复 setup 不覆盖手册、配置或经验；配置存在时传入不同来源会报冲突，
@@ -55,7 +55,7 @@ none 只是运行审计，不创建经验，也不通知人。船长仍然只有
 ## 开工时：检索不等于加载全部资料
 
 ```sh
-agent-ship team context --tag git --tag parallel --project api-service
+crewvane team context --tag git --tag parallel --project api-service
 ```
 
 输出必读规范的路径、相关 active 经验的短摘要、需要复核的编号和预算信息。
@@ -71,7 +71,7 @@ agent-ship team context --tag git --tag parallel --project api-service
 不进入摘要，也不占复核编号。需要更多细节时显式展开一条：
 
 ```sh
-agent-ship lesson show --id isolated-repositories
+crewvane lesson show --id isolated-repositories
 ```
 
 `learning_required` 为 true 时，`slice start` 还要求 `--worker`，以及合同里的
@@ -89,7 +89,7 @@ agent-ship lesson show --id isolated-repositories
 完成独立代码核验后，核验者返回经验影响结论，船长负责记录：
 
 ```sh
-agent-ship lesson check --source-task-id task_upload \
+crewvane lesson check --source-task-id task_upload \
   --outcome none --reason '常规改动，已有规范和测试已覆盖，没有新的复用结论。' \
   --reviewed-by verifier_run_123
 ```
@@ -104,8 +104,8 @@ none 只追加一条运行审计事件，不创建经验文件，也不默认通
 候选示例在 `templates/lesson.example.json`，先替换证据和任务占位符，再执行：
 
 ```sh
-agent-ship lesson add --input /path/to/verified-finding.json
-agent-ship lesson check --source-task-id task_upload \
+crewvane lesson add --input /path/to/verified-finding.json
+crewvane lesson check --source-task-id task_upload \
   --outcome candidate --candidate-id isolated-repositories \
   --reason '跨仓库验收的遗漏已复现，证据与适用条件完整。' \
   --reviewed-by verifier_run_123 --trigger verifier_return
@@ -122,8 +122,8 @@ add 校验字段、字数和证据指针，创建 candidate。同条件、动作
 安全停工、failed/cancelled 或人的拒绝不会因为缺少文档而被阻止。船长在收尾时检查遗留项：
 
 ```sh
-agent-ship lesson pending
-agent-ship lesson pending --source-task-id task_upload
+crewvane lesson pending
+crewvane lesson pending --source-task-id task_upload
 ```
 
 pending 默认最多返回 20 个任务编号与状态，并报告总量；不会把历史报告全部带入上下文。
@@ -136,8 +136,8 @@ pending 默认最多返回 20 个任务编号与状态，并报告总量；不�
 这一步不写入手册，也不写入团队配置的 `rules`。
 
 ```sh
-agent-ship lesson add --input /path/to/verified-finding.json --auto
-agent-ship lesson add --input /path/to/verified-finding.json --auto --demand billing
+crewvane lesson add --input /path/to/verified-finding.json --auto
+crewvane lesson add --input /path/to/verified-finding.json --auto --demand billing
 ```
 
 每张自动候选记录需求指纹：卡片上的 `source_task_id`，加上可选的 `--demand` 标签。
@@ -149,8 +149,8 @@ CLI 在原卡片上追加该指纹并标记 `handbook_review_suggested`。不新
 也不改写已有结论和证据。已经在经验根目录的相同结论不会被自动候选改写，也不会因此进入队列。
 
 ```sh
-agent-ship lesson pending --handbook
-agent-ship lesson pending --handbook --source-task-id task_upload
+crewvane lesson pending --handbook
+crewvane lesson pending --handbook --source-task-id task_upload
 ```
 
 `--handbook` 只列出被标记且尚未退役的卡片（编号、来源路径、状态、需求指纹），
@@ -169,7 +169,7 @@ agent-ship lesson pending --handbook --source-task-id task_upload
 激活不是工人自审：`--reviewed-by` 不能等于卡片上的 `authored_by`，也不能等于该任务已记录的 `worker_ref`。
 
 ```sh
-agent-ship lesson review --id isolated-repositories --status active \
+crewvane lesson review --id isolated-repositories --status active \
   --reviewed-by maintainer_review_456 --note '已复跑证据并检查相关条目，适用边界清楚。'
 ```
 
@@ -196,7 +196,7 @@ when/action，确定性事件管线负责落盘与检索。
 注入后复发可标 needs_review；最近使用时间参与排序，不自动删除或升级硬规则。
 `learning review` 列出未收尾纠正，用 outcome none/candidate 和 reason 记录审计。
 `handbook propose --from-lesson ID` 只给目标、插入位置和可审 diff，不写手册。
-普通 local setup 的新经验默认在 `.agent-ship/lessons`，共享 setup 使用团队经验目录。
+普通 local setup 的新经验默认在 `.crewvane/lessons`，共享 setup 使用团队经验目录。
 
 ## 复发时先修已有机制
 

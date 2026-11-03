@@ -8,15 +8,15 @@
 
 ## 准备工作
 
-在项目目录里运行 `agent-ship`。命令不在 `PATH` 上时，改用
-`node $HOME/.agent-ship-kit/current/cli/bin/agent-ship.js`，参数相同。
+在项目目录里运行 `crewvane`。命令不在 `PATH` 上时，改用
+`node $HOME/.crewvane/current/cli/bin/crewvane.js`，参数相同。
 `/work/workspace` 是控制仓库，`repos/alpha`、`repos/beta` 是两个独立 Git 仓库。
 在子目录里执行 `setup` 会解析到当前 worktree 的仓库根，不会误用另一个 worktree。
 
 ```sh
-agent-ship setup --root /work/workspace
-agent-ship setup --root /work/workspace/repos/alpha --state-root /work/workspace
-agent-ship setup --root /work/workspace/repos/beta --state-root /work/workspace
+crewvane setup --root /work/workspace
+crewvane setup --root /work/workspace/repos/alpha --state-root /work/workspace
+crewvane setup --root /work/workspace/repos/beta --state-root /work/workspace
 ```
 
 根目录的 hooks 不会传播到独立成员，必须分别安装。默认安装仍保留既有规则和忽略文件；
@@ -24,13 +24,13 @@ agent-ship setup --root /work/workspace/repos/beta --state-root /work/workspace
 不会静默安装一组 Git 不执行的 hooks。
 
 `setup` 通过 `git rev-parse --git-path` 定位 hooks，支持 `.git` 为文件的 worktree。
-每个 checkout 的 `.agent-ship/state-root` 和 `active-contract` 独立保存。
+每个 checkout 的 `.crewvane/state-root` 和 `active-contract` 独立保存。
 共享 hooks 保留既有 hook 的串联；卸载一个 checkout 时，如果还有其他已安装 checkout，
 保留共享 hooks 和忽略规则。所有 checkout 都卸载后才恢复原 hook。
 
 ## 冻结合同与预留并行名额
 
-合同放在共享根目录 `.agent-ship/contracts/<id>.md`，必须记录：
+合同放在共享根目录 `.crewvane/contracts/<id>.md`，必须记录：
 
 - `Status: frozen`、真实的 `Frozen by`、有效的 `Frozen at` 时间；
 - 非空 Allowed paths 和 Forbidden paths；
@@ -53,7 +53,7 @@ Git diff 不进入独立仓库，CLI 会拒绝这种跨 Git 边界的路径检�
 先创建分支，例如 `git branch ship/auth/middleware main`，再登记。
 
 ```sh
-agent-ship slice start --root /work/workspace \
+crewvane slice start --root /work/workspace \
   --repo /work/workspace/repos/alpha \
   --contract auth --slice middleware --source-task-id task_auth_middleware \
   --branch ship/auth/middleware --base main \
@@ -67,7 +67,7 @@ agent-ship slice start --root /work/workspace \
 随后调用适配器 spawn，使用同一个稳定任务 ID 映射平台 run ID，并记录 worker 引用：
 
 ```sh
-agent-ship slice update --root /work/workspace \
+crewvane slice update --root /work/workspace \
   --source-task-id task_auth_middleware --status running --worker platform_run_123 \
   --summary 'Worker started on the prepared checkout.'
 ```
@@ -84,20 +84,20 @@ agent-ship slice update --root /work/workspace \
 ```sh
 git -C /work/workspace/repos/alpha worktree add -b ship/auth/middleware /work/trees/auth main
 git -C /work/workspace/repos/alpha worktree add -b ship/billing/webhook /work/trees/billing main
-agent-ship setup --root /work/trees/auth --state-root /work/workspace
-agent-ship setup --root /work/trees/billing --state-root /work/workspace
+crewvane setup --root /work/trees/auth --state-root /work/workspace
+crewvane setup --root /work/trees/billing --state-root /work/workspace
 ```
 
-在每个 checkout 的 `.agent-ship/active-contract` 写入它负责的合同 ID，
+在每个 checkout 的 `.crewvane/active-contract` 写入它负责的合同 ID，
 再按上面的方式登记，并将 `--repo` 指到对应 worktree。pre-commit 会读取该工作树的指针，
 从共享根目录加载合同，检查当前工作树的暂存区。
 
 ## 核验、收件箱与状态闭环
 
 ```sh
-agent-ship check --root /work/workspace --contract auth --slice middleware
-agent-ship watchdog --root /work/workspace
-agent-ship inbox list --root /work/workspace --sort priority
+crewvane check --root /work/workspace --contract auth --slice middleware
+crewvane watchdog --root /work/workspace
+crewvane inbox list --root /work/workspace --sort priority
 ```
 
 `check` 从登记记录确定实际 checkout、分支和固定基线。合同跨多个仓库或分支时，
@@ -110,7 +110,7 @@ watchdog 的提交进展与路径越界检查使用同一条切片的 checkout �
 独立核验通过后，船长使用 `inbox add --type needs_review` 汇总证据。运行视图同时折叠
 events 和 inbox，因此待审、阻塞和中途审批都会暂停 running/queued 状态；接受待审包后
 不会再把已交付任务判为停滞。相同毫秒写入的本地事件用状态锁内生成的 sequence 排序。
-`.agent-ship/sequence` 是锁内递增的一个整数，用来给同一时间戳的事件排稳定顺序。
+`.crewvane/sequence` 是锁内递增的一个整数，用来给同一时间戳的事件排稳定顺序。
 不要在命令运行时改这个文件。如果内容不是非负整数，CLI 报 `invalid state sequence` 并停止。
 确认没有进程持有锁之后，可以把文件改回最后一个正确整数，或写成 `0`。
 `created_at` 无法解析时，排序改用 sequence，再不行就保持文件里的原顺序。
@@ -130,7 +130,7 @@ events 和 inbox，因此待审、阻塞和中途审批都会暂停 running/queu
 worktree hooks、人工决定后的状态闭环、显式恢复与替换、无法检查时的告警。
 测试使用临时 Git 仓库和工人进程夹具，不代表已完成 Herdr/Orca/Multica 的真实模型接入验收。
 
-状态锁和 hook 注册锁都是目录 `.agent-ship-lock`，里面的 `owner.json` 记录
+状态锁和 hook 注册锁都是目录 `.crewvane-lock`，里面的 `owner.json` 记录
 `pid`、`hostname`、`started_at`、`cmd`。同一台机器上，如果记录的 pid 已经不存在，
 下一次命令会自动收回这把锁。pid 仍在，或锁来自别的主机，命令等到超时后报错，
 并写明拥有者和 pid 是否仍活着。手工恢复：确认拥有者已经退出后执行 `rm -rf <锁目录>`。
