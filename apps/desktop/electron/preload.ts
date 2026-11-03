@@ -1,35 +1,16 @@
 import { contextBridge, ipcRenderer } from "electron";
-import type { ServiceCommand } from "../../../packages/orchestrator/src/service.js";
+import type { CrewvaneCommand } from "../../../packages/core/src/index.js";
 contextBridge.exposeInMainWorld("crewvane", {
-  command: (command: ServiceCommand) =>
-    ipcRenderer.invoke("crewvane:command", command),
-  selectWorkspace: () => ipcRenderer.invoke("crewvane:workspace"),
-  selectProject: () => ipcRenderer.invoke("crewvane:project"),
-  environment: () => ipcRenderer.invoke("crewvane:environment"),
-  openEvidence: (taskId: string) =>
-    ipcRenderer.invoke("crewvane:evidence", taskId),
-  openPR: (taskId: string) => ipcRenderer.invoke("crewvane:pr", taskId),
-  terminalBackends: () => ipcRenderer.invoke("crewvane:terminal-backends"),
-  terminalStart: (options: {
-    backend: string;
-    cwd?: string;
-    cols: number;
-    rows: number;
-  }) => ipcRenderer.invoke("crewvane:terminal-start", options),
-  terminalWrite: (id: string, data: string) =>
-    ipcRenderer.invoke("crewvane:terminal-write", id, data),
-  terminalResize: (id: string, cols: number, rows: number) =>
-    ipcRenderer.invoke("crewvane:terminal-resize", id, cols, rows),
-  terminalStop: (id: string) => ipcRenderer.invoke("crewvane:terminal-stop", id),
-  herdrStatus: () => ipcRenderer.invoke("crewvane:herdr-status"),
-  installHerdr: () => ipcRenderer.invoke("crewvane:install-herdr"),
-  openHerdrDocs: () => ipcRenderer.invoke("crewvane:open-herdr-docs"),
-  vaultStatus: () => ipcRenderer.invoke("crewvane:vault-status"),
-  saveCredential: (input: { projectId: string; label: string; env: string; checkIndex: number; value: string }) => ipcRenderer.invoke("crewvane:vault-save", input),
-  removeCredential: (input: { projectId: string; credentialId: string }) => ipcRenderer.invoke("crewvane:vault-remove", input),
-  subscribe: (listener: (event: unknown) => void) => {
-    const handler = (_: unknown, data: unknown) => listener(data);
-    ipcRenderer.on("crewvane:event", handler);
-    return () => ipcRenderer.removeListener("crewvane:event", handler);
-  },
+  command: (command: CrewvaneCommand) => ipcRenderer.invoke("crewvane:command", command),
+  selectWorkspace: () => ipcRenderer.invoke("crewvane:workspace"), selectProject: () => ipcRenderer.invoke("crewvane:project"),
+  environment: () => ipcRenderer.invoke("crewvane:environment"), herdrStatus: () => ipcRenderer.invoke("crewvane:herdr-status"),
+  agentChoices: () => ipcRenderer.invoke("crewvane:agent-choices"),
+  installHerdr: () => ipcRenderer.invoke("crewvane:install-herdr"), cliStatus: () => ipcRenderer.invoke("crewvane:cli-status"),
+  installCli: () => ipcRenderer.invoke("crewvane:install-cli"), prepareConcierge: () => ipcRenderer.invoke("crewvane:prepare-concierge"),
+  dispatchGoal: (goalId: string) => ipcRenderer.invoke("crewvane:dispatch-goal", goalId),
+  terminalSnapshot: () => ipcRenderer.invoke("crewvane:terminal-snapshot"),
+  writeTerminal: (session: string, data: string) => ipcRenderer.invoke("crewvane:terminal-write", session, data),
+  resizeTerminal: (session: string, cols: number, rows: number) => ipcRenderer.invoke("crewvane:terminal-resize", session, cols, rows),
+  openHerdr: (goalId?: string) => ipcRenderer.invoke("crewvane:open-herdr", goalId), openUrl: (url: string) => ipcRenderer.invoke("crewvane:open-url", url), showCli: () => ipcRenderer.invoke("crewvane:show-cli"),
+  subscribe: (listener: (event: any) => void) => { const handler = (_: unknown, data: unknown) => listener(data); ipcRenderer.on("crewvane:event", handler); return () => ipcRenderer.removeListener("crewvane:event", handler); },
 });

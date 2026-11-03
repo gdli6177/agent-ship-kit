@@ -2,7 +2,7 @@
 import { _electron as electron } from "@playwright/test";
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
-import { access, mkdir, mkdtemp, readFile, rm } from "node:fs/promises";
+import { access, mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
@@ -17,6 +17,19 @@ const trial = await mkdtemp(join(tmpdir(), "crewvane-install-test-"));
 await exec("shasum", ["-a", "256", "-c", "SHA256SUMS.txt"], { cwd: installers });
 await exec("hdiutil", ["verify", join(installers, `${stem}.dmg`)]);
 async function verifyDownloadedApp(appPath, label) {
+  // Verify the icon in the delivered bundle, rather than only the source
+  // artwork: an old ICNS can otherwise survive a successful application build.
+  const { stdout: iconFile } = await exec("/usr/libexec/PlistBuddy", [
+    "-c", "Print :CFBundleIconFile", join(appPath, "Contents/Info.plist"),
+  ]);
+  const iconName = iconFile.trim();
+  assert.ok(iconName && !/[\\/]/.test(iconName), "Bundle icon must name a resource");
+  const iconResource = iconName.endsWith(".icns") ? iconName : `${iconName}.icns`;
+  assert.deepEqual(
+    await readFile(join(appPath, "Contents/Resources", iconResource)),
+    await readFile(join(repo, "apps/desktop/assets/brand/crewvane-icon.icns")),
+    `${label}: shipped application must use the current Dock icon`,
+  );
   await exec("codesign", ["--verify", "--deep", "--strict", "--verbose=2", appPath]);
   // A browser-downloaded app carries the quarantine marker when extracted.
   // Gatekeeper evaluates nested code through the sealed bundle signature.
@@ -30,32 +43,47 @@ async function verifyDownloadedApp(appPath, label) {
 }
 async function launchInstalled(appPath, label) {
   await verifyDownloadedApp(appPath, label);
+  assert.ok(
+    (await readFile(join(appPath, "Contents/Resources/app.asar"))).includes(
+      Buffer.from("CREWVANE_TEST_HOME"),
+    ),
+    "Installer predates isolated CLI testing; rebuild with pnpm desktop:dist before running",
+  );
+  assert.ok(
+    (await stat(join(appPath, "Contents/Resources/app.asar"))).size < 50 * 1024 * 1024,
+    "App archive must contain bundled code/assets, not source dependencies or previous releases",
+  );
   const workspace = join(trial, `${label}-workspace`);
-  await mkdir(workspace);
+  const home = join(trial, `${label}-home`);
+  await mkdir(workspace); await mkdir(join(home, ".local/bin"), { recursive: true });
   const app = await electron.launch({
     executablePath: join(appPath, "Contents/MacOS/Crewvane"),
     args: [],
-    env: { ...process.env, CREWVANE_TEST_USER_DATA: join(trial, `${label}-userData`),
-      CREWVANE_TEST_WORKSPACE: workspace },
+    env: { ...process.env, CREWVANE_TEST_HOME: home,
+      CREWVANE_TEST_USER_DATA: join(trial, `${label}-userData`),
+      CREWVANE_TEST_WORKSPACE: workspace, CREWVANE_HERDR_SESSION: `crewvane-installer-${label}` },
     timeout: 60_000,
   });
   try {
     const page = await app.firstWindow();
     const errors = [];
     page.on("pageerror", (error) => errors.push(error.message));
-    await page.getByRole("heading", { name: "全部目标" }).waitFor();
+    await page.getByRole("heading", { name: "现在，可以安心了。" }).waitFor();
     assert.equal(await app.evaluate(({ app }) => app.getVersion()), version);
     assert.equal(await page.evaluate(() => typeof window.require), "undefined");
-    await page.locator(".rail-bottom").getByRole("button", { name: "终端", exact: true }).click();
-    await page.getByLabel("终端后端").selectOption("shell");
-    await page.locator(".drawer-title small").getByText(/zsh|bash|fish|sh/).waitFor();
-    await page.getByLabel("交互式终端").click();
-    await page.keyboard.type("printf __installer_ok__");
-    await page.keyboard.press("Enter");
-    await page.waitForFunction(() =>
-      (document.querySelector(".xterm-rows")?.textContent.match(/__installer_ok__/g)?.length ?? 0) >= 2);
+    await page.getByRole("button", { name: "设置", exact: true }).click();
+    await page.getByRole("button", { name: "安装到 ~/.local/bin" }).click();
+    await page.getByRole("button", { name: "重新安装", exact: true }).waitFor();
+    const cli = join(home, ".local/bin/crewvane");
+    assert.ok((await exec(cli, ["status", "--root", workspace, "--json"])).stdout.includes('"version": 2'));
+    const created = JSON.parse((await exec(cli, ["goal", "create", "--title", "安装包 CLI 验收",
+      "--project", "personal", "--root", workspace, "--json"])).stdout);
+    await writeFile(join(trial, `${label}-cli.json`), JSON.stringify(created));
+    await page.getByRole("button", { name: "全部目标", exact: true }).click();
+    await page.getByText("安装包 CLI 验收", { exact: true }).waitFor();
+    await page.screenshot({ path: join(trial, `${label}-installed.png`) });
     assert.deepEqual(errors, []);
-    console.log(`${label}: installed app starts, version matches, renderer isolated, real PTY works`);
+    console.log(`${label}: installed app starts, icon/signature verified, bundled CLI installs and writes a goal`);
   } finally {
     await app.close();
   }

@@ -1,9 +1,0 @@
-{
-  "id": "evt_eval_high_empty",
-  "type": "needs_review",
-  "title": "Auth ready",
-  "summary": "Checks passed.",
-  "priority": "high",
-  "source_task_id": "task_auth",
-  "evidence_urls": []
-}

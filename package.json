@@ -1,12 +1,9 @@
 {
   "name": "crewvane",
-  "version": "0.3.1",
-  "description": "Crewvane\uff5c\u534f\u822a \u2014 \u4ea4\u4ee3\u76ee\u6807\uff0c\u56e2\u961f\u4ea4\u4ed8\u3002",
+  "version": "0.4.1",
+  "description": "Crewvane｜协航 — 一位管家，整理所有事。",
   "license": "MIT",
   "type": "module",
-  "engines": {
-    "node": ">=20"
-  },
   "bin": {
     "crewvane": "./cli/bin/crewvane.js"
   },
@@ -14,32 +11,26 @@
     "type": "git",
     "url": "git+https://github.com/gdli6177/crewvane.git"
   },
-  "dependencies": {
-    "tsx": "^4.20.6"
-  },
   "scripts": {
-    "test": "pnpm --dir cli test && pnpm --filter @crewvane/core --filter @crewvane/orchestrator test",
+    "test": "pnpm --dir cli test && pnpm --filter @crewvane/core test && pnpm --filter @crewvane/desktop test",
     "typecheck": "pnpm -r typecheck",
-    "test:dogfood": "node scripts/dogfood.mjs",
-    "test:dogfood:lanes": "node scripts/dogfood-lanes.mjs",
     "desktop:dev": "pnpm --dir apps/desktop dev",
     "desktop:build": "pnpm --dir apps/desktop build",
     "desktop:package": "pnpm --dir apps/desktop package",
     "desktop:dist": "pnpm --dir apps/desktop dist",
     "test:installers": "node scripts/installer-smoke.mjs",
-    "test:desktop": "node scripts/desktop-smoke.mjs",
-    "test:design": "tsx scripts/design-qa.mjs",
-    "test:crewvane": "tsx scripts/crewvane-dogfood.ts",
-    "test:product": "tsx scripts/product-dogfood.ts",
+    "test:desktop": "tsx scripts/desktop-smoke.mjs",
+    "test:terminal": "node scripts/herdr-terminal-smoke.mjs",
     "desktop": "pnpm --dir apps/desktop dev",
     "build": "pnpm --dir apps/desktop build",
-    "package:mac": "pnpm --dir apps/desktop package:mac"
+    "package:mac": "pnpm --dir apps/desktop package"
   },
   "packageManager": "pnpm@10.4.1",
   "devDependencies": {
+    "@playwright/test": "^1.58.0",
     "@types/node": "^22.20.0",
-    "typescript": "^5.9.3",
     "esbuild": "^0.25.0",
-    "@playwright/test": "^1.58.0"
+    "tsx": "^4.20.0",
+    "typescript": "^5.9.3"
   }
 }

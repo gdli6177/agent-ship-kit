@@ -1,30 +1,11 @@
 {
   "name": "@crewvane/cli",
-  "version": "0.3.1",
-  "description": "Local inbox and notify dry-run for the crewvane captain. Never merges, deploys, or starts a shell.",
+  "version": "0.4.1",
+  "description": "Crewvane 全局管家与注意力中心 CLI",
   "license": "MIT",
   "type": "module",
-  "engines": {
-    "node": ">=20"
-  },
-  "bin": {
-    "crewvane": "./bin/crewvane.js"
-  },
-  "repository": {
-    "type": "git",
-    "url": "git+https://github.com/gdli6177/crewvane.git",
-    "directory": "cli"
-  },
-  "scripts": {
-    "crewvane": "tsx src/cli.ts",
-    "test": "tsx --test test/*.test.ts",
-    "typecheck": "tsc --noEmit"
-  },
-  "dependencies": {
-    "tsx": "^4.20.6"
-  },
-  "devDependencies": {
-    "@types/node": "^22.20.0",
-    "typescript": "^5.9.3"
-  }
+  "files": ["bin", "dist"],
+  "bin": { "crewvane": "./bin/crewvane.js" },
+  "scripts": { "crewvane": "tsx src/main.ts", "build": "esbuild src/main.ts --bundle --platform=node --format=cjs --target=node20 --outfile=dist/crewvane.cjs", "prepack": "pnpm build", "test": "tsx --test test/*.test.ts", "typecheck": "tsc --noEmit" },
+  "devDependencies": { "@types/node": "^22.20.0", "typescript": "^5.9.3", "esbuild": "^0.25.0" }
 }

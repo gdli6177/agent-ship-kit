@@ -6,4 +6,3 @@ packages:
 onlyBuiltDependencies:
   - electron
   - esbuild
-  - node-pty

@@ -1,0 +1,37 @@
+import parseArgsStringToArgv from "string-argv";
+import { basename } from "node:path";
+
+export function parseAgentCommand(command: string, kinds: string[]) {
+  if (!command.trim() || command.length > 2000 || /[\x00-\x1f\x7f;&|<>`$]/.test(command))
+    throw new Error("请输入单行 Agent 启动命令；不支持 shell 管道、重定向或变量展开");
+  let quote = "";
+  for (const character of command) {
+    if (character === "'" || character === '"') {
+      if (!quote) quote = character;
+      else if (quote === character) quote = "";
+    }
+  }
+  if (quote) throw new Error("启动命令的引号没有闭合");
+  const [executable, ...args] = parseArgsStringToArgv(command.trim());
+  if (!executable || executable.startsWith("-")) throw new Error("启动命令缺少 CLI 可执行文件");
+  if (/^[A-Za-z_][A-Za-z0-9_]*=/.test(executable) || executable === "env")
+    throw new Error("启动命令不能设置环境变量；请把 CLI 需要的环境配置写入该 CLI 自身的配置文件");
+  const kind = basename(executable);
+  if (!kinds.includes(kind))
+    throw new Error(`Herdr 暂不支持 ${kind}。请填写受支持的 CLI 命令：${kinds.join("、") || "请先安装 Herdr"}；参数直接写在命令后。`);
+  return { executable, kind, args };
+}
+
+export function codexArguments(args: string[], cliRoot: string, projects: string[], cliPath: string) {
+  const has = (...options: string[]) => args.some(arg => options.some(option => arg === option || arg.startsWith(`${option}=`)));
+  return [
+    ...(!has("-a", "--ask-for-approval") ? ["--ask-for-approval", "never"] : []),
+    ...(!has("--full-auto", "--yolo", "--dangerously-bypass-approvals-and-sandbox", "-s", "--sandbox")
+      ? ["--sandbox", "workspace-write"] : []),
+    "-c", "sandbox_workspace_write.network_access=true",
+    "--add-dir", cliRoot,
+    ...projects.flatMap(directory => ["--add-dir", directory]),
+    "-c", `shell_environment_policy.set.PATH=${JSON.stringify(cliPath)}`,
+    ...args,
+  ];
+}

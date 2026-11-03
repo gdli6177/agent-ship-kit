@@ -1,343 +1,51 @@
-# Crewvane 桌面架构
+# Crewvane 架构
 
-当前桌面与自主执行以 [V0.1 方案](product/crewvane-v0.1.md) 和 [使用说明](crewvane.md) 为准。
-`packages/core` 拥有记录、授权和工序；`packages/orchestrator` 拥有运行时、调度、决策和交付；
-`apps/desktop` 提供 Electron 主进程、独立 utility 进程与隔离的 React 界面。CLI 与桌面共用状态。
+产品基线见 [全局管家与注意力中心开发说明](product/attention-center-development.md)。
 
-## Desktop boundaries
-
-Crewvane owns persistent tasks, authorization, delegation, hierarchical escalation,
-decision reuse, workflow versions, evidence and the human attention queue. Agent
-protocols execute work; terminal backends only expose or observe sessions.
-
-- OMP and DSH use ACP. Codex uses Codex App Server. Cursor and Qoder are discovery-only
-  until their Agent CLI dispatch protocols are verified.
-- Herdr is an optional terminal/session backend. Settings detects it and offers a
-  one-click `brew install herdr`; the fixed executable and argv run without a shell.
-  When present, the embedded terminal prefers Herdr. Without it, agents still exchange
-  structured work through ACP or Codex App Server and Crewvane's persistent state.
-- Workspace-level `crewvane.runtimes.json` can add protocol-aware local CLIs. The
-  manifest stores executable names and argv arrays, not credentials or shell strings.
-- Captain messages are durable routing commands. The host validates the model's
-  proposed route and atomically records task creation, follow-up context and the
-  captain reply. Ambiguous routes stay open across restarts; follow-ups invalidate
-  stale stage evidence and require another independent verification.
-- Team handbook and explicitly configured Markdown sources have a combined 64 KB
-  injection budget. Large owner `AGENTS.md` files still get streaming digest receipts
-  without a body-injection limit. Completed, independently verified tasks can create
-  lesson candidates; a different human reviewer must approve them before reuse.
-- Test credentials live in Electron safeStorage under the OS keychain. Workspace
-  events contain only references and access metadata. The main process decrypts a
-  granted reference for the utility process's specified test command; the renderer,
-  model prompts, runtime events and evidence never receive the plaintext. The host
-  masks plaintext and encoded forms even when process output splits them across chunks.
-- `external-approval` is fixed. The product does not auto-merge or deploy.
-
-The UI and infrastructure deliberately reuse maintained components:
-
-| Need | Reuse |
-| --- | --- |
-| Desktop shell | Electron |
-| UI primitives | React, Radix UI Themes / Dialog |
-| Icons | Lucide |
-| Terminal UI | xterm.js |
-| PTY | node-pty |
-| Agent protocol | ACP, Codex App Server |
-| Optional terminal sessions | Herdr |
-| Test-secret encryption | Electron safeStorage / OS keychain |
-| Desktop E2E | Playwright |
-
-ACP and Codex App Server use a narrowly tested JSON-RPC subset. Adding
-`@agentclientprotocol/sdk` would not currently remove a Crewvane responsibility or
-materially reduce the implemented protocol surface.
-
-以下为仍可单独使用的手工合同 CLI 架构，不是桌面项目授权模式的执行协议。
-
-# 手工合同 CLI 架构
-
-
-v0.2: [reliability changes and trial](reliability-v0.2.md).
-
-多仓库与 worktree 的执行位置、共享状态、原子派工门禁和状态闭环以
-[工作空间接入说明](workspace-parallel.md) 为准。`repo_root` 是执行 checkout，
-`base_ref` 是派工时固定的提交，`sequence` 用于同毫秒事件排序；旧事件仍兼容。
-CLI 预留名额在 adapter spawn 之前，inbox 的待审/阻塞/审批事件同时更新运行视图。
-
-crewvane is an acceptance-and-attention layer. A captain agent is the
-only thing the human talks to. Workers are created when a contract is frozen
-and disappear when their slice is done. An orchestrator, if there is one,
-sits behind an adapter. The kit stores events, evidence pointers, and a
-notification plan. It does not run models, merge to main, or deploy.
-
-## Captain is a router
-
-The captain talks to the human, routes queued demands to temporary lane owners, compresses decisions, and records routing. Owners coordinate scouts, contract drafts, workers and verifiers. It does not edit product code and it does not run the long task, including work that looks small. It also does not block on a worker: the next human request is accepted while slices run.
-
-Prompt-only delegation is unreliable. A sentence that says "stay the coordinator" sits in the same context that will be asked to implement the next edit, so the boundary dissolves. The frozen contract file is the handoff. Workers execute. The captain returns to the owner.
-
-Follow-up events on a subscribed thread (`thread_refs`: PR, issue, chat) go to the owning worker. The captain handles new or unowned events and coordination across slices.
-
-`worker_progress` in `.crewvane/events.jsonl` is a heartbeat. `crewvane watchdog` is a deterministic check, not a model call. It reads that heartbeat, the last commit on the slice's own branch (`slice start --branch`, default `ship/<contract>/<slice>`), and `crewvane check`. A commit on another branch does not count. It files a `blocked` item (`reason` `stalled` or `drift`) only when one of those is wrong. With no queued or running slice it exits immediately and retains its timer until explicit uninstall. `slice start` registers that timer when the first slice opens: a marked user crontab line on Linux/WSL, or `launchctl bootstrap` of a plist in `~/Library/LaunchAgents` on macOS. Copies under `~/.config/crewvane/` are not the activation and are never committed. If registration fails, slice start refuses admission unless --allow-untimed explicitly chooses manual supervision; later `watchdog` / `inbox list` runs warn while slices are active and the timer is not. The captain sees only the inbox item.
-
-Inbox summaries are at most 280 characters and carry the recall chain: contract, slice, worker or branch, PR, evidence. `/ship-inbox` shows that card first. The packet is the spill, opened on request.
-
-Notify has two filters. The fast path is the deterministic rule list plus the allowlist. The slow path is the captain reading the policy's prose and optionally passing `--action`, still under the allowlist. A push is at most 100 words, decision-oriented, and includes `/ship-inbox <id>`. The packet stays complete.
-
-Speculative mode is off unless `limits.json` sets `"speculative": true`. The captain may then pre-draft a proposal or a read-only reproduction from an incoming signal, and may show it only when it has evidence. It still does not dispatch or edit code without a frozen contract.
-
-## Captain loop
-
-```mermaid
-flowchart LR
-  human[Human]
-  captain[Captain]
-  proposal[Proposal card]
-  contract[Frozen contract]
-  adapter[Adapter]
-  workers[On-demand workers]
-  packet[Review packet]
-  inbox[Inbox JSONL]
-  plan[Notify dry-run]
-
-  human <--> captain
-  captain --> proposal
-  human --> contract
-  contract --> adapter
-  adapter --> workers
-  workers --> packet
-  packet --> inbox
-  inbox --> captain
-  captain --> plan
-  plan --> human
-  human --> captain
-```
-
-1. Intake stays in the captain thread. The captain writes a proposal card
-   (`skills/ship-contract`).
-2. The human freezes a contract. Until that happens there is nothing to spawn.
-3. The captain dispatches one worker per slice, through the adapter, without
-   exceeding the contract's `max_parallel` or the global cap of 3
-   (`skills/ship-dispatch`, `templates/workflow.md`).
-4. If the worker is blocked or needs a mid-task decision, it returns that to
-   the captain. The captain files `blocked` or `needs_approval`. The human
-   does not open the worker session.
-5. The worker returns evidence. The captain writes a review packet, including
-   E2E rows when smoke ran, and a `needs_review` inbox line (`skills/ship-inbox`,
-   `skills/ship-e2e`).
-6. Normal inbox items are pull. The notify planner pushes only for a
-   high-priority review that has evidence, or for `blocked` / `needs_approval`.
-   `notify dry-run` prints the plan. `notify run` may start that argv with no
-   shell (`skills/ship-notify`).
-7. The human accepts, requests changes, or rejects with `inbox decide`.
-   Accepting is not a merge. The human ships with their own tools.
-
-Workers are not a roster. No slice, no worker. The worker's prompt is the
-frozen slice, not the captain transcript.
-
-## Events
-
-`events/schema.json` is the envelope. Every event has:
-
-| Field | Required | Notes |
-| --- | --- | --- |
-| `id` | yes | `evt_` plus letters, digits, `_`, `-` |
-| `type` | yes | See below |
-| `title` | yes | One line |
-| `summary` | yes | What the human needs to know |
-| `created_at` | yes | ISO-8601 |
-| `source_task_id` | yes | Adapter task id, or the proposal/contract id before dispatch |
-
-Types:
-
-| `type` | When the captain writes it | Extra required fields |
-| --- | --- | --- |
-| `proposal_ready` | A draft card is ready for the human | — |
-| `contract_frozen` | The human froze a contract | — |
-| `worker_dispatched` | CLI admitted the frozen slice before adapter spawn | — |
-| `needs_review` | A packet is waiting | `evidence_urls`, `priority`, `links` |
-| `blocked` | The worker cannot continue | `priority` |
-| `needs_approval` | The worker needs a mid-task decision | `priority` |
-| `review_decided` | The human decided, closing one inbox item | `decision`, `subject_id` |
-| `notify_planned` | A plan was shown | — |
-
-`needs_review`, `blocked`, and `needs_approval` are attention events. The inbox
-stores them. `inbox list` shows the ones that do not yet have a
-`review_decided` row whose `subject_id` is that item. `inbox list --all`
-shows the log, including decisions.
-
-`needs_review` fields:
-
-- `evidence_urls` — array of strings. May be empty only as an explicit draft. `priority: high` with an empty array is not paged. The CLI warns on add and the planner sets `missing_evidence` (or matches no push rule).
-- `priority` — `normal` or `high`. Normal items are pull: no push rule in the example policy.
-- `links` — object with optional `pr`, `issue`, and `path`. The object is required; each key is optional.
-
-`blocked` and `needs_approval` carry `priority` and the same envelope. They may
-push without evidence URLs, because the owner is stuck and does not open the
-worker session.
-
-Optional cross-links on any type: `proposal_id`, `contract_id`, `slice_id`, `worker_ref`, `note`. Unknown keys are rejected by the schema (`additionalProperties: false`).
-
-`inbox add --type` writes the three attention types. `inbox decide <id> accept|changes_requested|reject` appends `review_decided`. An event does not authorize a merge or a deploy. `accept` records that the evidence matched the contract, or that the owner answered an escalation.
-
-## Storage
+## 边界
 
 ```text
-.crewvane/inbox.jsonl
-.crewvane/hard-rules.json
-.crewvane/proposals/<proposal_id>.md
-.crewvane/contracts/<contract_id>.md
-.crewvane/packets/<task_id>.md
+Electron 主进程      可信文件选择、Herdr、系统通知、受约束 IPC
+React 渲染进程       注意力、目标、工序、设置；无 Node 或任意命令能力
+packages/core        记录类型、注意力派生、工序快照、校验、锁与原子存储
+cli                  人和 Agent 共用的薄命令层，调用同一个 core 服务
+Herdr                Session、Tab、Pane、Agent 生命周期与消息
 ```
 
-The inbox is append-only JSONL, one event per line. `cli/src/inbox.ts` creates
-the directory, refuses a duplicate `id`, and refuses a priority other than
-`normal` or `high`. Runtime files are gitignored. Templates in `templates/`
-are the blanks.
+Crewvane 不运行模型，不扫描或适配 Agent 协议，不管理模型凭据。应用内用 xterm.js 显示 Herdr 的 TUI，用独立 Electron utility process 中的 node-pty 提供真实 TTY；会话、Agent 管理与通信由 Herdr 负责。任意已经能在 Herdr 中运行的 CLI Agent 都可以使用。
 
-Conventions for ids, branch names, freeze phrases, and the global worker cap: `templates/workflow.md`. Login and smoke tests: `templates/e2e.md` and `templates/e2e-testing.md`.
+## 状态
 
-## Local setup
+工作区由用户选择，状态位于 `<workspace>/.crewvane/`。`state.json` 是完整快照，`events.jsonl` 是追加事件记录，`.crewvane-lock/` 串行化桌面和 CLI 的并发写入。每次修改先写临时文件，再原子替换快照。
 
-`crewvane setup` (alias `init`, captain command `/ship-setup`) prepares one clone. It does not call a forge and it never sets `core.hooksPath`.
+`WorkspaceState.version = 2` 当前包含项目、工序、目标与唯一管家引用。旧版没有迁移路径，打开会明确报不支持。
 
-Default is local:
+注意力是独立派生：
 
-- Hooks live only in `.git/hooks`. An existing hook is saved as `pre-commit.crewvane-chain` or `pre-push.crewvane-chain` and run after the kit hook. Nothing under `.git/` is committed.
-- `.crewvane/`, `.env*`, and `*.storage-state.json` are written to `.git/info/exclude`, not `.gitignore`.
-- The rules block is merged into an untracked `AGENTS.md`, which is then excluded. A tracked `AGENTS.md` is not edited; the block goes to `.crewvane/AGENTS.local.md`.
-
-`crewvane setup --shared` is the opt-in that writes a marked block in the shared `.gitignore` and merges the rules into `AGENTS.md` even when that file is already tracked. Hooks stay in `.git/hooks` either way.
-
-`crewvane setup --uninstall` removes the kit hook (restoring the chained file) and the rules block. `.crewvane/` stays on disk, and `.git/info/exclude` keeps a marked `.crewvane/` line so the leftover directory does not show as untracked. `--uninstall --purge` deletes `.crewvane/` and that line.
-
-`pre-commit` runs `crewvane check --staged` for `.crewvane/active-contract` when that file exists, then chains. `pre-push` refuses `main`, `master`, and names in `.crewvane/protected-branches` unless a human sets `CREWVANE_ALLOW_PROTECTED_PUSH=1`. The captain must not set it.
-
-## Path check
-
-`crewvane check --root <state> --contract <id> --slice <slice>` reads the shared contract and uses the recorded execution checkout, worker branch and pinned base commit. Unregistered single-repository checks may explicitly pass `--repo`, `--head` and `--base`. Ambiguous multi-repository/branch checks and scopes entering nested Git repositories are rejected. It lists paths with plain `git diff` and prints JSON. A changed path that matches Forbidden paths, or that matches none of the Allowed paths, fails the check. The same command loads `.crewvane/hard-rules.json` from the state root. A `hook` or `contract_forbidden` glob match fails the check with `rule: "hard_rule"` and that rule's id. `verify_checklist` entries are returned as `checklist` and do not fail the path gate. `--hard-rules` runs only that file, with no contract. `--staged` is what the pre-commit hook uses: the active contract when one is set, otherwise `--hard-rules` when the file exists. The JSON belongs in the review packet's verifier section.
-
-`crewvane promote` and `inbox decide ... changes_requested --promote hook|contract|verify` write that file. `--promote` defaults to `none`. The file stays under gitignored `.crewvane/`, so the gate is local to clones that installed the kit. It does not merge, deploy, or add CI for other contributors. Secret-shaped text is refused.
-
-`crewvane check` fails a new proposal or contract whose `## Human review budget` section is missing `human_reviews_expected` or malformed (the count must match the purpose list), and only warns when that section is absent so older cards still pass; `inbox_needs_review_count` is reported for comparison and the check never merges.
-
-This does not need GitHub, GitLab, or CI. An optional extra, on any host, is to run the same command on the branch. A green extra check does not replace the verifier or the human.
-
-## Verifier
-
-After a worker reports done, its owner arranges a second agent with `templates/verifier-prompt.md`. That agent sees the frozen contract and the branch, not the worker chat. It re-runs acceptance commands, `crewvane check`, and the relevant E2E smoke. Disagreement goes back to the worker. Agreement is what allows `needs_review`.
-
-`crewvane eval --fixture <dir>` (sample `cli/test/eval-fixtures/verifier-gates`) is the before/after check when changing `ship-*` skills or these gates; a non-zero exit is a regression.
-
-## Changing a frozen contract
-
-The captain stops slices the change affects, drafts a new contract id with `Supersedes` set to the old id, and waits for the owner to freeze it again. Finished slices the new text does not touch are kept.
-
-## Adapters
-
-```text
-spawn(contract_path, slice_id, task_id, prompt) -> task_id, worker_ref
-status(task_id) -> queued | running | needs_review | blocked | needs_approval | failed | cancelled
-collect(task_id) -> summary, evidence_urls, links
-```
-
-`adapters/generic.md` is normative. `adapters/herdr.md`, `adapters/orca.md`,
-and `adapters/multica.md` say what to map those calls onto, without vendoring
-those products. v0 does not contain their clients and does not invent their
-HTTP paths.
-
-`spawn` fails closed when the contract is not `frozen`. None of the three
-calls merge or deploy. The example allowlist pattern
-`multica issue create --assignee me *` is a notify target, not a `spawn`
-implementation; see `adapters/multica.md`.
-
-With no orchestrator, `spawn` is one new agent session per slice. The human
-still speaks only to the captain.
-
-## Notify
-
-v0's decision step is a rule parser, not a model call. The policy markdown
-can still carry a free-text Instructions section. The parser ignores it and
-reads only `## Rule:` blocks. The captain may turn that prose into an argv and
-pass `--action`. The allowlist and the empty-evidence refusal still apply.
-
-Pull is the default. The example policy has no push rule for a normal
-`needs_review`. Push rules exist for high-priority reviews that have evidence,
-and for `blocked` and `needs_approval`.
-
-A rule:
-
-```markdown
-## Rule: high priority page
-
-when.priority: high
-when.type: needs_review
-when.evidence_urls: nonempty
-action: curl -X POST https://hooks.example/ship /ship-inbox {id}
-note: Page only when evidence exists. Deep link /ship-inbox {id}. Do not merge or deploy.
-```
-
-- Conditions: `when.type`, `when.priority`, `when.source_task_id`, and `when.evidence_urls` (`nonempty` or `empty`). An unknown `when.*` key is an error.
-- Every `when.` line must match. A rule with no conditions is an error.
-- The first matching rule wins. `--action` replaces the matched action with the captain's argv and labels the rule `captain action`.
-- `action` is one line of whitespace-separated argv. No quoting. `{id}` is replaced with the event id so the message can name `/ship-inbox <id>`. No other placeholders are expanded.
-- If `priority` is `high`, the type is not `blocked` or `needs_approval`, and `evidence_urls` is missing or empty, the plan is `missing_evidence` with `allow: false` even when a looser rule would have matched.
-
-`notify dry-run` prints the plan and does not start a process. `executed` on
-that plan is false. Exit 0 means the plan was produced, including a denial.
-
-`notify run` is opt-in. It prints a refusal and exits 1 when `allow` is false.
-When `allow` is true it starts that argv from `cli/src/run.ts` with
-`shell: false` and no environment expansion, then records the child's exit
-code. It does not merge or deploy.
-
-### Allow and deny reasons
-
-| `reason` | What happened |
+| 来源 | 进入注意力 |
 | --- | --- |
-| `allowlisted` | `allow: true`. A pattern matched the full argv. |
-| `not_allowlisted` | A rule matched and the argv is ordinary, but no pattern fits. |
-| `no_matching_rule` | No rule's conditions matched. This is the pull outcome for a normal review. |
-| `missing_evidence` | A high-priority page was selected but `evidence_urls` is empty. `allow` is false and argv is null. |
-| `shell_metacharacter` | The action contains a semicolon, ampersand, pipe, backtick, dollar sign, angle bracket, backslash, carriage return, newline, or NUL. Argv is null. |
-| `shell_interpreter` | The program is a shell, `eval`, `busybox`, or `sudo` (basename, case-insensitive, optional path prefix). |
-| `empty_action` | The action had no tokens. |
+| 人工或管家请求决定 | 是 |
+| 提交了带真实检查的交付 | 是，等待验收 |
+| 等待事项到达提醒时间 | 是 |
+| Herdr Agent 为 `blocked` / 不可达，或目标长期无进展 | 先请管家核查；联系失败或未恢复再提示人介入 |
+| Herdr `idle` / `done` / `unknown` 或普通进展 | 否 |
 
-### Allowlist patterns
+`done` 只是 Agent 空闲，Crewvane 只有在交付检查记录通过且人验收后才把目标设为完成。
 
-The file is JSON: `{ "patterns": ["multica issue create --assignee me *", "curl -X POST https://hooks.example/* *"] }`. Extra keys such as `version` are ignored. Prefer an exact subcommand over a broad `multica *`. The curl pattern's last `*` is where `/ship-inbox <id>` goes.
+## Herdr 管家
 
-Matching rules, implemented by `validatePattern` and `matchPattern`:
+应用打开工作区后使用按路径派生的命名 Session，也可以通过 `CREWVANE_HERDR_SESSION` 固定名称。准备管家会检查 CLI 和 Server，优先复用实时 `concierge`，检查登记的 Pane，再显式设置工作区、Session 和 CLI `PATH`，最后启动默认的 Codex 管家。Session 未运行时，应用内 PTY 启动 `herdr session attach <session>` 并等待 Server 就绪，不打开系统 Terminal。同一工作区复用一个连接；收起面板不终止会话，重启应用重新 attach。输入和尺寸 IPC 只允许访问当前工作区的连接，不接受渲染器指定的可执行文件。
 
-- The pattern is split on whitespace.
-- The first token is a literal program name matching `[A-Za-z0-9._+/-]+`. It must not contain `*`.
-- A token that is exactly `*` matches one argument. If that token is last, it matches one or more remaining arguments. `multica issue create --assignee me` does not match `multica issue create --assignee me *`. `multica issue create --assignee me --title blocked` does. `multica inbox push` does not.
-- A token ending in a single `*` with a non-empty prefix matches one argument that starts with that prefix. `https://hooks.example/*` matches `https://hooks.example/ship` and does not match `https://hooks.example.evil/ship`.
-- The whole argv must be consumed. An extra argument that the pattern did not account for does not match.
-- The loader rejects shell metacharacters in a pattern, a leading `*`, more than one `*` in a token, a `*` that is not a suffix, an empty pattern list, and non-string patterns.
-- The loader rejects program names whose basename is a shell, `eval`, `busybox`, or `sudo`.
-- The loader rejects a wildcard pattern whose program is `node`, `nodejs`, `deno`, `bun`, `python`, `python3`, `perl`, `ruby`, or `php`.
+管家通过 `crewvane` 读取和写回目标。负责人使用 Herdr Tab、Pane 和 Agent 消息，但 Crewvane 不预设任务图、分配算法或固定层级拓扑。
 
-Denied dry-runs still exit 0: the JSON says `allow: false`. `notify run` on a denied plan exits 1 and does not spawn. Missing files, a broken policy, or a broken allowlist exit 1.
+## 桌面 IPC
 
-Environment variables are not expanded, so a secret cannot be pulled into the plan by writing `$TOKEN`. The `$` is rejected first.
+渲染进程通过 preload 暴露的有限接口选择工作区与项目、执行目标命令、管理 Herdr 和 CLI、打开 HTTPS 链接。`BrowserWindow` 使用 `contextIsolation: true`、`nodeIntegration: false`、`sandbox: true`，拒绝窗口跳转和权限请求。IPC 校验发送方 URL，项目路径必须先由文件选择器选中。
 
-## Invariants
+应用内 CLI 使用随包分发的独立 Node 可执行文件，CLI bundle 位于 ASAR unpack 目录，脚本和 Node runtime 都在 `.app` 内。`~/.local/bin/crewvane` 只是启动器的符号链接，因此移动应用后 CLI 会失败并提示重新安装，可避免悄悄执行旧版本。
 
-1. One human and one shared state root have one human-facing captain conversation and N independent owner lanes from intake through ship.
-2. Workers are spawned per frozen contract slice. No standing roster is required.
-3. The human freezes contracts, reviews packets, and is the one who merges or ships.
-4. Notify never starts a shell. `notify run` starts only an allowlisted argv, with `shell: false`, and refuses a high-priority page that has no evidence.
-5. No secrets in the repo, the cards, the events, or the policy files.
-6. Adapters are replaceable. The event and the contract card are not.
-7. One current proposal per owner lane; a new lane never supersedes another lane's proposal or approval. Registered human approval and approved global limits bind every named-lane dispatch and resume.
-8. Only the captain executes notifications. Role cards are stable, runtime-free templates; owner/worker instances remain temporary.
+## 安装和签名
 
-The executable v0.2 queue, role and actor contract is specified in [owner-lanes.md](owner-lanes.md). It supersedes single-slot examples below for parallel demands. `active-lane` in each checkout selects `active-contract.<lane>`; the default lane preserves the original unsuffixed files. The host must authenticate actors and connect the generic pre-tool hook; the CLI does not supply an OS isolation boundary.
+发布产物包含 DMG、ZIP 和 SHA256SUMS。构建后按 Electron 嵌套代码顺序完成 ad-hoc 或 Developer ID 签名，再制作附件；测试在 ZIP 解压和 DMG 复制后验证严格签名，然后启动安装应用、安装 CLI 并真实创建目标。
 
-## What v0 leaves out
-
-- Executable Herdr, Orca, or Multica clients. `notify run` can start an allowlisted `multica issue create ...` argv; it does not implement Multica.
-- A Playwright suite inside this repo. `ship-e2e` is the procedure the captain copies into the project under test.
-- A model call inside the notify decision step. The markdown is ready for a later captain to read; the CLI does not need one.
-- Hosting model runtimes, multi-agent scheduling, auto-merge, and production deploy.
-- A persistent cloud runtime, compute/state separation, and device daemons. Those are the orchestrator's job. Adapters map onto them; this kit does not reimplement them.
+代码签名证明包内完整性，不等于 Apple 公证。没有 Developer ID 时仍可能出现“无法验证开发者”；只有已核对 GitHub 来源与 SHA-256 的应用才应按系统提示打开。

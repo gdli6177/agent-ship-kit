@@ -1,80 +1,42 @@
-import { appendFile, lstat, mkdir, realpath } from "node:fs/promises";
+import { appendFile, mkdir, readFile, realpath, rename, lstat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
-import { nextSequence, readEvents, withLock } from "./storage.js";
-import { initialState } from "./workflows.js";
+import { nextSequence, withLock } from "./storage.js";
 import type { WorkspaceState } from "./types.js";
-export const newId = (prefix: string) =>
-  `${prefix}_${randomUUID().replaceAll("-", "").slice(0, 16)}`;
-export function redact(text: string): string {
-  return text
-    .replace(
-      /\b(?:sk-[A-Za-z0-9_-]{16,}|gh[pousr]_[A-Za-z0-9]{20,})\b/g,
-      "[redacted]",
-    )
-    .replace(
-      /((?:api[_-]?key|access[_-]?token|authorization|password)\s*[:=]\s*)[^\s,;]+/gi,
-      "$1[redacted]",
-    );
+import { initialState, newId } from "./model.js";
+export { initialState, newId } from "./model.js";
+export function validateState(value: unknown): WorkspaceState {
+  const state = value as WorkspaceState;
+  if (!state || state.version !== 2 || !Array.isArray(state.goals) || !Array.isArray(state.projects) || !Array.isArray(state.workflows) || !state.concierge)
+    throw new Error("不支持的工作区状态版本。请打开一个新的 Crewvane 0.4 工作区。");
+  return state;
 }
 export class WorkspaceStore {
   constructor(readonly root: string) {}
   private async directory() {
-    const owner = await realpath(this.root),
-      path = join(owner, ".crewvane");
+    const owner = await realpath(this.root), path = join(owner, ".crewvane");
     await mkdir(path, { recursive: true });
-    if ((await lstat(path)).isSymbolicLink())
-      throw new Error("state directory must not be a symlink");
-    for (const name of ["events.jsonl", "sequence"]) {
-      try {
-        if (!(await lstat(join(path, name))).isFile())
-          throw new Error(`invalid state file ${name}`);
-      } catch (error) {
-        if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
-      }
-    }
+    if ((await lstat(path)).isSymbolicLink()) throw new Error("状态目录不能是符号链接");
     return path;
   }
   async read(): Promise<WorkspaceState> {
-    await this.directory();
-    const event = (await readEvents(this.root))
-      .filter((e) => e.type === "workspace_changed")
-      .at(-1);
-    if (!event) return initialState();
-    const state = structuredClone(event.state) as WorkspaceState;
-    if (
-      state.version !== 1 ||
-      !Array.isArray(state.tasks) ||
-      !Array.isArray(state.projects)
-    )
-      throw new Error("unsupported workspace state");
-    return state;
+    const directory = await this.directory();
+    try { return validateState(JSON.parse(await readFile(join(directory, "state.json"), "utf8"))); }
+    catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") return initialState();
+      if (error instanceof SyntaxError) throw new Error("工作区状态无法读取，请保留原文件并检查 state.json。");
+      throw error;
+    }
   }
-  async update<T>(
-    reason: string,
-    action: (state: WorkspaceState) => T | Promise<T>,
-  ): Promise<T> {
+  async update<T>(reason: string, action: (state: WorkspaceState) => T | Promise<T>): Promise<T> {
     const directory = await this.directory();
     return withLock(directory, async () => {
-      const state = await this.read();
-      const before = JSON.stringify(state);
-      const result = await action(state);
+      const state = await this.read(), before = JSON.stringify(state), result = await action(state);
       if (before === JSON.stringify(state)) return result;
-      const event = {
-        id: newId("evt"),
-        type: "workspace_changed",
-        sequence: await nextSequence(this.root),
-        created_at: new Date().toISOString(),
-        title: reason,
-        source_task_id: "workspace",
-        state,
-      };
-      // Each complete record is a single append; malformed/truncated logs fail closed.
-      await appendFile(
-        join(directory, "events.jsonl"),
-        `${JSON.stringify(event)}\n`,
-        { mode: 0o600 },
-      );
+      const temporary = join(directory, `.state-${process.pid}-${randomUUID()}.tmp`);
+      await writeFile(temporary, `${JSON.stringify(state, null, 2)}\n`, { mode: 0o600 });
+      await rename(temporary, join(directory, "state.json"));
+      await appendFile(join(directory, "events.jsonl"), `${JSON.stringify({ id: newId("evt"), type: "workspace_changed", sequence: await nextSequence(this.root), created_at: new Date().toISOString(), title: reason, source_task_id: "workspace", state })}\n`, { mode: 0o600 });
       return result;
     });
   }

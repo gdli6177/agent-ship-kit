@@ -1,35 +1,34 @@
 {
   "name": "@crewvane/desktop",
-  "version": "0.3.1",
+  "version": "0.4.1",
   "private": true,
   "type": "module",
   "main": "dist/main.cjs",
-  "files": ["dist/**"],
   "scripts": {
-    "postinstall": "node scripts/fix-node-pty.mjs",
-    "dev": "node build.mjs && electron .",
-    "build": "node build.mjs",
+    "dev": "pnpm package && ./release/Crewvane-darwin-arm64/Crewvane.app/Contents/MacOS/Crewvane",
+    "build": "electron-rebuild -w node-pty && node build.mjs",
     "typecheck": "tsc --noEmit",
-    "package": "node build.mjs && node package.mjs",
+    "test": "tsx --test test/*.test.ts",
+    "package": "pnpm build && node package.mjs",
     "package:mac": "pnpm package",
     "dist": "pnpm package && node distribute.mjs"
   },
-  "dependencies": {
-    "node-pty": "^1.1.0"
-  },
   "devDependencies": {
-    "@radix-ui/react-dialog": "^1.3.1",
-    "@radix-ui/themes": "^3.3.0",
-    "@xterm/addon-fit": "^0.11.0",
-    "@xterm/xterm": "^6.0.0",
     "@electron/packager": "^20.3.0",
     "@electron/rebuild": "^4.2.1",
+    "@radix-ui/react-dialog": "^1.3.1",
     "@types/react": "^19.2.0",
     "@types/react-dom": "^19.2.0",
+    "@xterm/addon-fit": "^0.11.0",
+    "@xterm/xterm": "^6.0.0",
     "electron": "^45.2.1",
     "lucide-react": "^1.66.0",
     "react": "^19.3.1",
     "react-dom": "^19.3.1",
+    "string-argv": "^0.3.2",
     "vite": "^8.3.5"
+  },
+  "dependencies": {
+    "node-pty": "^1.1.0"
   }
 }

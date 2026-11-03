@@ -1,0 +1,95 @@
+import { _electron as electron } from "@playwright/test";
+import { mkdir, mkdtemp, rm } from "node:fs/promises";
+import { join, resolve } from "node:path";
+import { tmpdir } from "node:os";
+import { randomUUID } from "node:crypto";
+import assert from "node:assert/strict";
+
+const home = await mkdtemp(join(tmpdir(), "crewvane-embedded-terminal-"));
+const workspace = join(home, "workspace"), session = `crewvane-tty-${randomUUID().slice(0, 8)}`;
+await mkdir(workspace);
+let app;
+const errors = [];
+try {
+  app = await electron.launch({
+    executablePath: resolve(process.env.CREWVANE_APP_PATH ||
+      "apps/desktop/release/Crewvane-darwin-arm64/Crewvane.app/Contents/MacOS/Crewvane"),
+    args: [],
+    env: { ...process.env, CREWVANE_TEST_HOME: home, CREWVANE_TEST_USER_DATA: join(home, "userData"),
+      CREWVANE_TEST_WORKSPACE: workspace, CREWVANE_HERDR_SESSION: session },
+    timeout: 60_000,
+  });
+  const page = await app.firstWindow();
+  page.on("pageerror", (error) => errors.push(error.message));
+  await page.waitForFunction(() => !!window.crewvane);
+  await page.getByRole("heading", { name: "现在，可以安心了。" }).waitFor();
+  const goal = await page.evaluate(() => window.crewvane.command({
+    type: "goal.create", input: { title: "隔离的真实终端测试", projectId: "personal", mode: "manual" },
+  }));
+  // A manually recorded goal opens the workspace TUI without starting a model.
+  await page.evaluate((id) => window.crewvane.openHerdr(id), goal.id);
+  await page.getByRole("region", { name: "Herdr 工作现场" }).waitFor();
+  await page.waitForFunction(() => document.querySelector(".xterm-screen")?.clientWidth > 200);
+  let connection = await page.evaluate(() => window.crewvane.terminalSnapshot());
+  assert.equal(connection.session, session);
+  assert.equal(connection.running, true);
+  const marker = `tty_${randomUUID().replaceAll("-", "")}`;
+  await page.evaluate(async ({ session, marker }) => {
+    await window.crewvane.writeTerminal(session, `printf '\\n%s\\n' '${marker}'\r`);
+  }, { session, marker });
+  // Require the result as a line, not just the echoed command.
+  await page.waitForFunction(async (marker) => {
+    const snapshot = await window.crewvane.terminalSnapshot();
+    return snapshot?.data.includes(`\r\n${marker}\r\n`);
+  }, marker, { timeout: 30_000 });
+  await page.locator(".xterm-accessibility").filter({ hasText: marker }).waitFor({ state: "attached" });
+  const firstPid = await app.evaluate(({ app }) => app.getAppMetrics().filter(item => item.name === "Crewvane Herdr terminal").map(item => item.pid));
+  assert.equal(firstPid.length, 1);
+  await page.getByRole("button", { name: "隐藏终端", exact: true }).click();
+  assert.equal(await page.locator(".terminal-panel").isVisible(), false);
+  await page.locator(".top-actions").getByRole("button", { name: "新目标", exact: true }).click();
+  await page.getByLabel("要处理什么？").fill("不能被终端抢走的草稿");
+  // An arriving connection/open event must not dismiss a form or steal its focus.
+  await page.getByLabel("背景与完成标准").fill("保留正在填写的内容");
+  await page.evaluate((id) => window.crewvane.openHerdr(id), goal.id);
+  assert.equal(await page.locator(".terminal-panel").isVisible(), false);
+  assert.equal(await page.getByLabel("要处理什么？").inputValue(), "不能被终端抢走的草稿");
+  await page.getByLabel("背景与完成标准").type("，可以继续输入");
+  await page.getByRole("button", { name: "关闭", exact: true }).click();
+  await page.getByRole("region", { name: "Herdr 工作现场" }).waitFor();
+  await page.getByRole("button", { name: "隐藏终端", exact: true }).click();
+  await page.evaluate((id) => window.crewvane.openHerdr(id), goal.id);
+  await page.locator(".terminal-panel").waitFor();
+  await page.locator(".xterm-accessibility").filter({ hasText: marker }).waitFor({ state: "attached" });
+  const nextPid = await app.evaluate(({ app }) => app.getAppMetrics().filter(item => item.name === "Crewvane Herdr terminal").map(item => item.pid));
+  assert.deepEqual(nextPid, firstPid);
+  await page.getByRole("button", { name: "展开现场面板" }).click();
+  await page.locator(".terminal-panel.expanded").waitFor();
+  await page.screenshot({ path: join(home, "embedded-dark.png") });
+  await page.getByRole("button", { name: "浅色模式" }).click();
+  await page.screenshot({ path: join(home, "embedded-light.png") });
+  await page.evaluate(async () => {
+    let rejected = false;
+    try { await window.crewvane.writeTerminal("unrelated-session", "echo should-not-run\r"); } catch { rejected = true; }
+    if (!rejected) throw new Error("Cross-workspace terminal input was accepted");
+  });
+  assert.deepEqual(errors, []);
+  console.log(JSON.stringify({ ok: true, home, session, checks: [
+    "real Herdr TUI in embedded PTY", "real shell input/output", "collapse/reopen reuses PID",
+    "expanded panel", "dark/light", "reject unrelated terminal input", "terminal events preserve modal draft and input",
+  ] }));
+} catch (error) {
+  if (app) await (await app.firstWindow()).screenshot({ path: join(home, "failure.png") }).catch(() => {});
+  console.error(JSON.stringify({ home, session, errors, error: String(error) }));
+  throw error;
+} finally {
+  if (app) {
+    // Stop only the uniquely named session created by this isolated integration.
+    await app.evaluate(async (_electron, session) => {
+      const { execFile } = process.getBuiltinModule("node:child_process");
+      await new Promise((resolve) => execFile("herdr", ["--session", session, "server", "stop"], { timeout: 10_000 }, () => resolve()));
+    }, session).catch(() => {});
+    await app.close();
+  }
+  if (process.env.CREWVANE_KEEP_TEST_ARTIFACTS !== "1") await rm(home, { recursive: true, force: true });
+}
