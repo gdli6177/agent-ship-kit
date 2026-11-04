@@ -59,6 +59,12 @@ function attachmentActivity(text: string, attachments: GoalAttachment[]): string
   if (!attachments.length) return text;
   return `${text}\n\n附带图片：${attachments.map(item => item.name).join("、")}`;
 }
+function substantiveAgentText(value: string | undefined, label: string, limit: number) {
+  const result = text(value, label, limit);
+  if (/^(?:已(?:经)?)?(?:回答|回复|答复|处理|完成)(?:了)?(?:用户)?(?:的)?(?:问题)?[。.!！]?$/.test(result))
+    throw new Error(`${label}必须写回具体内容，不能只写「已回答」或同类占位摘要`);
+  return result;
+}
 export { attentionGoals, attentionKind } from "./model.js";
 export class WorkspaceService {
   readonly store: WorkspaceStore;
@@ -496,6 +502,10 @@ export class WorkspaceService {
         case "goal.progress": {
           const item = goal(command.goalId);
           ongoing(item);
+          const actor = command.actor || "管家",
+            summary = actor.startsWith("你")
+              ? text(command.summary, "实际结果", 12_000)
+              : substantiveAgentText(command.summary, "实际结果", 12_000);
           item.status = "active";
           item.remindAt = undefined;
           item.waitingFor = undefined;
@@ -506,12 +516,12 @@ export class WorkspaceService {
               throw new Error("该工序不在目标中");
             item.stageId = command.stageId;
           }
-          if ((command.actor || "管家") === "你" && item.mode === "concierge")
+          if (actor === "你" && item.mode === "concierge")
             item.dispatch = {
-              id: newId("handoff"), kind: "feedback", note: command.summary,
+              id: newId("handoff"), kind: "feedback", note: summary,
               status: "pending", at: nowIso(),
             };
-          activity(item, "progress", command.summary, command.actor || "管家");
+          activity(item, "progress", summary, actor);
           return item;
         }
         case "goal.wait": {
@@ -679,7 +689,7 @@ export class WorkspaceService {
             return item;
           }
           item.delivery = {
-            summary: text(delivery.summary, "成果摘要", 12_000),
+            summary: substantiveAgentText(delivery.summary, "成果摘要", 12_000),
             ...(delivery.location
               ? { location: text(delivery.location, "交付位置", 2000) }
               : {}),

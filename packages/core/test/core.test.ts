@@ -344,3 +344,28 @@ test("manual waiting can resume and stops an old follow-up notification", async 
   assert.equal(attentionGoals((await service.read()).goals).length, 0);
   assert.equal((await service.read()).goals[0]?.status, "active");
 });
+
+test("agent answers must include the substantive response", async () => {
+  const { root, service } = await fixture();
+  const item = await service.execute({
+    type: "goal.intake",
+    text: "解释为什么保留旧接口",
+  }) as Goal;
+  await assert.rejects(
+    service.execute({
+      type: "goal.progress",
+      goalId: item.id,
+      summary: "已回答",
+      actor: "负责人 alpha-owner",
+    }),
+    /必须写回具体内容/,
+  );
+  const answered = await service.execute({
+    type: "goal.progress",
+    goalId: item.id,
+    summary: "旧接口仍被两个外部客户端使用，保留两轮兼容期后再移除。",
+    actor: "负责人 alpha-owner",
+  }) as Goal;
+  assert.match(answered.activities.at(-1)!.text, /两个外部客户端/);
+  await rm(root, { recursive: true, force: true });
+});

@@ -103,7 +103,7 @@ test("expired ended-goal images are deleted while active and recent images remai
     goalId: ended.id,
     actor: "owner",
     delivery: {
-      summary: "完成",
+      summary: "已完成附件保留期验证并检查文件清理结果",
       checks: [{ name: "读取", command: "cat result", result: "passed" }],
     },
   });
@@ -156,7 +156,7 @@ test("only ended goals can be permanently deleted, including their image files",
     goalId: goal.id,
     actor: "owner",
     delivery: {
-      summary: "完成",
+      summary: "已完成永久删除验证并检查附件文件清理结果",
       checks: [{ name: "读取", command: "cat result", result: "passed" }],
     },
   });
