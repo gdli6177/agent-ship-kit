@@ -15,9 +15,8 @@ concurrency:
 
 jobs:
   build:
-    # GitHub's current standard macOS runner image is Apple Silicon. Keep the
-    # installer smoke test on that architecture so node-pty matches the DMG.
-    runs-on: macos-latest
+    # This GitHub-hosted image is Apple Silicon, so node-pty matches the DMG.
+    runs-on: macos-15
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
