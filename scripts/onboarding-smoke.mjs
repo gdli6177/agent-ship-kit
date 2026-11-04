@@ -104,7 +104,9 @@ try {
   assert.ok(!(await page.getByRole("dialog").getByRole("alert").innerText()).includes("remote method"));
   await picker(rootB);
   await page.getByRole("dialog").getByRole("button", { name: "选择其他工作区文件夹" }).click();
-  await page.getByText("已打开工作区：另一个工作区", { exact: true }).waitFor();
+  await expect.poll(async () =>
+    (await page.evaluate(() => window.crewvane.environment())).workspace
+  ).toBe(await realpath(rootB));
   await page.getByRole("button", { name: "设置", exact: true }).click();
   const command = `"${customCli}" --model "local test model"`;
   await page.getByLabel("管家启动命令").fill(command);
