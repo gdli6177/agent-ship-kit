@@ -1,5 +1,13 @@
-import { WorkspaceService, attentionGoals, type CrewvaneCommand, type HighRiskCategory } from "../../packages/core/src/index.js";
+import {
+  WorkspaceService,
+  attentionGoals,
+  importAttachmentFiles,
+  type CrewvaneCommand,
+  type GoalAttachment,
+  type HighRiskCategory,
+} from "../../packages/core/src/index.js";
 import { readFile, rename, writeFile } from "node:fs/promises";
+import { join } from "node:path";
 import { runBoard } from "./board.js";
 const usage = `Crewvane — 把所有事整理成清晰的下一步
 
@@ -7,8 +15,9 @@ const usage = `Crewvane — 把所有事整理成清晰的下一步
   crewvane status [--json]
   crewvane attention [--json]
   crewvane board [--new] [--once]
-  crewvane ask TEXT [--project ID]
+  crewvane ask TEXT [--project ID] [--attachment PATH ...]
   crewvane direct TEXT [--new] [--goal ID] [--next TEXT] [--project ID]
+    [--attachment PATH ...]
   crewvane event herdr [--json]
   crewvane goal list [--all] [--json]
   crewvane goal show ID [--json]
@@ -48,7 +57,7 @@ function parse(argv: string[]) {
     if (["json", "all", "help", "new", "once", "current"].includes(name)) { values.set(name, ["true"]); continue; }
     const value = inline ?? argv[++index];
     if (value === undefined || (inline === undefined && value.startsWith("--"))) throw new Error(`--${name} 需要一个值`);
-    if (values.has(name) && name !== "check") throw new Error(`--${name} 不能重复`);
+    if (values.has(name) && !["check", "attachment"].includes(name)) throw new Error(`--${name} 不能重复`);
     values.set(name, [...(values.get(name) ?? []), value]);
   }
   return { positional, one: (name: string) => values.get(name)?.[0], all: (name: string) => values.get(name) ?? [], has: (name: string) => values.has(name) };
@@ -230,7 +239,10 @@ export async function run(argv: string[], io = { out: console.log, error: consol
       if (group === "status") result = await service.read();
       else if (group === "attention") result = attentionGoals((await service.read()).goals);
       else if (group === "workflow" && action === "list") result = (await service.read()).workflows;
-      else if (group === "ask") command = { type: "goal.intake", text: args.positional.slice(1).join(" "), projectId: args.one("project") };
+      else if (group === "ask") {
+        const attachments = await importAttachmentFiles(service.root, args.all("attachment"));
+        command = { type: "goal.intake", text: args.positional.slice(1).join(" "), projectId: args.one("project"), ...(attachments.length ? { attachments } : {}) };
+      }
       else if (group === "direct") {
         const directText = args.positional.slice(1).join(" ").trim();
         if (!directText) throw new Error("需要一个要同步给管家的终端消息");
@@ -240,6 +252,7 @@ export async function run(argv: string[], io = { out: console.log, error: consol
           throw new Error("--current 不能与 --new 或 --goal 同时使用");
         if (args.has("current") && !coordinatorCase)
           throw new Error("--current 只能由当前受管管家使用");
+        const attachments = await importAttachmentFiles(service.root, args.all("attachment"));
         command = {
           type: "goal.direct",
           text: directText,
@@ -247,6 +260,7 @@ export async function run(argv: string[], io = { out: console.log, error: consol
             : args.has("current") ? coordinatorCase : args.one("goal") ?? coordinatorCase,
           next: args.one("next"),
           projectId: args.one("project"),
+          ...(attachments.length ? { attachments } : {}),
         };
       }
       else if (group === "event" && action === "herdr") {
@@ -306,7 +320,12 @@ export async function run(argv: string[], io = { out: console.log, error: consol
       const current = result as { matched: number };
       io.out(current.matched ? `已同步 ${current.matched} 个目标的现场状态。` : "没有需要同步的 Crewvane 目标。");
     }
-    else if (group === "goal" && action === "show") { const goal = result as import("../../packages/core/src/index.js").Goal; io.out(`${goal.title}\n${goal.status} · ${goal.next}\n\n${goal.description}`); }
+    else if (group === "goal" && action === "show") {
+      const goal = result as import("../../packages/core/src/index.js").Goal,
+        images = (goal.attachments ?? []).map((item: GoalAttachment) =>
+          `\n图片：${item.name}\n${join(service.root, item.path)}`).join("\n");
+      io.out(`${goal.title}\n${goal.status} · ${goal.next}\n\n${goal.description}${images}`);
+    }
     else if (Array.isArray(result)) io.out(result.length ? result.map((item) => `${item.id}  ${item.title ?? item.name}  ${item.next ?? ""}`).join("\n") : "暂无记录");
     else if (group === "status") { const state = result as import("../../packages/core/src/index.js").WorkspaceState; io.out(`${state.name} · ${state.goals.filter((goal) => !["completed", "dropped"].includes(goal.status)).length} 个进行中目标 · ${attentionGoals(state.goals).length} 项需要处理`); }
     else { const goal = result as import("../../packages/core/src/index.js").Goal; io.out(goal?.id ? `${goal.id} · ${goal.status}\n${goal.next}` : JSON.stringify(result)); }

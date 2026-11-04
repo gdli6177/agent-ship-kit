@@ -6,7 +6,16 @@ import { pathToFileURL } from "node:url";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { createHash } from "node:crypto";
-import { attentionGoals, attentionKind, WorkspaceService, type CrewvaneCommand, type WatchdogRequest } from "../../../packages/core/src/index.js";
+import {
+  attentionGoals,
+  attentionKind,
+  attachmentAbsolutePath,
+  importAttachmentBytes,
+  validateGoalAttachments,
+  WorkspaceService,
+  type CrewvaneCommand,
+  type WatchdogRequest,
+} from "../../../packages/core/src/index.js";
 import { HerdrClient, herdrRunner, quoteShell } from "./herdr.js";
 import { TerminalHost } from "./terminal-host.js";
 import { parseAgentCommand } from "./agent-command.js";
@@ -29,6 +38,16 @@ function sessionName(path = root) { return process.env.CREWVANE_HERDR_SESSION ??
 function sender(event: Electron.IpcMainInvokeEvent) { if (event.sender !== window.webContents || event.senderFrame?.url !== rendererURL) throw new Error("不受信任的界面请求"); }
 function activeService() { if (!service) throw new Error("请先打开工作区"); return service; }
 async function snapshot() { return activeService().read(); }
+async function validatedAttachment(goalId: string, attachmentId: string) {
+  if (typeof goalId !== "string" || typeof attachmentId !== "string")
+    throw new Error("附件参数无效");
+  const target = activeService(), state = await target.read(),
+    item = state.goals.find(goal => goal.id === goalId),
+    attachment = item?.attachments?.find(candidate => candidate.id === attachmentId);
+  if (!attachment) throw new Error("找不到这个附件");
+  const [validated] = await validateGoalAttachments(target.root, [attachment]);
+  return { target, attachment: validated!, path: attachmentAbsolutePath(target.root, validated!) };
+}
 function broadcastHerdrStatus(status: HerdrStatus) {
   if (!window || window.isDestroyed()) return;
   window.webContents.send("crewvane:event", {
@@ -139,6 +158,15 @@ function client(path: string, workspace = root) {
     if (root === workspace) window.webContents.send("crewvane:event", { type: "terminal-available", session, title: "全局管家" });
   });
 }
+async function closeEndedGoalSession(target: WorkspaceService, goalId: string, executable?: string) {
+  const item = (await target.read()).goals.find(goal => goal.id === goalId);
+  if (!item || !["completed", "dropped"].includes(item.status) || !item.herdr) return false;
+  const herdrExecutable = executable ?? (await herdrStatus()).executable;
+  if (!herdrExecutable) throw new Error("Herdr 当前不可用，负责人现场将在恢复后自动关闭");
+  await client(herdrExecutable, target.root).closeGoal(item.herdr);
+  await target.execute({ type: "session.release", goalId });
+  return true;
+}
 const preparations = new Map<string, Promise<import("../../../packages/core/src/index.js").HerdrReference>>();
 const refreshedConcierges = new Map<string, string>();
 function conciergeIdentity(reference: import("../../../packages/core/src/index.js").HerdrReference) {
@@ -173,8 +201,8 @@ async function dispatchGoal(target: WorkspaceService, goalId: string): Promise<v
         const messenger = client(herdrExecutable, target.root);
         await setCoordinatorScope(target, item.id, item.dispatch?.id);
         if (item.dispatch?.kind === "follow_up")
-          await messenger.notifyFollowUp(reference, item.id, item.dispatch.note || "", item);
-        else await messenger.notifyGoal(reference, item.id, item.title, item);
+          await messenger.notifyFollowUp(reference, item.id, item.dispatch.note || "", item, target.root);
+        else await messenger.notifyGoal(reference, item.id, item.title, item, target.root);
       });
     } finally {
       if (root === target.root && !window.isDestroyed()) window.webContents.send("crewvane:event", {
@@ -279,6 +307,12 @@ async function openWorkspace(path: string) {
   const opened = new WorkspaceService(canonical); await opened.read();
   root = canonical; service = opened;
   watchWorkspaceState(opened);
+  void opened.execute({ type: "attachments.cleanup", retentionDays: 30 }).catch(error => {
+    if (!window.isDestroyed()) window.webContents.send("crewvane:event", {
+      type: "diagnostic",
+      message: `附件清理暂未完成：${error instanceof Error ? error.message : String(error)}`,
+    });
+  });
   await mkdir(app.getPath("userData"), { recursive: true }); await writeFile(join(app.getPath("userData"), "workspaces.json"), JSON.stringify({ selected: root }), { mode: 0o600 });
   window.webContents.send("crewvane:event", { type: "refresh", workspace: root });
   if (process.env.CREWVANE_TEST_SKIP_HERDR_SETUP !== "1")
@@ -294,6 +328,13 @@ async function synchronize() {
   const target = service, workspace = root;
   try {
     let state = await target.read(), status = await herdrStatus();
+    if (status.executable) {
+      for (const goal of state.goals.filter(goal =>
+        ["completed", "dropped"].includes(goal.status) && goal.herdr)) {
+        await closeEndedGoalSession(target, goal.id, status.executable).catch(() => {});
+      }
+      state = await target.read();
+    }
     for (const goal of state.goals.filter(goal => goal.mode === "concierge" && goal.dispatch?.status === "pending" &&
       !["completed", "dropped"].includes(goal.status))) {
       void dispatchGoal(target, goal.id).catch(() => {});
@@ -380,6 +421,30 @@ app.whenReady().then(async () => {
   window.webContents.session.setPermissionRequestHandler((_wc, _permission, callback) => callback(false));
   window.on("close", (event) => { if (!quitting) { event.preventDefault(); window.hide(); } });
   ipcMain.handle("crewvane:environment", (event) => { sender(event); return { workspace: root, version: app.getVersion() }; });
+  ipcMain.handle("crewvane:import-attachments", async (event, inputs: { name: string; bytes: ArrayBuffer }[]) => {
+    sender(event);
+    const target = activeService();
+    if (!Array.isArray(inputs) || inputs.length > 8) throw new Error("附件列表无效");
+    return importAttachmentBytes(target.root, inputs.map(input => ({ name: input?.name, bytes: input?.bytes })));
+  });
+  ipcMain.handle("crewvane:attachment-preview", async (event, goalId: string, attachmentId: string) => {
+    sender(event);
+    const { attachment, path } = await validatedAttachment(goalId, attachmentId),
+      image = nativeImage.createFromPath(path);
+    if (image.isEmpty()) throw new Error(`无法读取图片：${attachment.name}`);
+    const size = image.getSize(), scale = Math.min(1, 360 / size.width, 240 / size.height);
+    return image.resize({
+      width: Math.max(1, Math.round(size.width * scale)),
+      height: Math.max(1, Math.round(size.height * scale)),
+      quality: "best",
+    }).toDataURL();
+  });
+  ipcMain.handle("crewvane:open-attachment", async (event, goalId: string, attachmentId: string) => {
+    sender(event);
+    const { path } = await validatedAttachment(goalId, attachmentId),
+      error = await shell.openPath(path);
+    if (error) throw new Error(error);
+  });
   ipcMain.handle("crewvane:workspace", async (event) => { sender(event); const picked = await dialog.showOpenDialog(window, { title: "选择 Crewvane 工作区", properties: ["openDirectory", "createDirectory"] }); if (picked.canceled || !picked.filePaths[0]) return null; await openWorkspace(picked.filePaths[0]); return root; });
   ipcMain.handle("crewvane:project", async (event) => { sender(event); const picked = await dialog.showOpenDialog(window, { title: "选择项目目录", properties: ["openDirectory"] }); const path = picked.filePaths[0]; if (!path) return null; const real = await realpath(path); selections.add(real); return real; });
   ipcMain.handle("crewvane:command", async (event, command: CrewvaneCommand) => {
@@ -389,7 +454,13 @@ app.whenReady().then(async () => {
       const kinds = (await agentChoices()).map(option => option.kind);
       for (const value of Object.values(command.preferences)) if (value?.trim()) parseAgentCommand(value, kinds);
     }
-    const target = activeService(), result = await target.execute(command);
+    const target = activeService();
+    if (command.type === "goal.delete") {
+      const item = (await target.read()).goals.find(goal => goal.id === command.goalId);
+      if (item && ["completed", "dropped"].includes(item.status) && item.herdr)
+        await closeEndedGoalSession(target, item.id);
+    }
+    const result = await target.execute(command);
     if (command.type === "goal.intake" || (command.type === "goal.create" && command.input.mode === "concierge") ||
       command.type === "goal.followup" || command.type === "goal.delegate" || (command.type === "goal.resume" && command.mode === "concierge") ||
       command.type === "goal.resolve" ||
@@ -399,7 +470,16 @@ app.whenReady().then(async () => {
         if (root === target.root) window.webContents.send("crewvane:event", { type: "diagnostic", message: String(error) });
       });
     }
-    if (["goal.accept", "goal.rework", "goal.resolve", "goal.update", "goal.drop"].includes(command.type)) {
+    if (["goal.accept", "goal.drop"].includes(command.type)) {
+      const item = result as import("../../../packages/core/src/index.js").Goal;
+      await closeEndedGoalSession(target, item.id).catch((error) => {
+        if (root === target.root) window.webContents.send("crewvane:event", {
+          type: "diagnostic",
+          message: `目标已结束，负责人现场暂未关闭，将自动重试：${error instanceof Error ? error.message : String(error)}`,
+        });
+      });
+    }
+    if (["goal.rework", "goal.resolve", "goal.update"].includes(command.type)) {
       const item = result as import("../../../packages/core/src/index.js").Goal, current = await target.read();
       if (item.mode === "concierge" && current.concierge.status === "ready" && item.dispatch?.status !== "pending") {
         const status = await herdrStatus();
@@ -407,7 +487,7 @@ app.whenReady().then(async () => {
           const herdrExecutable = status.executable;
           try { await coordinate(target, async () => {
             await setCoordinatorScope(target, item.id, `event-${Date.now()}`);
-            await client(herdrExecutable, target.root).notifyGoal(current.concierge, item.id, item.title, item);
+            await client(herdrExecutable, target.root).notifyGoal(current.concierge, item.id, item.title, item, target.root);
           }); }
           catch (error) { window.webContents.send("crewvane:event", { type: "diagnostic", message: error instanceof Error ? error.message : String(error) }); }
         }

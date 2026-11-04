@@ -8,6 +8,7 @@ crewvane status --json
 crewvane attention --json
 crewvane board
 crewvane ask "检查发布流程并补齐证据"
+crewvane ask "按截图修复布局" --attachment /path/to/screenshot.png
 crewvane workflow list --json
 crewvane goal list --json
 crewvane goal show <ID> --json
@@ -28,6 +29,16 @@ CREWVANE_WORKSPACE=/path/to/workspace crewvane goal list --json
 `crewvane board` 是随应用的 Herdr 插件打开的注意力控制台。它显示决定、验收、到期跟进和介入，支持补充/决定、等待跟进、继续推进、人工接管、验收、退回、聚焦真实负责人现场，以及按 `g` 回到全局管家。`--once` 输出静态文本，适合诊断。桌面未运行时，`ask` 与补充意见仍会保存在同一个工作区，下一次启动桌面后自动派发。
 
 用户直接在 Herdr 管家终端里追加要求时，管家必须先用 `crewvane direct "<原话>"`（当前案卷）、`crewvane direct --goal ID "<原话>"`，或以 `crewvane direct --new "<原话>"` 创建新目标，把输入写到共享状态，再继续执行。新建成功后，管家的案卷 scope 会原子切到新目标，后续写回直接落在同一个 App 目标，不产生重复派发。Herdr 0.9.5 不向插件暴露用户提交的 prompt 文本，所以这条同步由管家通过 CLI 完成；没有执行这一步的普通终端聊天不会出现在桌面或注意力面板。
+
+图片使用可重复的 `--attachment PATH` 传入：
+
+```sh
+crewvane ask "按图修复页面" --attachment ~/Desktop/before.png --attachment ~/Desktop/after.png
+crewvane direct --current "再参考这张图" --attachment ~/Desktop/detail.jpg
+crewvane direct --new "从终端新建并带图" --attachment ~/Desktop/context.png
+```
+
+CLI 只接受 PNG、JPEG、WebP、GIF；单张最多 10 MB，每个目标最多 8 张且总计不超过 30 MB。文件按魔数校验后复制到 `<workspace>/.crewvane/attachments/`，状态与分析事件只保存相对路径、大小和 SHA-256，不保存 Base64。`goal show` 的普通文本输出会列出可直接读取的绝对路径。目标结束 30 天后，桌面启动时清理原图；也可以在目标详情逐张删除，或永久删除整个已结束目标。完成或放弃目标时，应用会关闭对应负责人 Tab。
 
 `crewvane event herdr` 是插件内部入口，读取 Herdr 注入的 `HERDR_PLUGIN_EVENT_JSON`。它把 `pane.agent_status_changed`、`pane.exited`、`pane.closed`、`pane.moved`、`tab.closed` 和 `workspace.closed` 同步到已经登记为对应现场的目标；Pane 移动时以 Herdr 返回的新 Pane、Tab 与 Workspace ID 原子替换旧现场。无关或跨目标现场不会串案。
 

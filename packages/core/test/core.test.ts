@@ -74,6 +74,23 @@ test("goal owners cannot register the concierge or another live goal's execution
   assert.equal(state.goals[0]?.owner,"owner-a");
   assert.equal(state.goals[1]?.owner,"owner-b");
 });
+test("completed or dropped goals release their ended owner scene", async () => {
+  const { service } = await fixture(), item = await create(service);
+  await service.execute({
+    type: "session.set",
+    goalId: item.id,
+    reference: { session: "test", agent: "owner-a", paneId: "w1:p2", tabId: "w1:t2" },
+  });
+  await assert.rejects(
+    service.execute({ type: "session.release", goalId: item.id }),
+    /只有已完成或已放弃/,
+  );
+  await service.execute({ type: "goal.drop", goalId: item.id, note: "结束现场" });
+  const released = await service.execute({ type: "session.release", goalId: item.id }) as Goal;
+  assert.equal(released.herdr, undefined);
+  assert.equal(released.live, undefined);
+  assert.equal(released.activities.at(-1)?.text, "目标已结束，负责人现场已关闭。");
+});
 test("Agent role preferences persist without changing running concierge references", async () => {
   const { service } = await fixture();
   await service.execute({ type: "concierge.status", status: "ready",
@@ -326,4 +343,29 @@ test("manual waiting can resume and stops an old follow-up notification", async 
   });
   assert.equal(attentionGoals((await service.read()).goals).length, 0);
   assert.equal((await service.read()).goals[0]?.status, "active");
+});
+
+test("agent answers must include the substantive response", async () => {
+  const { root, service } = await fixture();
+  const item = await service.execute({
+    type: "goal.intake",
+    text: "解释为什么保留旧接口",
+  }) as Goal;
+  await assert.rejects(
+    service.execute({
+      type: "goal.progress",
+      goalId: item.id,
+      summary: "已回答",
+      actor: "负责人 alpha-owner",
+    }),
+    /必须写回具体内容/,
+  );
+  const answered = await service.execute({
+    type: "goal.progress",
+    goalId: item.id,
+    summary: "旧接口仍被两个外部客户端使用，保留两轮兼容期后再移除。",
+    actor: "负责人 alpha-owner",
+  }) as Goal;
+  assert.match(answered.activities.at(-1)!.text, /两个外部客户端/);
+  await rm(root, { recursive: true, force: true });
 });

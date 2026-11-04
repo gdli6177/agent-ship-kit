@@ -1,5 +1,5 @@
 import { _electron as electron } from "@playwright/test";
-import { mkdir, mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { execFile } from "node:child_process";
@@ -7,6 +7,10 @@ import { promisify } from "node:util";
 import assert from "node:assert/strict";
 import { WorkspaceService } from "../packages/core/src/index.ts";
 const run = promisify(execFile);
+const png = Buffer.from(
+  "iVBORw0KGgoAAAANSUhEUgAAACAAAAAYCAYAAACbU/80AAAAVUlEQVR4nGPUMIr6z4AEAqKWInMZNiyLZqClPBPDAAOmEe8Axoqe///pGefo8kwMAwyYRrwDGEfLAYaR7gDG0XKAYaQ7gHG0HGAY6Q5gHC0HGEa6AwC58E1KmpVcaAAAAABJRU5ErkJggg==",
+  "base64",
+);
 const home = await mkdtemp(join(tmpdir(), "crewvane-desktop-v04-")),
   workspace = join(home, "workspace");
 await mkdir(workspace);
@@ -62,18 +66,89 @@ try {
     .getByRole("button", { name: "新目标" })
     .click();
   await page.getByLabel("要交给管家的事情").fill("桌面试用交付");
-  assert.equal(await page.locator('[role="dialog"] input, [role="dialog"] select').count(), 0);
+  await page.getByLabel("选择图片").setInputFiles({
+    name: "selected.png",
+    mimeType: "image/png",
+    buffer: png,
+  });
+  await page.getByText("selected.png", { exact: true }).waitFor();
+  await page.getByLabel("要交给管家的事情").evaluate((element, base64) => {
+    const bytes = Uint8Array.from(atob(base64), character => character.charCodeAt(0));
+    const transfer = new DataTransfer();
+    transfer.items.add(new File([bytes], "dragged.png", { type: "image/png" }));
+    element.dispatchEvent(new DragEvent("drop", { bubbles: true, cancelable: true, dataTransfer: transfer }));
+  }, png.toString("base64"));
+  await page.getByText("dragged.png", { exact: true }).waitFor();
+  await page.getByLabel("要交给管家的事情").evaluate((element, base64) => {
+    const bytes = Uint8Array.from(atob(base64), character => character.charCodeAt(0));
+    const transfer = new DataTransfer();
+    transfer.items.add(new File([bytes], "pasted.png", { type: "image/png" }));
+    element.dispatchEvent(new ClipboardEvent("paste", {
+      bubbles: true,
+      cancelable: true,
+      clipboardData: transfer,
+    }));
+  }, png.toString("base64"));
+  await page.getByText("pasted.png", { exact: true }).waitFor();
+  await page.getByRole("button", { name: "移除图片 dragged.png" }).click();
+  assert.equal(await page.getByText("dragged.png", { exact: true }).count(), 0);
+  await page.screenshot({ path: join(home, "intake-with-images-dark.png"), animations: "disabled" });
+  assert.equal(await page.locator('[role="dialog"] input:not([type="file"]), [role="dialog"] select').count(), 0);
   await page.getByRole("button", { name: "交给管家", exact: true }).click();
   await page.getByRole("dialog", { name: "桌面试用交付", exact: true }).waitFor();
+  await page.getByText("selected.png", { exact: true }).waitFor();
+  await page.getByText("pasted.png", { exact: true }).waitFor();
+  let state = await page.evaluate(() => window.crewvane.command({ type: "snapshot" })),
+    goalId = state.goals[0].id;
+  assert.equal(state.goals[0].attachments.length, 2);
+  for (const attachment of state.goals[0].attachments) {
+    const attachmentPath = join(workspace, attachment.path);
+    assert.ok((await stat(attachmentPath)).isFile());
+    assert.equal((await stat(attachmentPath)).mode & 0o777, 0o600);
+  }
+  const attachmentPreview = await page.evaluate(async ({ goalId, attachmentId }) =>
+    window.crewvane.attachmentPreview(goalId, attachmentId), {
+    goalId: state.goals[0].id,
+    attachmentId: state.goals[0].attachments[0].id,
+  });
+  assert.match(attachmentPreview, /^data:image\/png;base64,/);
+  const persistedState = await readFile(join(workspace, ".crewvane", "state.json"), "utf8");
+  assert.doesNotMatch(persistedState, /data:image|iVBORw0KGgo|base64/i);
+  const removedAttachment = state.goals[0].attachments[0];
+  page.once("dialog", dialog => void dialog.accept());
+  await page.getByRole("button", { name: `删除图片 ${removedAttachment.name}` }).click();
+  await page.getByText(removedAttachment.name, { exact: true }).waitFor({ state: "detached" });
+  await assert.rejects(stat(join(workspace, removedAttachment.path)), /ENOENT/);
+  state = await page.evaluate(() => window.crewvane.command({ type: "snapshot" }));
+  assert.equal(state.goals[0].attachments.length, 1);
+  assert.ok(!state.goals[0].attachments.some(item => item.id === removedAttachment.id));
   await page.getByLabel("补充意见", { exact: true }).fill("请保留现有验收记录，不要扩大范围。");
   const nextBeforeFeedback = (await page.evaluate(() => window.crewvane.command({type:"snapshot"}))).goals[0].next;
   await page.getByRole("button", { name: "发给管家", exact: true }).click();
   await page.getByText("补充意见：请保留现有验收记录，不要扩大范围。", { exact: true }).waitFor();
   assert.equal((await page.evaluate(() => window.crewvane.command({type:"snapshot"}))).goals[0].next, nextBeforeFeedback);
-  let state = await page.evaluate(() =>
+  for (let index = 1; index <= 5; index += 1) {
+    await page.evaluate(({ id, index }) => window.crewvane.command({
+      type: "goal.progress",
+      goalId: id,
+      summary: index === 5
+        ? "负责人具体答复：旧接口仍可只读调用，但新界面应改用 /v2/items，并保留两轮兼容期。"
+        : `负责人过程记录 ${index}`,
+      actor: "负责人 alpha-owner",
+    }), { id: goalId, index });
+  }
+  await page.locator(".conversation-feed").getByText(
+    "负责人具体答复：旧接口仍可只读调用，但新界面应改用 /v2/items，并保留两轮兼容期。",
+    { exact: true },
+  ).waitFor();
+  assert.equal(
+    await page.locator(".conversation-feed").getByText("补充意见：请保留现有验收记录，不要扩大范围。", { exact: true }).count(),
+    1,
+    "older conversation history must remain visible after more than four activity records",
+  );
+  state = await page.evaluate(() =>
       window.crewvane.command({ type: "snapshot" }),
-    ),
-    goalId = state.goals[0].id;
+    );
   const dispatchBeforeDirect = state.goals[0].dispatch?.id;
   await run("pnpm", [
     "--dir", "cli", "exec", "tsx", "src/main.ts", "direct",
@@ -243,9 +318,9 @@ try {
   await page.locator(".top-actions").getByRole("button", { name: "新目标" }).click();
   await page.getByLabel("要交给管家的事情").fill("等待审批操作");
   await page.getByRole("button", { name: "交给管家", exact: true }).click();
+  await page.getByRole("dialog", { name: "等待审批操作", exact: true }).waitFor();
   const waiting = (await service.read()).goals.find(item => item.title === "等待审批操作");
   await service.execute({ type: "goal.wait", goalId: waiting.id, reason: "等 YR 审批", owner: "YR", remindAt: "2030-01-01T00:00:00Z" });
-  await page.getByRole("dialog", { name: "等待审批操作", exact: true }).waitFor();
   await page.getByRole("heading", { name: "这件事，接下来怎么走？" }).waitFor();
   assert.equal(await page.getByLabel("当前安排").count(), 0);
   await page.getByRole("button", { name: "稍后提醒我", exact: true }).click();
@@ -256,13 +331,28 @@ try {
   await page.getByRole("button", { name: "有结果了，继续推进", exact: true }).click();
   await page.getByLabel("最新结果与下一步").fill("审批通过了，我亲自处理。");
   await page.getByRole("button", { name: "我来处理", exact: true }).click();
+  await page.waitForFunction(async goalId => {
+    const state = await window.crewvane.command({ type: "snapshot" });
+    return state.goals.find(item => item.id === goalId)?.status === "active";
+  }, waiting.id);
   waitingState = (await service.read()).goals.find(item => item.id === waiting.id);
   assert.equal(waitingState.status, "active");
   assert.equal(waitingState.mode, "manual");
   assert.equal(waitingState.owner, "你");
   assert.equal(waitingState.dispatch, undefined);
   await page.screenshot({ path: join(home, "waiting-resumed-dark.png"), animations: "disabled" });
-  await page.getByRole("button", { name: "关闭", exact: true }).click();
+  await page.getByText("手动处理", { exact: true }).click();
+  await page.getByRole("button", { name: "提交成果", exact: true }).click();
+  await page.getByLabel("成果摘要").fill("删除闭环已完成");
+  await page.getByLabel("检查名称").fill("目标状态核对");
+  await page.getByLabel("实际检查操作").fill("确认目标已进入待验收");
+  await page.getByLabel("通过依据").fill("目标状态为 review");
+  await page.getByRole("button", { name: "提交验收", exact: true }).click();
+  await page.getByRole("button", { name: "验收通过", exact: true }).click();
+  page.once("dialog", dialog => void dialog.accept());
+  await page.getByRole("button", { name: "永久删除目标", exact: true }).click();
+  await page.getByText("目标与关联图片已永久删除。", { exact: true }).waitFor();
+  assert.equal((await service.read()).goals.some(item => item.id === waiting.id), false);
   assert.deepEqual(errors, []);
   assert.equal(await page.evaluate(() => typeof window.require), "undefined");
   console.log(
@@ -289,10 +379,13 @@ try {
         "local reminder round trip",
         "custom workflow add/remove/save",
         "single natural-language goal intake",
+        "image paste, drag, file selection, preview, removal, and metadata-only persistence",
         "keyboard submission for goal intake",
         "visible goal feedback preserves the next step",
+        "complete goal conversation and substantive owner answer remain visible",
         "external terminal feedback refreshes the app without replaying a handoff",
         "waiting snooze and resume directly without the manual editor",
+        "permanent deletion for completed goals",
       ],
       errors,
     }),

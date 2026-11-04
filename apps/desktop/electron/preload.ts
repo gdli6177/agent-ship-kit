@@ -1,7 +1,13 @@
 import { contextBridge, ipcRenderer } from "electron";
-import type { CrewvaneCommand } from "../../../packages/core/src/index.js";
+import type { CrewvaneCommand, GoalAttachment } from "../../../packages/core/src/index.js";
 contextBridge.exposeInMainWorld("crewvane", {
   command: (command: CrewvaneCommand) => ipcRenderer.invoke("crewvane:command", command),
+  importAttachments: (inputs: { name: string; bytes: ArrayBuffer }[]) =>
+    ipcRenderer.invoke("crewvane:import-attachments", inputs) as Promise<GoalAttachment[]>,
+  attachmentPreview: (goalId: string, attachmentId: string) =>
+    ipcRenderer.invoke("crewvane:attachment-preview", goalId, attachmentId) as Promise<string>,
+  openAttachment: (goalId: string, attachmentId: string) =>
+    ipcRenderer.invoke("crewvane:open-attachment", goalId, attachmentId) as Promise<void>,
   selectWorkspace: () => ipcRenderer.invoke("crewvane:workspace"), selectProject: () => ipcRenderer.invoke("crewvane:project"),
   environment: () => ipcRenderer.invoke("crewvane:environment"), herdrStatus: () => ipcRenderer.invoke("crewvane:herdr-status"),
   agentChoices: () => ipcRenderer.invoke("crewvane:agent-choices"),

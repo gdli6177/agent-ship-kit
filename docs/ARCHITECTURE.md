@@ -17,7 +17,7 @@ Crewvane 不运行模型，不扫描或适配 Agent 协议，不管理模型凭�
 
 ## 状态
 
-工作区由用户选择，状态位于 `<workspace>/.crewvane/`。`state.json` 是完整快照，`events.jsonl` 是追加事件记录，`.crewvane-lock/` 串行化桌面和 CLI 的并发写入。每次修改先写临时文件，再原子替换快照。`decisions.md` 与 `rejected.md` 由结构化决定记录派生，供 Agent 和人直接阅读。
+工作区由用户选择，状态位于 `<workspace>/.crewvane/`。`state.json` 是完整快照，`events.jsonl` 是追加事件记录，`.crewvane-lock/` 串行化桌面和 CLI 的并发写入。每次修改先写临时文件，再原子替换快照。`decisions.md` 与 `rejected.md` 由结构化决定记录派生，供 Agent 和人直接阅读。图片原图位于 `.crewvane/attachments/`，状态只保存相对路径、MIME、大小和 SHA-256；导入校验真实文件魔数并限制数量与体积。已结束目标保留图片 30 天，应用启动时清理，也支持逐张或随目标永久删除。
 
 `WorkspaceState.version = 2` 当前包含项目及项目上线策略、工序、目标、决定账本与唯一管家引用。旧版没有迁移路径，打开会明确报不支持。
 
@@ -72,9 +72,11 @@ Herdr 的 `pane.agent_status_changed`、`pane.exited`、`pane.closed`、`pane.mo
 
 通知送达与负责人现场登记是两个独立事实。未登记现场的活动目标在一分钟启动宽限期后交由管家巡检，不把通知成功显示成已经执行。`session.set` 拒绝把管家现场或其他未结束目标的现场登记成当前目标负责人；真实连接仍由 Herdr presence 核实，包括自定义 CLI 的前台 PID。
 
+`goal.accept`、`goal.drop` 和已结束目标的永久删除会释放负责人现场。桌面立即关闭对应 Herdr Tab，并通过 `session.release` 清理已结束目标的引用；关闭请求失败时保留引用，巡检恢复后继续重试。目标删除只开放给 `completed` / `dropped`，同时删除附件文件；项目决定账本不随目标删除。
+
 ## 桌面 IPC
 
-渲染进程通过 preload 暴露的有限接口选择工作区与项目、执行目标命令、管理 Herdr 和 CLI、打开 HTTPS 链接。`BrowserWindow` 使用 `contextIsolation: true`、`nodeIntegration: false`、`sandbox: true`，拒绝窗口跳转和权限请求。IPC 校验发送方 URL，项目路径必须先由文件选择器选中。
+渲染进程通过 preload 暴露的有限接口选择工作区与项目、导入与预览受校验的图片、执行目标命令、管理 Herdr 和 CLI、打开 HTTPS 链接。`BrowserWindow` 使用 `contextIsolation: true`、`nodeIntegration: false`、`sandbox: true`，拒绝窗口跳转和权限请求。IPC 校验发送方 URL，项目路径必须先由文件选择器选中；附件导入接受字节而不是任意目标路径，预览与打开只接受当前状态中的附件 ID。
 
 应用内 CLI 使用随包分发的独立 Node 可执行文件，CLI bundle 位于 ASAR unpack 目录，脚本和 Node runtime 都在 `.app` 内。打开工作区时自动安装或刷新 `~/.local/bin/crewvane`，并把它默认绑定到当前工作区。该入口只是应用内脚本的符号链接，因此移动应用后 CLI 会失败并提示重新安装，可避免悄悄执行旧版本。
 

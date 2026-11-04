@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect, useState, type FormEvent, type ReactNode } from "react";
+import { lazy, Suspense, useEffect, useRef, useState, type ReactNode } from "react";
 import { createRoot } from "react-dom/client";
 import * as Dialog from "@radix-ui/react-dialog";
 import {
@@ -10,15 +10,18 @@ import {
   CircleAlert,
   Clock3,
   Folder,
+  ImagePlus,
   Inbox,
   LayoutList,
   ListChecks,
+  MessageCircle,
   Moon,
   Plus,
   Settings2,
   Sparkles,
   SquareTerminal,
   Sun,
+  Trash2,
   X,
   Zap,
 } from "lucide-react";
@@ -32,6 +35,7 @@ import type {
   CrewvaneCommand,
   AgentPreferences,
   Goal,
+  GoalAttachment,
   Project,
   ShipPolicy,
   Workflow,
@@ -135,6 +139,286 @@ function Modal({
         </Dialog.Content>
       </Dialog.Portal>
     </Dialog.Root>
+  );
+}
+type IntakeImage = { key: string; file: File; preview: string };
+const attachmentFormats = new Set(["image/png", "image/jpeg", "image/webp", "image/gif"]);
+function imageFile(file: File) {
+  return attachmentFormats.has(file.type) || /\.(png|jpe?g|webp|gif)$/i.test(file.name);
+}
+function formatBytes(value: number) {
+  if (value < 1024) return `${value} B`;
+  if (value < 1024 * 1024) return `${Math.round(value / 1024)} KB`;
+  return `${(value / 1024 / 1024).toFixed(1)} MB`;
+}
+function GoalIntakeForm({
+  busy,
+  error,
+  onClose,
+  onSubmit,
+}: {
+  busy: boolean;
+  error: string;
+  onClose: () => void;
+  onSubmit: (text: string, files: File[]) => Promise<void>;
+}) {
+  const [images, setImages] = useState<IntakeImage[]>([]),
+    [validation, setValidation] = useState(""),
+    [dragging, setDragging] = useState(false),
+    input = useRef<HTMLInputElement>(null),
+    imagesRef = useRef(images);
+  imagesRef.current = images;
+  useEffect(() => () => {
+    imagesRef.current.forEach(item => URL.revokeObjectURL(item.preview));
+  }, []);
+  function addFiles(incoming: File[]) {
+    if (!incoming.length) return;
+    const supported = incoming.filter(imageFile);
+    let message = supported.length < incoming.length ? "只支持 PNG、JPEG、WebP 和 GIF 图片。" : "";
+    if (supported.some(file => file.size > 10 * 1024 * 1024)) {
+      setValidation("单张图片不能超过 10 MB。");
+      return;
+    }
+    const accepted: IntakeImage[] = [];
+    let total = images.reduce((sum, item) => sum + item.file.size, 0),
+      count = images.length;
+    for (const file of supported) {
+      if (count >= 8) {
+        message = "每个目标最多添加 8 张图片。";
+        break;
+      }
+      if (total + file.size > 30 * 1024 * 1024) {
+        message = "图片总计不能超过 30 MB。";
+        break;
+      }
+      total += file.size;
+      count += 1;
+      accepted.push({
+        key: `${file.name}-${file.size}-${file.lastModified}-${accepted.length}-${Date.now()}`,
+        file,
+        preview: URL.createObjectURL(file),
+      });
+    }
+    setValidation(message);
+    if (accepted.length) setImages(current => [...current, ...accepted]);
+  }
+  function removeImage(key: string) {
+    setImages(current => {
+      const removed = current.find(item => item.key === key);
+      if (removed) URL.revokeObjectURL(removed.preview);
+      return current.filter(item => item.key !== key);
+    });
+    setValidation("");
+  }
+  return (
+    <Modal
+      error={error || validation}
+      title="把事情放下。"
+      description="文字、截图或图片一起交给管家。"
+      onClose={onClose}
+    >
+      <form
+        className="form"
+        onSubmit={async event => {
+          event.preventDefault();
+          const data = new FormData(event.currentTarget);
+          setValidation("");
+          try {
+            await onSubmit(String(data.get("request")), images.map(item => item.file));
+          } catch {
+            /* The parent keeps the draft and reports the actual error. */
+          }
+        }}
+      >
+        <div
+          className={`goal-intake-zone ${dragging ? "dragging" : ""}`}
+          onDragEnter={event => {
+            if (Array.from(event.dataTransfer.types).includes("Files")) {
+              event.preventDefault();
+              setDragging(true);
+            }
+          }}
+          onDragOver={event => {
+            if (Array.from(event.dataTransfer.types).includes("Files")) {
+              event.preventDefault();
+              event.dataTransfer.dropEffect = "copy";
+            }
+          }}
+          onDragLeave={event => {
+            if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setDragging(false);
+          }}
+          onDrop={event => {
+            event.preventDefault();
+            setDragging(false);
+            addFiles(Array.from(event.dataTransfer.files));
+          }}
+        >
+          <textarea
+            className="goal-intake"
+            name="request"
+            required
+            autoFocus
+            maxLength={20000}
+            rows={5}
+            aria-label="要交给管家的事情"
+            placeholder="直接说：要做什么、知道哪些背景、怎样算完成……"
+            onPaste={event => {
+              const files = Array.from(event.clipboardData.files);
+              if (!files.length) return;
+              addFiles(files);
+              if (!event.clipboardData.getData("text/plain").trim()) event.preventDefault();
+            }}
+            onKeyDown={event => {
+              if (event.key === "Enter" && (event.metaKey || event.ctrlKey) && !event.nativeEvent.isComposing) {
+                event.preventDefault();
+                event.currentTarget.form?.requestSubmit();
+              }
+            }}
+          />
+          <div className="goal-intake-tools">
+            <button type="button" className="secondary" disabled={busy} onClick={() => input.current?.click()}>
+              <ImagePlus size={14} />
+              添加图片
+            </button>
+            <span>{images.length ? `${images.length}/8 张 · 可直接在输入框粘贴或拖入` : "可粘贴截图、拖入图片，或从本机选择"}</span>
+          </div>
+          <input
+            ref={input}
+            className="visually-hidden"
+            type="file"
+            accept="image/png,image/jpeg,image/webp,image/gif"
+            multiple
+            aria-label="选择图片"
+            onChange={event => {
+              addFiles(Array.from(event.currentTarget.files ?? []));
+              event.currentTarget.value = "";
+            }}
+          />
+        </div>
+        {images.length > 0 && (
+          <div className="intake-attachments" aria-label="待提交图片">
+            {images.map(item => (
+              <figure className="intake-attachment" key={item.key}>
+                <img src={item.preview} alt={item.file.name} />
+                <figcaption>
+                  <strong title={item.file.name}>{item.file.name}</strong>
+                  <span>{formatBytes(item.file.size)}</span>
+                </figcaption>
+                <button type="button" aria-label={`移除图片 ${item.file.name}`} disabled={busy} onClick={() => removeImage(item.key)}>
+                  <Trash2 size={13} />
+                </button>
+              </figure>
+            ))}
+          </div>
+        )}
+        <p className="intake-hint">图片只保存在本机，目标结束 30 天后自动清理。⌘ / Ctrl + Enter 提交。</p>
+        {busy && (
+          <p className="form-progress" role="status">
+            正在保存图片并联系管家，首次准备可能需要几十秒…
+          </p>
+        )}
+        <div className="modal-actions">
+          <button type="button" className="secondary" disabled={busy} onClick={onClose}>
+            取消
+          </button>
+          <button className="primary" disabled={busy}>
+            <Sparkles size={15} />
+            {busy ? "正在交给管家…" : "交给管家"}
+          </button>
+        </div>
+      </form>
+    </Modal>
+  );
+}
+function GoalAttachmentTile({
+  goalId,
+  attachment,
+  open,
+  remove,
+}: {
+  goalId: string;
+  attachment: GoalAttachment;
+  open: () => void;
+  remove: () => void;
+}) {
+  const [preview, setPreview] = useState("");
+  useEffect(() => {
+    let active = true;
+    void api.attachmentPreview(goalId, attachment.id)
+      .then(value => { if (active) setPreview(value); })
+      .catch(() => { /* The file card remains usable if preview decoding fails. */ });
+    return () => { active = false; };
+  }, [goalId, attachment.id]);
+  return (
+    <div className="goal-attachment">
+      <button type="button" className="goal-attachment-open" onClick={open}>
+        <span className="goal-attachment-preview">
+          {preview ? <img src={preview} alt="" /> : <ImagePlus size={18} />}
+        </span>
+        <span>
+          <strong>{attachment.name}</strong>
+          <small>{formatBytes(attachment.size)} · 点击打开原图</small>
+        </span>
+        <ArrowUpRight size={13} />
+      </button>
+      <button
+        type="button"
+        className="goal-attachment-remove"
+        aria-label={`删除图片 ${attachment.name}`}
+        title="永久删除这张图片"
+        onClick={() => {
+          if (window.confirm(`永久删除图片「${attachment.name}」？`)) remove();
+        }}
+      >
+        <Trash2 size={13} />
+      </button>
+    </div>
+  );
+}
+const activityKindLabel = {
+  created: "目标",
+  progress: "答复",
+  waiting: "等待",
+  decision: "决定",
+  delivery: "交付",
+  accepted: "验收",
+  rework: "返工",
+  dropped: "放弃",
+  resolved: "处理",
+  reminder: "提醒",
+  session: "会话",
+  watchdog: "巡检",
+  ship: "上线",
+} as const;
+function ActivityFeed({ goal }: { goal: Goal }) {
+  const feed = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const node = feed.current;
+    if (node) node.scrollTop = node.scrollHeight;
+  }, [goal.id, goal.activities.length, goal.activities.at(-1)?.id]);
+  return (
+    <section className="conversation" aria-label="对话与动态">
+      <div className="section-heading">
+        <h3><MessageCircle size={14} />对话与动态</h3>
+        <small>{goal.activities.length} 条，完整保留</small>
+      </div>
+      <div className="conversation-feed" ref={feed}>
+        {goal.activities.map(item => {
+          const mine = item.actor.startsWith("你"),
+            system = item.actor === "系统" || item.actor === "巡检";
+          return (
+            <article className={`conversation-entry ${mine ? "mine" : system ? "system" : ""}`} key={item.id}>
+              <header>
+                <strong>{item.actor}</strong>
+                <span>{activityKindLabel[item.kind]}</span>
+                <time>{time(item.at)}</time>
+              </header>
+              <p>{item.text}</p>
+            </article>
+          );
+        })}
+      </div>
+    </section>
   );
 }
 function App() {
@@ -287,17 +571,31 @@ function App() {
     setSelectedWorkflowId(workflow.id);
     setDraft(structuredClone(workflow));
   }
-  async function saveGoal(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    const data = new FormData(event.currentTarget);
-    const created = await execute({
-      type: "goal.intake", text: String(data.get("request")),
-      projectId: projectId || undefined,
-    }) as Goal;
-    setGoalId(created.id);
-    setModal("goal");
-    notify("目标已保存，正在联系管家。");
-    return created;
+  async function saveGoal(text: string, files: File[]) {
+    setBusy(true);
+    setError("");
+    try {
+      const inputs = await Promise.all(files.map(async file => ({
+        name: file.name,
+        bytes: await file.arrayBuffer(),
+      })));
+      const attachments = inputs.length ? await api.importAttachments(inputs) : [];
+      const created = await api.command({
+        type: "goal.intake",
+        text,
+        projectId: projectId || undefined,
+        ...(attachments.length ? { attachments } : {}),
+      }) as Goal;
+      setState(await api.command({ type: "snapshot" }));
+      setGoalId(created.id);
+      setModal("goal");
+      notify(attachments.length ? `目标与 ${attachments.length} 张图片已保存，正在联系管家。` : "目标已保存，正在联系管家。");
+    } catch (reason) {
+      showError(reason);
+      throw reason;
+    } finally {
+      setBusy(false);
+    }
   }
   return (
     <div className={`app ${collapsed ? "collapsed" : ""}`}>
@@ -952,45 +1250,12 @@ function App() {
         </div>
       </Modal>}
       {modal === "new" && (
-        <Modal
+        <GoalIntakeForm
           error={error}
-          title="把事情放下。"
-          description="记录一个目标，剩下的交给管家。"
+          busy={busy}
           onClose={() => setModal("")}
-        >
-          <form
-            className="form"
-            onSubmit={(event) => void saveGoal(event).catch(() => {})}
-          >
-            <textarea className="goal-intake" name="request" required autoFocus maxLength={20000} rows={5}
-              aria-label="要交给管家的事情"
-              placeholder="直接说：要做什么、知道哪些背景、怎样算完成……"
-              onKeyDown={event => {
-                if (event.key === "Enter" && (event.metaKey || event.ctrlKey) && !event.nativeEvent.isComposing) {
-                  event.preventDefault(); event.currentTarget.form?.requestSubmit();
-                }
-              }} />
-            <p className="intake-hint">管家会整理目标、项目、工序和下一步。⌘ / Ctrl + Enter 提交。</p>
-            {busy && (
-              <p className="form-progress" role="status">
-                正在记录并联系管家，首次准备可能需要几十秒…
-              </p>
-            )}
-            <div className="modal-actions">
-              <button
-                type="button"
-                className="secondary"
-                onClick={() => setModal("")}
-              >
-                取消
-              </button>
-              <button className="primary" disabled={busy}>
-                <Sparkles size={15} />
-                {busy ? "正在交给管家…" : "交给管家"}
-              </button>
-            </div>
-          </form>
-        </Modal>
+          onSubmit={saveGoal}
+        />
       )}
       {modal === "project" && (
         <Modal
@@ -1064,6 +1329,23 @@ function App() {
           busy={busy}
           openHerdr={() => void openScene(goal.id)}
           openUrl={(url) => void api.openUrl(url).catch(showError)}
+          openAttachment={(attachmentId) => void api.openAttachment(goal.id, attachmentId).catch(showError)}
+          removeAttachment={(attachmentId) => void execute({
+            type: "goal.attachment.remove",
+            goalId: goal.id,
+            attachmentId,
+            actor: "你",
+          }).then(() => notify("图片已删除，相关元数据也已清理。")).catch(() => {})}
+          deleteGoal={() => {
+            if (!window.confirm(`永久删除目标「${goal.title}」及其图片？项目决定账本会保留。`)) return;
+            void execute({ type: "goal.delete", goalId: goal.id, actor: "你" })
+              .then(() => {
+                setGoalId("");
+                setModal("");
+                notify("目标与关联图片已永久删除。");
+              })
+              .catch(() => {});
+          }}
           edit={() => setModal("edit")}
           submit={() => setModal("delivery")}
           retry={async () => {
@@ -1394,6 +1676,9 @@ function GoalModal({
   busy,
   openHerdr,
   openUrl,
+  openAttachment,
+  removeAttachment,
+  deleteGoal,
   edit,
   notify,
   error,
@@ -1407,6 +1692,9 @@ function GoalModal({
   busy: boolean;
   openHerdr: () => void;
   openUrl: (url: string) => void;
+  openAttachment: (attachmentId: string) => void;
+  removeAttachment: (attachmentId: string) => void;
+  deleteGoal: () => void;
   edit: () => void;
   notify: (text: string) => void;
   error: string;
@@ -1448,6 +1736,26 @@ function GoalModal({
       </div>
       {goal.status === "waiting" && <WaitingActions key={goal.id} goal={goal} busy={busy} act={act} />}
       <p className="goal-description">{goal.description}</p>
+      {!!goal.attachments?.length && (
+        <section className="goal-attachments">
+          <div className="section-heading">
+            <h3>图片附件</h3>
+            <small>{goal.attachments.length} 张 · 交给负责人时附带原图路径</small>
+          </div>
+          <div>
+            {goal.attachments.map(attachment => (
+              <GoalAttachmentTile
+                key={attachment.id}
+                goalId={goal.id}
+                attachment={attachment}
+                open={() => openAttachment(attachment.id)}
+                remove={() => removeAttachment(attachment.id)}
+              />
+            ))}
+          </div>
+          <p className="attachment-retention">已结束目标的原图保留 30 天后自动清理；也可以逐张删除，或永久删除整个目标。</p>
+        </section>
+      )}
       {!ended && goal.status === "active" && <form className="goal-feedback" onSubmit={async event => {
         event.preventDefault();
         if (await act({ type: "goal.progress", goalId: goal.id, summary: `补充意见：${feedback}`, actor: "你" },
@@ -1521,20 +1829,7 @@ function GoalModal({
           </div>
         </section>
       )}
-      <div className="activity">
-        <h3>最近动态</h3>
-        {goal.activities
-          .slice(-4)
-          .reverse()
-          .map((item) => (
-            <div key={item.id}>
-              <span>
-                {item.actor} · {time(item.at)}
-              </span>
-              <p>{item.text}</p>
-            </div>
-          ))}
-      </div>
+      <ActivityFeed goal={goal} />
       {!ended && (needsDecision || goal.status === "review") && (
         <label className="decision-input">
           {kind === "decision" && <p className="decision-question">{goal.attention?.summary}</p>}
@@ -1554,6 +1849,11 @@ function GoalModal({
         </label>
       )}
       <div className="modal-actions goal-actions">
+        {ended && (
+          <button className="secondary danger-action" disabled={busy} onClick={deleteGoal}>
+            永久删除目标
+          </button>
+        )}
         {!ended && goal.mode === "concierge" && goal.status !== "waiting" && goal.status !== "review" &&
           <button className="secondary" disabled={busy} onClick={() => void act({
             type: "goal.takeover", goalId: goal.id,

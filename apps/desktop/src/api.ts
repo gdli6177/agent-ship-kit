@@ -1,8 +1,11 @@
-import type { CrewvaneCommand } from "../../../packages/core/src/index.js";
+import type { CrewvaneCommand, GoalAttachment } from "../../../packages/core/src/index.js";
 import type { HerdrStatus } from "../electron/herdr-install.js";
 import type { HerdrPluginStatus } from "../electron/herdr-plugin.js";
 export interface DesktopApi {
   command(command: CrewvaneCommand): Promise<any>;
+  importAttachments(inputs: { name: string; bytes: ArrayBuffer }[]): Promise<GoalAttachment[]>;
+  attachmentPreview(goalId: string, attachmentId: string): Promise<string>;
+  openAttachment(goalId: string, attachmentId: string): Promise<void>;
   selectWorkspace(): Promise<string | null>; selectProject(): Promise<string | null>;
   environment(): Promise<{ workspace?: string; version: string }>;
   herdrStatus(): Promise<HerdrStatus & { session: string; plugin: HerdrPluginStatus }>;

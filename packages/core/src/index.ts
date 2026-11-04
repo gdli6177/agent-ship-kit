@@ -5,4 +5,5 @@ export * from "./governance.js";
 export * from "./workflows.js";
 export * from "./service.js";
 export * from "./watchdog.js";
+export * from "./attachments.js";
 export { readEvents, withLock } from "./storage.js";
