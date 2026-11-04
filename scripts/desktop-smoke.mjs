@@ -216,6 +216,7 @@ try {
   page.once("dialog", dialog => void dialog.accept());
   await page.getByRole("button", { name: `删除图片 ${removedAttachment.name}` }).click();
   await page.getByText(removedAttachment.name, { exact: true }).waitFor({ state: "detached" });
+  await page.getByRole("dialog", { name: /桌面试用交付/ }).waitFor();
   await assert.rejects(stat(join(workspace, removedAttachment.path)), /ENOENT/);
   state = await page.evaluate(() => window.crewvane.command({ type: "snapshot" }));
   assert.equal(state.goals[0].attachments.length, 1);

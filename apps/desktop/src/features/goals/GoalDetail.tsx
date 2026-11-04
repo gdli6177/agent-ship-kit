@@ -61,7 +61,10 @@ export function GoalDetail({
     >
       <Dialog.Portal>
         <Dialog.Overlay className="overlay" />
-        <Dialog.Content className="goal-detail-modal">
+        <Dialog.Content
+          className="goal-detail-modal"
+          onFocusOutside={(event) => event.preventDefault()}
+        >
           <header className="goal-detail-header">
             <div className="goal-detail-origin">
               <span>
