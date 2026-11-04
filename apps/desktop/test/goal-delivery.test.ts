@@ -1,0 +1,70 @@
+import test, { afterEach } from "node:test";
+import assert from "node:assert/strict";
+import { mkdtemp, rm } from "node:fs/promises";
+import { join } from "node:path";
+import { tmpdir } from "node:os";
+import { WorkspaceService, type Goal } from "../../../packages/core/src/index.js";
+import { deliverGoalUpdate } from "../electron/goal-delivery.js";
+import { HerdrClient } from "../electron/herdr.js";
+
+const roots: string[] = [];
+afterEach(async () => { await Promise.all(roots.splice(0).map(root => rm(root, { recursive: true, force: true }))); });
+async function fixture() {
+  const root = await mkdtemp(join(tmpdir(), "crewvane-handoff-"));
+  roots.push(root);
+  const service = new WorkspaceService(root);
+  const item = await service.execute({ type: "goal.create", input: {
+    title: "审批", projectId: "personal", mode: "manual",
+  } }) as Goal;
+  await service.execute({ type: "goal.wait", goalId: item.id, reason: "等 YR", owner: "YR" });
+  return { service, id: item.id };
+}
+
+test("offline handoff is saved, restart retries the actual follow-up message without resuming", async () => {
+  const { service, id } = await fixture();
+  await service.execute({ type: "goal.followup", goalId: id, note: "核查审批进展" });
+  await deliverGoalUpdate(service, id, async () => { throw new Error("连接失败"); });
+  let goal = (await service.read()).goals[0]!;
+  assert.equal(goal.dispatch?.status, "failed");
+  assert.equal(goal.attention?.source, "dispatch");
+  assert.equal(goal.status, "waiting");
+  const calls: string[][] = [];
+  const messenger = new HerdrClient({ async run(args) { calls.push(args); return "{}"; } }, "trial");
+  await deliverGoalUpdate(new WorkspaceService(service.root), id, async item => {
+    await messenger.notifyFollowUp({ session: "trial", agent: "concierge" }, item.id, item.dispatch!.note!);
+  });
+  goal = (await service.read()).goals[0]!;
+  assert.equal(goal.dispatch?.status, "sent");
+  assert.equal(goal.attention, null);
+  assert.equal(goal.status, "waiting");
+  assert.match(calls[0]![3]!, /核查审批进展/);
+  assert.match(calls[0]![3]!, /保持等待状态和跟进提醒/);
+});
+
+test("a newer resume request is not acknowledged by an older in-flight follow-up", async () => {
+  const { service, id } = await fixture();
+  await service.execute({ type: "goal.followup", goalId: id });
+  const sent: string[] = [];
+  await deliverGoalUpdate(service, id, async item => {
+    sent.push(item.dispatch!.kind!);
+    if (sent.length === 1) {
+      await service.execute({ type: "goal.resume", goalId: id, note: "审批通过，继续", mode: "concierge" });
+    }
+  });
+  assert.deepEqual(sent, ["follow_up", "resume"]);
+  const goal = (await service.read()).goals[0]!;
+  assert.equal(goal.dispatch?.kind, "resume");
+  assert.equal(goal.dispatch?.status, "sent");
+  assert.equal(goal.status, "active");
+});
+
+test("manual takeover during send is never turned back into a concierge goal", async () => {
+  const { service, id } = await fixture();
+  await service.execute({ type: "goal.followup", goalId: id });
+  await deliverGoalUpdate(service, id, async () => {
+    await service.execute({ type: "goal.resume", goalId: id, note: "我来处理", mode: "manual" });
+  });
+  const goal = (await service.read()).goals[0]!;
+  assert.equal(goal.mode, "manual");
+  assert.equal(goal.dispatch, undefined);
+});

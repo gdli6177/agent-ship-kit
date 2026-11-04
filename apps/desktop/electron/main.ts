@@ -11,6 +11,7 @@ import { TerminalHost } from "./terminal-host.js";
 import { parseAgentCommand } from "./agent-command.js";
 import { Executables } from "./executables.js";
 import { HerdrInstallation } from "./herdr-install.js";
+import { deliverGoalUpdate } from "./goal-delivery.js";
 const exec = promisify(execFile);
 let window: BrowserWindow, tray: Tray, root: string | undefined, service: WorkspaceService | undefined, syncing = false, quitting = false;
 const selections = new Set<string>();
@@ -83,20 +84,18 @@ async function dispatchGoal(target: WorkspaceService, goalId: string): Promise<v
   const key = `${target.root}:${goalId}`;
   const pending = handoffs.get(key); if (pending) return pending;
   const work = (async () => {
-    await target.execute({ type: "goal.dispatch", goalId, status: "pending" });
     try {
-      const reference = await prepareConcierge(target);
-      const item = (await target.read()).goals.find((goal) => goal.id === goalId);
-      if (!item || ["completed", "dropped"].includes(item.status)) return;
-      const status = await herdrStatus();
-      if (!status.executable) throw new Error("请先在设置中安装 Herdr");
-      await client(status.executable, target.root).notifyGoal(reference, item.id, item.title);
-      await target.execute({ type: "goal.dispatch", goalId, status: "sent" });
-    } catch (error) {
-      const item = (await target.read()).goals.find((goal) => goal.id === goalId);
-      if (item && !["completed", "dropped"].includes(item.status)) await target.execute({
-        type: "goal.dispatch", goalId, status: "failed",
-        detail: `${error instanceof Error ? error.message : String(error)}。目标已保存，可在详情中重试联系管家。`,
+      await deliverGoalUpdate(target, goalId, async item => {
+        const reference = await prepareConcierge(target);
+        const latest = (await target.read()).goals.find(goal => goal.id === goalId);
+        if (!latest || latest.mode !== "concierge" || ["completed", "dropped"].includes(latest.status) ||
+          latest.dispatch?.id !== item.dispatch?.id) return;
+        const status = await herdrStatus();
+        if (!status.executable) throw new Error("Herdr 尚未准备好");
+        const messenger = client(status.executable, target.root);
+        if (item.dispatch?.kind === "follow_up")
+          await messenger.notifyFollowUp(reference, item.id, item.dispatch.note || "");
+        else await messenger.notifyGoal(reference, item.id, item.title, item.dispatch?.kind === "resume" ? item.dispatch.note : undefined);
       });
     } finally {
       if (root === target.root && !window.isDestroyed()) window.webContents.send("crewvane:event", {
@@ -184,6 +183,10 @@ async function synchronize() {
   const target = service, workspace = root;
   try {
     let state = await target.read(), status = await herdrStatus();
+    for (const goal of state.goals.filter(goal => goal.mode === "concierge" && goal.dispatch?.status === "pending" &&
+      !["completed", "dropped"].includes(goal.status))) {
+      void dispatchGoal(target, goal.id).catch(() => {});
+    }
     const tracked = state.goals.filter(goal => goal.status === "active" && (goal.herdr?.agent || goal.herdr?.transport === "pane"));
     if (status.executable && tracked.length) {
       try {
@@ -260,7 +263,9 @@ app.whenReady().then(async () => {
       for (const value of Object.values(command.preferences)) if (value?.trim()) parseAgentCommand(value, kinds);
     }
     const target = activeService(), result = await target.execute(command);
-    if (command.type === "goal.create" && command.input.mode === "concierge") {
+    if ((command.type === "goal.create" && command.input.mode === "concierge") ||
+      command.type === "goal.followup" || (command.type === "goal.resume" && command.mode === "concierge") ||
+      (command.type === "goal.progress" && command.actor === "你" && (result as import("../../../packages/core/src/index.js").Goal).mode === "concierge")) {
       const item = result as import("../../../packages/core/src/index.js").Goal;
       void dispatchGoal(target, item.id).catch((error) => {
         if (root === target.root) window.webContents.send("crewvane:event", { type: "diagnostic", message: String(error) });

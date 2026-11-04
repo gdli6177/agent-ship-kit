@@ -281,12 +281,17 @@ export class HerdrClient {
     reference: HerdrReference | undefined,
     goalId: string,
     title: string,
+    resumeNote?: string,
   ) {
     if (!reference?.agent && reference?.transport !== "pane")
       throw new Error("管家尚未准备好，请先在设置中准备管家");
     await this.prompt(reference,
-      `${conciergeRole}\n目标有更新 ${goalId}：${title}。请用 crewvane goal show ${goalId} --json 读取最新状态，并用 crewvane status --json 查看当前 Agent 默认偏好。待执行的目标交给独立负责人；退回修改转交原负责人；交付齐备则向人交接。若人已经验收或放弃，请通知负责人停止该目标的工作，不再派发。`,
+      `${conciergeRole}\n目标有更新 ${goalId}：${title}。${resumeNote ? `用户已结束等待，要求继续推进：${resumeNote}。优先联系原负责人恢复执行；确无可用原现场时才创建独立负责人。` : ""}请用 crewvane goal show ${goalId} --json 读取最新状态，并用 crewvane status --json 查看当前 Agent 默认偏好。待执行的目标交给独立负责人；退回修改转交原负责人；交付齐备则向人交接。若人已经验收或放弃，请通知负责人停止该目标的工作，不再派发。`,
     );
+  }
+  async notifyFollowUp(reference: HerdrReference, goalId: string, note: string) {
+    await this.prompt(reference,
+      `${conciergeRole}\n用户请求跟进等待事项 ${goalId}：${note}。请用 crewvane goal show ${goalId} --json 读取实际等待对象与提醒安排，联系原负责人核查进展并写回结果。保持等待状态和跟进提醒，不把催办当作等待已结束；没有真实新结果时不得用 goal progress 恢复执行。需要人决定时提出具体问题，不亲自执行业务，也不自动向外部人员发送消息。`);
   }
   async refreshConcierge(reference: HerdrReference, root: string, preferences?: AgentPreferences) {
     await this.prompt(reference, conciergeInstructions(root, preferences, this.session));

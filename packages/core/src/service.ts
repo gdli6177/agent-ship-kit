@@ -235,16 +235,50 @@ export class WorkspaceService {
           return item;
         }
         case "goal.dispatch": {
-          const item = goal(command.goalId); ongoing(item, true);
+          const item = goal(command.goalId);
+          if (command.requestId && item.dispatch?.id !== command.requestId) return item;
+          ongoing(item, true);
           if (!["pending", "sent", "failed"].includes(command.status)) throw new Error("无效的派送状态");
           const at = nowIso(), detail = command.detail ? text(command.detail, "派送说明", 2000) : undefined;
           item.mode = "concierge";
-          item.dispatch = { status: command.status, at, ...(detail ? { detail } : {}) };
+          item.dispatch = { ...item.dispatch,
+            id: command.status === "pending" && !command.requestId ? newId("handoff") : item.dispatch?.id,
+            status: command.status, at, detail };
           if (command.status === "failed" && !item.attention) item.attention = {
             kind: "intervention", source: "dispatch", summary: detail || "目标尚未送达管家，请重试。", since: at,
           };
           if (command.status === "sent" && item.attention?.source === "dispatch") item.attention = null;
           activity(item, "session", command.status === "sent" ? "目标已送达管家。" : command.status === "failed" ? `联系管家失败：${detail}` : "正在联系管家。", "系统");
+          return item;
+        }
+        case "goal.resume": {
+          const item = goal(command.goalId); ongoing(item);
+          if (item.status !== "waiting") throw new Error("只有等待中的目标可以恢复推进");
+          if (!["concierge", "manual"].includes(command.mode)) throw new Error("请选择由谁继续推进");
+          const note = text(command.note, "最新结果与下一步", 2000);
+          item.status = "active";
+          item.mode = command.mode;
+          item.next = note;
+          item.owner = command.mode === "manual" ? "你" : item.herdr?.agent || "待分配负责人";
+          item.waitingFor = undefined;
+          item.remindAt = undefined;
+          item.attention = null;
+          delete item.watchdog;
+          delete item.live;
+          if (command.mode === "concierge") item.dispatch = {
+            id: newId("handoff"), kind: "resume", note, status: "pending", at: nowIso(),
+          };
+          else delete item.dispatch;
+          activity(item, "resolved", `等待已结束。${note}`, "你");
+          return item;
+        }
+        case "goal.followup": {
+          const item = goal(command.goalId); ongoing(item);
+          if (item.status !== "waiting") throw new Error("只有等待中的目标可以请求跟进");
+          const note = command.note?.trim() ? text(command.note, "跟进说明", 2000) : "请核查等待事项的最新进展，并写回跟进结果。";
+          item.mode = "concierge";
+          item.dispatch = { id: newId("handoff"), kind: "follow_up", note, status: "pending", at: nowIso() };
+          activity(item, "session", `已请求管家跟进：${note}`, "你");
           return item;
         }
         case "goal.progress": {

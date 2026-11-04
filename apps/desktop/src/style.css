@@ -208,6 +208,13 @@ h1 em { color: var(--accent); font-style: normal; }
 .danger-action { color: var(--warm) !important; }
 .dispatch-note { margin: 0 0 18px; color: var(--muted); font-size: 11px; line-height: 1.8; overflow-wrap: anywhere; }
 .dispatch-note.failed { color: var(--warm); }
+.waiting-actions { margin-top: 18px; padding: 18px; border: 1px solid var(--line); border-radius: 12px; background: var(--surface-soft); }
+.waiting-actions .section-heading { margin-bottom: 15px; gap: 12px; flex-wrap: wrap; }
+.waiting-actions h3 { margin: 0; font-size: 13px; font-weight: 550; }
+.waiting-actions .section-heading span { font-size: 11px; color: var(--muted); }
+.waiting-choices { display: flex; flex-wrap: wrap; gap: 9px; }
+.waiting-form { margin-top: 18px; padding-top: 18px; border-top: 1px solid var(--line); }
+.waiting-form .modal-actions { flex-wrap: wrap; }
 .manual-tools { margin-top: 22px; padding-top: 18px; border-top: 1px solid var(--line); color: var(--muted); }
 .manual-tools summary { cursor: pointer; width: fit-content; font-size: 11px; }
 .manual-tools > p { margin: 14px 0 0; font-size: 11px; line-height: 1.8; }

@@ -152,9 +152,11 @@ try {
   await page.getByRole("button", { name: "全部目标", exact: true }).click();
   await page.getByText("个人事项界面闭环", { exact: true }).click();
   await page.getByText("手动处理", { exact: true }).click();
-  await page.getByLabel("手动处理说明", { exact: true }).fill("审批已经通过，继续处理");
-  await page.getByRole("button", { name: "记录进展", exact: true }).click();
-  await page.getByRole("button", { name: "更新下一步", exact: true }).click();
+  await page.getByLabel("补充进展", { exact: true }).fill("审批已经通过，继续处理");
+  const previousNext = (await service.read()).goals.find(item => item.title === "个人事项界面闭环").next;
+  await page.getByRole("button", { name: "补充进展", exact: true }).click();
+  assert.equal((await service.read()).goals.find(item => item.title === "个人事项界面闭环").next, previousNext, "progress notes must not silently change the next step");
+  await page.getByRole("button", { name: "编辑目标", exact: true }).click();
   await page.getByLabel("当前安排").selectOption("waiting");
   await page.getByLabel("下一步", { exact: true }).fill("等待下一次核对");
   await page.getByLabel("跟进提醒", { exact: true }).fill("2030-01-01T09:30");
@@ -163,7 +165,7 @@ try {
   assert.equal(manual.status, "waiting");
   assert.equal(manual.remindAt, new Date("2030-01-01T09:30").toISOString());
   await page.getByText("手动处理", { exact: true }).click();
-  await page.getByRole("button", { name: "更新下一步", exact: true }).click();
+  await page.getByRole("button", { name: "编辑目标", exact: true }).click();
   assert.equal(await page.getByLabel("跟进提醒", { exact: true }).inputValue(), "2030-01-01T09:30");
   await page.getByRole("button", { name: "关闭", exact: true }).click();
   await page.getByText("手动处理", { exact: true }).click();
@@ -174,7 +176,7 @@ try {
   await page.getByLabel("通过依据").fill("界面值与保存前一致，未发生时区偏移");
   await page.getByRole("button", { name: "提交验收", exact: true }).click();
   await page.getByRole("button", { name: "验收通过", exact: true }).click();
-  assert.equal(await page.getByRole("button", { name: "更新下一步", exact: true }).count(), 0);
+  assert.equal(await page.getByRole("button", { name: "编辑目标", exact: true }).count(), 0);
   await page.getByRole("button", { name: "关闭", exact: true }).click();
   await page.getByRole("button", { name: "工序", exact: true }).click();
   await page.getByRole("button", { name: "新建工序", exact: true }).click();
@@ -189,6 +191,31 @@ try {
   assert.equal(state.goals.find(item => item.id === manual.id).status, "completed");
   assert.equal(state.workflows.find(item => item.name === "内容发布").steps.length, 1);
   assert.equal(state.workflows[0].steps[0].name, "理解与对齐");
+  await page.locator(".top-actions").getByRole("button", { name: "新目标" }).click();
+  await page.getByLabel("要处理什么？").fill("等待审批操作");
+  await page.getByLabel("交给谁？").selectOption("manual");
+  await page.getByRole("button", { name: "记录目标", exact: true }).click();
+  const waiting = (await service.read()).goals.find(item => item.title === "等待审批操作");
+  await service.execute({ type: "goal.wait", goalId: waiting.id, reason: "等 YR 审批", owner: "YR", remindAt: "2030-01-01T00:00:00Z" });
+  await page.getByRole("button", { name: "全部目标", exact: true }).click();
+  await page.getByText("等待审批操作", { exact: true }).click();
+  await page.getByRole("heading", { name: "这件事，接下来怎么走？" }).waitFor();
+  assert.equal(await page.getByLabel("当前安排").count(), 0);
+  await page.getByRole("button", { name: "稍后提醒我", exact: true }).click();
+  await page.getByRole("button", { name: "1 小时后", exact: true }).click();
+  let waitingState = (await service.read()).goals.find(item => item.id === waiting.id);
+  assert.ok(Date.parse(waitingState.remindAt) > Date.now());
+  assert.equal(waitingState.status, "waiting");
+  await page.getByRole("button", { name: "有结果了，继续推进", exact: true }).click();
+  await page.getByLabel("最新结果与下一步").fill("审批通过了，我亲自处理。");
+  await page.getByRole("button", { name: "我来处理", exact: true }).click();
+  waitingState = (await service.read()).goals.find(item => item.id === waiting.id);
+  assert.equal(waitingState.status, "active");
+  assert.equal(waitingState.mode, "manual");
+  assert.equal(waitingState.owner, "你");
+  assert.equal(waitingState.dispatch, undefined);
+  await page.screenshot({ path: join(home, "waiting-resumed-dark.png"), animations: "disabled" });
+  await page.getByRole("button", { name: "关闭", exact: true }).click();
   assert.deepEqual(errors, []);
   assert.equal(await page.evaluate(() => typeof window.require), "undefined");
   console.log(
@@ -212,6 +239,7 @@ try {
         "manual progress/wait/review/accept through UI",
         "local reminder round trip",
         "custom workflow add/remove/save",
+        "waiting snooze and resume directly without the manual editor",
       ],
       errors,
     }),

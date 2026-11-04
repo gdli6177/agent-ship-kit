@@ -1198,8 +1198,8 @@ function GoalEditor({
     : "";
   return (
     <Modal
-      title="更新下一步"
-      description="记录等待对象和跟进时间，之后不必一直记着。"
+      title="编辑目标"
+      description="修改目标说明或接下来的安排。它不会提交成果，也不会表示等待已经结束。"
       error={error}
       onClose={onClose}
     >
@@ -1376,6 +1376,69 @@ function DeliveryEditor({
     </Modal>
   );
 }
+function WaitingActions({ goal, busy, act }: {
+  goal: Goal;
+  busy: boolean;
+  act: (command: CrewvaneCommand, message: string) => Promise<boolean>;
+}) {
+  const [action, setAction] = useState<"resume" | "remind" | "">(""),
+    [update, setUpdate] = useState(""),
+    [reminder, setReminder] = useState(""),
+    [validation, setValidation] = useState("");
+  async function remind(at: string) {
+    const timestamp = Date.parse(at);
+    if (!Number.isFinite(timestamp) || timestamp <= Date.now()) {
+      setValidation("请选择未来的提醒时间。"); return;
+    }
+    if (await act({ type: "goal.remind", goalId: goal.id, at: new Date(timestamp).toISOString() }, "提醒已更新，到时再通知你")) {
+      setAction(""); setValidation("");
+    }
+  }
+  return <section className="waiting-actions" aria-label="推进等待事项">
+    <div className="section-heading">
+      <h3>这件事，接下来怎么走？</h3>
+      <span>正在等 {goal.waitingFor || goal.owner}</span>
+    </div>
+    {goal.attention?.kind === "decision" && <p>{goal.attention.summary}</p>}
+    <div className="waiting-choices">
+      <button className="primary" disabled={busy} aria-expanded={action === "resume"}
+        onClick={() => { setAction("resume"); setValidation(""); }}>有结果了，继续推进<ArrowRight size={14} /></button>
+      <button className="secondary" disabled={busy || goal.dispatch?.status === "pending"}
+        onClick={() => void act({ type: "goal.followup", goalId: goal.id }, "跟进请求已保存，正在联系管家")}>请管家跟进</button>
+      <button className="secondary" disabled={busy} aria-expanded={action === "remind"}
+        onClick={() => { setAction("remind"); setValidation(""); }}>稍后提醒我</button>
+    </div>
+    {action === "resume" && <form className="form waiting-form" onSubmit={async event => {
+      event.preventDefault();
+      if (await act({ type: "goal.resume", goalId: goal.id, note: update, mode: "concierge" }, "等待已结束，正在通知管家继续推进")) setUpdate("");
+    }}>
+      <label>最新结果与下一步
+        <textarea autoFocus required maxLength={2000} value={update} onChange={event => setUpdate(event.target.value)}
+          placeholder="例如：YR 已批准，按原方案继续开发。" />
+      </label>
+      <p className="quiet-copy">管家会把这条更新交给原负责人；没有可用现场时再安排独立负责人。</p>
+      <div className="modal-actions">
+        <button className="secondary" type="button" disabled={busy} onClick={() => setAction("")}>取消</button>
+        <button className="secondary" type="button" disabled={busy || !update.trim()} onClick={() => void act({
+          type: "goal.resume", goalId: goal.id, note: update, mode: "manual",
+        }, "已恢复推进，由你处理")}>我来处理</button>
+        <button className="primary" disabled={busy || !update.trim()}>交给管家继续</button>
+      </div>
+    </form>}
+    {action === "remind" && <form className="form waiting-form" onSubmit={event => { event.preventDefault(); void remind(reminder); }}>
+      <div className="waiting-choices">
+        <button type="button" className="secondary" disabled={busy} onClick={() => void remind(new Date(Date.now() + 3_600_000).toISOString())}>1 小时后</button>
+        <button type="button" className="secondary" disabled={busy} onClick={() => void remind(new Date(Date.now() + 86_400_000).toISOString())}>24 小时后</button>
+      </div>
+      <label>自定义提醒时间<input type="datetime-local" required value={reminder} onChange={event => setReminder(event.target.value)} /></label>
+      {validation && <p role="alert" className="modal-error">{validation}</p>}
+      <div className="modal-actions">
+        <button type="button" className="secondary" disabled={busy} onClick={() => setAction("")}>取消</button>
+        <button className="primary" disabled={busy}>保存提醒</button>
+      </div>
+    </form>}
+  </section>;
+}
 function GoalModal({
   goal,
   state,
@@ -1407,14 +1470,16 @@ function GoalModal({
     [note, setNote] = useState("");
   const ended = goal.status === "completed" || goal.status === "dropped";
   const kind = attentionKind(goal);
-  const needsDecision = kind === "decision" || kind === "follow_up";
+  const needsDecision = goal.status !== "waiting" && (kind === "decision" || kind === "follow_up");
   async function act(command: CrewvaneCommand, message: string) {
     try {
       await execute(command);
       setNote("");
       notify(message);
+      return true;
     } catch {
       /* execute reports errors inside this modal. */
+      return false;
     }
   }
   return (
@@ -1433,10 +1498,14 @@ function GoalModal({
           {goal.remindAt ? ` · ${time(goal.remindAt)} 跟进` : ""}
         </span>
       </div>
+      {goal.status === "waiting" && <WaitingActions key={goal.id} goal={goal} busy={busy} act={act} />}
       <p className="goal-description">{goal.description}</p>
       {goal.dispatch && <p className={`dispatch-note ${goal.dispatch.status}`} role="status">
-        {goal.dispatch.status === "pending" ? "正在准备管家并发送目标，你可以先处理其他事情。" :
+        {goal.dispatch.status === "pending" ? (goal.dispatch.kind === "follow_up" ? "正在通知管家跟进，目标仍保持等待。" : "正在准备管家并发送更新，你可以先处理其他事情。") :
           goal.dispatch.status === "failed" ? goal.dispatch.detail :
+            goal.dispatch.kind === "follow_up" ? `跟进请求已送达管家 · ${time(goal.dispatch.at)}，仍在等待实际结果。` :
+            goal.dispatch.kind === "resume" ? `继续推进的更新已送达管家 · ${time(goal.dispatch.at)}。` :
+            goal.dispatch.at ? `已通知管家 · ${time(goal.dispatch.at)}` :
             goal.status === "active" && !goal.herdr ? "已通知管家，等待分配独立负责人；尚未确认执行现场。" :
             goal.status === "active" && goal.live?.reachable === false ? "负责人现场暂时不可达，管家将先核查。" :
             goal.status === "active" && goal.herdr ? (goal.live?.reachable === true ? "负责人现场已连接。" : "已登记负责人现场，正在核实连接。") :
@@ -1519,7 +1588,7 @@ function GoalModal({
         </label>
       )}
       <div className="modal-actions goal-actions">
-        {!ended && (goal.mode === "manual" || goal.dispatch?.status === "failed") &&
+        {!ended && ((goal.mode === "manual" && goal.status !== "waiting") || goal.dispatch?.status === "failed") &&
           <button className="secondary" disabled={busy} onClick={() => void retry()}>
             {goal.mode === "manual" ? "交给管家" : "重试联系管家"}
           </button>}
@@ -1596,17 +1665,18 @@ function GoalModal({
       </div>
       {!ended && <details className="manual-tools">
         <summary>手动处理</summary>
-        <p>日常进展由管家维护。需要自行接管或纠正时，再使用这里。</p>
-        {!needsDecision && goal.status !== "review" && <label className="decision-input">
-          处理说明<textarea aria-label="手动处理说明" value={note} onChange={event => setNote(event.target.value)}
-            placeholder="记录实际进展，或说明为什么放弃。" />
+        <p>仅在你自己接管或纠正目标时使用；让管家继续工作请用上方操作。</p>
+        <p><strong>补充进展</strong>记录已经发生的事，目标仍会继续；<strong>编辑目标</strong>修改安排；<strong>提交成果</strong>附实际检查并进入待验收。</p>
+        {!needsDecision && goal.status !== "review" && (goal.status !== "waiting" || kind !== "follow_up") && <label className="decision-input">
+          实际发生了什么？<textarea aria-label="补充进展" value={note} onChange={event => setNote(event.target.value)}
+            placeholder="例如：已完成第一轮开发，接下来准备自测。" />
         </label>}
         <div className="modal-actions">
-          <button className="secondary" onClick={edit}>更新下一步</button>
+          <button className="secondary" onClick={edit}>编辑目标</button>
           {goal.status !== "review" && <>
             <button className="secondary" disabled={busy} onClick={submit}>提交成果</button>
-            {!needsDecision && <button className="secondary" disabled={busy || !note.trim()}
-              onClick={() => void act({ type: "goal.progress", goalId: goal.id, summary: note, next: note, actor: "你" }, "已记录实际进展")}>记录进展</button>}
+            {!needsDecision && (goal.status !== "waiting" || kind !== "follow_up") && <button className="secondary" disabled={busy || !note.trim()}
+              onClick={() => void act({ type: "goal.progress", goalId: goal.id, summary: note, actor: "你" }, "进展已补充，原来的下一步不变")}>补充进展</button>}
           </>}
           <button className="secondary danger-action" disabled={busy || !note.trim()}
             onClick={() => void act({ type: "goal.drop", goalId: goal.id, note }, "已放弃，记录仍可查看")}>放弃目标</button>
