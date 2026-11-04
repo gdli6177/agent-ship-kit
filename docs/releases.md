@@ -8,7 +8,7 @@
 | `Crewvane-<version>-macOS-arm64.zip` | 解压后将 Crewvane.app 移入“应用程序” |
 | `SHA256SUMS.txt` | 执行 `shasum -a 256 -c SHA256SUMS.txt` 核对安装附件 |
 
-GitHub 自动生成的 **Source code** 是源码，不是可安装应用。安装包自带 Electron 和 CLI runtime，无需安装 Node 或 pnpm；Herdr 与 Agent CLI 由用户在应用设置和 Terminal 中安装、登录。
+GitHub 自动生成的 **Source code** 是源码，不是可安装应用。安装包自带 Electron 和 CLI runtime，无需安装 Node 或 pnpm；启动时自动检测并安装最新 Herdr TUI CLI，不依赖 Homebrew。Agent CLI 仍由用户自行安装和登录。
 
 当前包没有 Apple Developer ID 签名与公证，首次打开可能出现“无法验证开发者”。核对发布来源与 SHA-256 后，可在“系统设置 → 隐私与安全性”选择“仍要打开”。如果出现“已损坏，无法打开”，不要清除隔离属性绕过；重新下载当前版本并联系维护者。`v0.3.0` 的签名不完整，不应继续使用。
 

@@ -7,9 +7,36 @@ const after = (minutes: number) => new Date(Date.parse(start) + minutes * 60_000
 function goal(): Goal {
   return { id: "goal_test", projectId: "personal", title: "巡检事项", description: "", mode: "concierge",
     status: "active", steps: [], next: "推进", owner: "负责人", attention: null,
+    herdr: {session:"test",paneId:"w1:p2",agent:"owner"},
     activities: [{ id: "created", kind: "created", at: start, actor: "你", text: "已交代事项" }],
     createdAt: start, updatedAt: start };
 }
+test("two goals without owner references are checked after startup grace, not treated as dispatched execution", () => {
+  const first = goal(), second = {...goal(),id:"goal_second"};
+  delete first.herdr; delete second.herdr;
+  first.dispatch = {status:"sent",at:start};
+  second.dispatch = {status:"sent",at:start};
+  assert.deepEqual(inspectWatchdog([first,second],after(0.5)),[]);
+  const requests = inspectWatchdog([first,second],after(1));
+  assert.deepEqual(requests.map(request=>[request.goalId,request.reason]),[
+    ["goal_test","unassigned"],["goal_second","unassigned"],
+  ]);
+  assert.equal(first.attention,null);
+  reportWatchdog(first,after(1),requests[0]!.basis,"contacted");
+  first.herdr={session:"test",paneId:"w1:p3",agent:"first-owner"};
+  assert.deepEqual(inspectWatchdog([first],after(2)),[]);
+  assert.equal(first.watchdog,undefined);
+  second.status="waiting";
+  assert.deepEqual(inspectWatchdog([second],after(2)),[]);
+});
+test("preparing concierge and pending human decisions do not trigger unassigned-owner patrols", () => {
+  const item=goal(); delete item.herdr;
+  item.dispatch={status:"pending",at:start};
+  assert.deepEqual(inspectWatchdog([item],after(2)),[]);
+  item.dispatch={status:"sent",at:start};
+  item.attention={kind:"decision",summary:"请人决定范围",since:start};
+  assert.deepEqual(inspectWatchdog([item],after(2)),[]);
+});
 test("no-progress check contacts concierge first, deduplicates, and escalates only after no recovery", () => {
   const item = goal();
   assert.deepEqual(inspectWatchdog([item], after(29)), []);

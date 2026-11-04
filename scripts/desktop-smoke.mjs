@@ -35,6 +35,18 @@ try {
   await page.getByRole("button", { name: "收起侧边栏" }).click();
   assert.ok(await page.locator(".app.collapsed").count());
   await page.getByRole("button", { name: "展开侧边栏" }).click();
+  await page.getByRole("button", { name: "我的工作台", exact: true }).click();
+  assert.equal(await page.getByRole("dialog").count(), 0, "workspace overview must not open a directory picker");
+  await page.getByRole("heading", { name: "现在，可以安心了。" }).waitFor();
+  await page.getByRole("button", { name: "添加项目", exact: true }).click();
+  await page.getByRole("dialog", { name: "添加项目" }).waitFor();
+  await page.getByLabel("项目名称").fill("界面测试项目");
+  await page.getByRole("button", { name: "添加项目", exact: true }).last().click();
+  await page.locator(".projects").getByRole("button", { name: /界面测试项目/ }).click();
+  await page.locator(".topbar").getByText("界面测试项目", { exact: true }).waitFor();
+  await page.getByRole("button", { name: "我的工作台", exact: true }).click();
+  await page.getByRole("heading", { name: "现在，可以安心了。" }).waitFor();
+  assert.equal(await page.locator(".projects button.active").count(), 0);
   await page
     .locator(".top-actions")
     .getByRole("button", { name: "新目标" })
@@ -186,6 +198,7 @@ try {
       checks: [
         "theme",
         "collapsible sidebar",
+        "workspace overview navigation and project creation without a directory",
         "manual goal",
         "waiting",
         "review evidence",

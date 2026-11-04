@@ -6,7 +6,7 @@ const usage = `Crewvane — 把所有事整理成清晰的下一步
   crewvane attention [--json]
   crewvane goal list [--all] [--json]
   crewvane goal show ID [--json]
-  crewvane goal create --title TEXT --project ID [--description TEXT]
+  crewvane goal create --title TEXT [--project ID] [--description TEXT]
     [--workflow ID] [--mode concierge|manual]
   crewvane goal update ID [--title TEXT] [--description TEXT] [--next TEXT]
     [--owner TEXT] [--stage ID] [--status active|waiting] [--remind-at ISO]
@@ -21,6 +21,7 @@ const usage = `Crewvane — 把所有事整理成清晰的下一步
   crewvane goal drop ID --reason TEXT
   crewvane goal remind ID --at ISO [--note TEXT]
   crewvane session set [ID] [--workspace ID] [--tab ID] [--pane ID] [--agent NAME]
+    [--transport pane --process-id PID]（自定义 CLI）
   crewvane workflow list [--json]
 
 使用 --root DIR 或 CREWVANE_WORKSPACE 指定工作区。所有读写与桌面共用状态。
@@ -60,7 +61,7 @@ export async function run(argv: string[], io = { out: console.log, error: consol
     else if (group === "workflow" && action === "list") result = (await service.read()).workflows;
     else if (group === "goal" && action === "list") { const state = await service.read(); result = args.has("all") ? state.goals : state.goals.filter((goal) => !["completed", "dropped"].includes(goal.status)); }
     else if (group === "goal" && action === "show") { const goalId = target ?? args.one("id"); if (!goalId) throw new Error("需要目标 ID"); result = (await service.read()).goals.find((goal) => goal.id === goalId); if (!result) throw new Error("找不到目标"); }
-    else if (group === "goal" && action === "create") command = { type: "goal.create", input: { title: args.one("title")!, projectId: args.one("project")!, description: args.one("description"), workflowId: args.one("workflow"), mode: (args.one("mode") ?? "concierge") as "concierge" | "manual", next: args.one("next"), waitingFor: args.one("owner"), remindAt: args.one("remind-at") } };
+    else if (group === "goal" && action === "create") command = { type: "goal.create", input: { title: args.one("title")!, projectId: args.one("project") ?? "personal", description: args.one("description"), workflowId: args.one("workflow"), mode: (args.one("mode") ?? "concierge") as "concierge" | "manual", next: args.one("next"), waitingFor: args.one("owner"), remindAt: args.one("remind-at") } };
     else if (group === "goal" && action === "update") command = { type: "goal.update", goalId: target!, patch: {
       title: args.one("title"), description: args.one("description"), next: args.one("next"),
       owner: args.one("owner"), stageId: args.one("stage"),
@@ -73,7 +74,8 @@ export async function run(argv: string[], io = { out: console.log, error: consol
     else if (group === "goal" && action === "review") command = { type: "goal.review", goalId: target!, delivery: { summary: args.one("summary")!, location: args.one("location"), url: args.one("url"), checks: checks(args.all("check")) }, actor: args.one("actor") };
     else if (group === "goal" && ["accept", "resolve", "rework", "drop"].includes(action ?? "")) command = { type: `goal.${action}` as "goal.accept", goalId: target!, note: args.one("note") ?? args.one("reason") ?? "", actor: args.one("actor") };
     else if (group === "goal" && action === "remind") command = { type: "goal.remind", goalId: target!, at: args.one("at")!, note: args.one("note") };
-    else if (group === "session" && action === "set") command = { type: "session.set", goalId: target, reference: { session: args.one("session") ?? process.env.HERDR_SESSION ?? "crewvane", workspaceId: args.one("workspace"), tabId: args.one("tab"), paneId: args.one("pane"), agent: args.one("agent") } };
+    else if (group === "session" && action === "set") command = { type: "session.set", goalId: target, reference: { session: args.one("session") ?? process.env.HERDR_SESSION ?? "crewvane", workspaceId: args.one("workspace"), tabId: args.one("tab"), paneId: args.one("pane"), agent: args.one("agent"),
+      ...(args.has("transport") ? { transport: args.one("transport") as "pane", processId: Number(args.one("process-id")) } : {}) } };
     else throw new Error(`不支持的命令：${args.positional.join(" ")}\n\n${usage}`);
     if (command) result = await service.execute(command);
     if (args.has("json")) io.out(JSON.stringify(result, null, 2));

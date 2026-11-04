@@ -31,6 +31,7 @@ jobs:
       - run: pnpm test
       - run: pnpm desktop:dist
       - run: pnpm test:installers
+      - run: pnpm test:onboarding
       - uses: actions/upload-artifact@v4
         with:
           name: crewvane-macOS-arm64
@@ -62,6 +63,10 @@ jobs:
           0.4：一位全局管家统筹所有项目与个人事项。注意力聚合决定、验收、到期跟进和需要介入的问题。
           应用内 Herdr 终端支持隐藏与恢复；设置中可填写各角色的 CLI 启动命令及原生参数。
           工序为名称与提示词组成的说明书；内置 Crewvane CLI 与桌面共用目标状态。
+          启动时自动检查并准备最新 Herdr CLI，无需 Homebrew；自定义 Agent 命令可直接在真实终端运行。
+          工作台回到全部目标总览；工作区目录在设置中切换，项目在项目栏添加；菜单栏统一使用像素魔法师应用图标。
+          管家只负责分发、跟进与向人交接；执行目标使用独立负责人现场，未分配时自动请管家核查。
+          项目关联可选；通知送达、现场登记与真实连接分别显示。
           本版重做本地数据模型，不读取 0.3 的工作区状态；请选择新的工作区目录。
 
           下载 Assets 中的 .dmg，将 Crewvane.app 拖入 Applications；也可下载 .zip 解压安装。

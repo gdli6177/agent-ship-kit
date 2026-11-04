@@ -34,9 +34,17 @@ Crewvane 不运行模型，不扫描或适配 Agent 协议，不管理模型凭�
 
 ## Herdr 管家
 
+`Executables` 将 Finder 的精简 PATH 与用户登录 shell 的 PATH、常见安装目录合并，保留可执行入口的符号链接名称。`HerdrInstallation` 在启动时查询 `https://herdr.dev/latest.json`：复用本机最新或更高版本，缺失/旧版时把官方当前平台二进制下载到 userData/runtime/herdr，SHA-256、运行版本均验证后原子替换。安装请求去重，不依赖 Homebrew，也不改用户已有安装。离线保留可用 CLI，并持续显示重试状态；安装失败不丢目标。
+
+已识别的 CLI 使用 Herdr Agent 通信；任意自定义交互式 CLI 通过真实 Pane 启动，原样保留可执行文件与参数，用 `transport=pane` 与前台 `processId` 记录并复用。每次发送文本前核对该进程仍在前台，退出或换进程时拒绝发送；没有 Agent 生命周期信息时只报告 unknown。不把任意程序“成功启动”当作理解任务或完成任务。用户复杂 shell 表达式通过自己的启动脚本承载。
+
 应用打开工作区后使用按路径派生的命名 Session，也可以通过 `CREWVANE_HERDR_SESSION` 固定名称。准备管家会检查 CLI 和 Server，优先复用实时 `concierge`，检查登记的 Pane，再显式设置工作区、Session 和 CLI `PATH`，最后启动默认的 Codex 管家。Session 未运行时，应用内 PTY 启动 `herdr session attach <session>` 并等待 Server 就绪，不打开系统 Terminal。同一工作区复用一个连接；收起面板不终止会话，重启应用重新 attach。输入和尺寸 IPC 只允许访问当前工作区的连接，不接受渲染器指定的可执行文件。
 
-管家通过 `crewvane` 读取和写回目标。负责人使用 Herdr Tab、Pane 和 Agent 消息，但 Crewvane 不预设任务图、分配算法或固定层级拓扑。
+管家通过 `crewvane` 读取和写回目标，只负责分发、协调跟进与向人交接。所有实际执行，包括简单任务、返工和检查，都交给独立负责人；管家不得在阻塞时接手执行。负责人使用 Herdr Tab、Pane 和 Agent 消息，但 Crewvane 不预设任务图、分配算法或固定层级拓扑。
+
+职责边界通过初始身份说明、每次目标通知与巡检消息传达。每次应用启动后首次恢复已有管家时刷新身份说明，同一运行中按实际管家引用去重，不重启或替换会话。它是 Agent 行为契约，不是操作系统权限隔离；Crewvane 无法拦截任意第三方 CLI 内部的工具调用。
+
+通知送达与负责人现场登记是两个独立事实。未登记现场的活动目标在一分钟启动宽限期后交由管家巡检，不把通知成功显示成已经执行。`session.set` 拒绝把管家现场或其他未结束目标的现场登记成当前目标负责人；真实连接仍由 Herdr presence 核实，包括自定义 CLI 的前台 PID。
 
 ## 桌面 IPC
 

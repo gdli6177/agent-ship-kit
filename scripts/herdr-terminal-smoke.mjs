@@ -1,5 +1,5 @@
-import { _electron as electron } from "@playwright/test";
-import { mkdir, mkdtemp, rm } from "node:fs/promises";
+import { _electron as electron, expect } from "@playwright/test";
+import { mkdir, mkdtemp, readFile, rm } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { tmpdir } from "node:os";
 import { randomUUID } from "node:crypto";
@@ -34,14 +34,15 @@ try {
   assert.equal(connection.session, session);
   assert.equal(connection.running, true);
   const marker = `tty_${randomUUID().replaceAll("-", "")}`;
-  await page.evaluate(async ({ session, marker }) => {
-    await window.crewvane.writeTerminal(session, `printf '\\n%s\\n' '${marker}'\r`);
-  }, { session, marker });
-  // Require the result as a line, not just the echoed command.
-  await page.waitForFunction(async (marker) => {
-    const snapshot = await window.crewvane.terminalSnapshot();
-    return snapshot?.data.includes(`\r\n${marker}\r\n`);
-  }, marker, { timeout: 30_000 });
+  const resultFile = join(workspace, "terminal-result.txt");
+  await page.evaluate(async ({ session, marker, resultFile }) => {
+    const quote = text => `'${text.replaceAll("'", "'\\''")}'`;
+    await window.crewvane.writeTerminal(session,
+      `/usr/bin/printf '%s' ${quote(marker)} > ${quote(resultFile)} && /bin/cat ${quote(resultFile)}\r`);
+  }, { session, marker, resultFile });
+  // TUI redraws can split or omit unchanged bytes in the PTY stream. Require an
+  // actual shell-side effect rather than mistaking echoed input for execution.
+  await expect.poll(() => readFile(resultFile, "utf8").catch(() => ""), { timeout: 30_000 }).toBe(marker);
   await page.locator(".xterm-accessibility").filter({ hasText: marker }).waitFor({ state: "attached" });
   const firstPid = await app.evaluate(({ app }) => app.getAppMetrics().filter(item => item.name === "Crewvane Herdr terminal").map(item => item.pid));
   assert.equal(firstPid.length, 1);

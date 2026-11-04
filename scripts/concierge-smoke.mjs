@@ -1,4 +1,4 @@
-import { _electron as electron } from "@playwright/test";
+import { _electron as electron, expect } from "@playwright/test";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { tmpdir } from "node:os";
@@ -29,7 +29,7 @@ const launch = async () => {
   app = await electron.launch({ executablePath, args: [], env, timeout: 60_000 });
   page = await app.firstWindow();
   page.on("pageerror", (error) => errors.push(error.message));
-  await page.waitForFunction(async () => Boolean((await window.crewvane.environment()).workspace));
+  await expect.poll(async () => Boolean((await page.evaluate(() => window.crewvane.environment())).workspace)).toBe(true);
 };
 const state = async () => JSON.parse(await readFile(join(workspace, ".crewvane/state.json"), "utf8"));
 const captureAgents = async (label) => {
