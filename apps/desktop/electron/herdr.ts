@@ -6,6 +6,7 @@ import type {
   HerdrReference,
   LivePresence,
   AgentPreferences,
+  Goal,
 } from "../../../packages/core/src/types.js";
 const exec = promisify(execFile);
 export interface HerdrRunner {
@@ -281,12 +282,12 @@ export class HerdrClient {
     reference: HerdrReference | undefined,
     goalId: string,
     title: string,
-    resumeNote?: string,
+    goal?: Goal,
   ) {
     if (!reference?.agent && reference?.transport !== "pane")
       throw new Error("管家尚未准备好，请先在设置中准备管家");
     await this.prompt(reference,
-      `${conciergeRole}\n目标有更新 ${goalId}：${title}。${resumeNote ? `用户已结束等待，要求继续推进：${resumeNote}。优先联系原负责人恢复执行；确无可用原现场时才创建独立负责人。` : ""}请用 crewvane goal show ${goalId} --json 读取最新状态，并用 crewvane status --json 查看当前 Agent 默认偏好。待执行的目标交给独立负责人；退回修改转交原负责人；交付齐备则向人交接。若人已经验收或放弃，请通知负责人停止该目标的工作，不再派发。`,
+      `${conciergeRole}\n目标有更新 ${goalId}：${title}。${goal?.dispatch?.kind === "resume" ? `用户已结束等待，要求继续推进：${goal.dispatch.note ?? ""}。优先联系原负责人恢复执行；确无可用原现场时才创建独立负责人。` : ""}${goal ? `\n当前目标快照：\n${JSON.stringify({ title: goal.title, description: goal.description, next: goal.next, steps: goal.steps, stageId: goal.stageId, latestActivities: goal.activities.slice(-8) }, null, 2)}\n` : ""}请用 crewvane goal show ${goalId} --json 读取最新状态，并用 crewvane status --json 查看当前 Agent 默认偏好。若目标处于「待管家梳理」，根据 description 中的完整原文整理标题、背景、完成标准、归属项目、合适工序与下一步；原文有明确项目时关联实际项目，没有充分依据则保留个人事项，不猜测范围。整理后待执行的目标交给独立负责人；退回修改转交原负责人；交付齐备则向人交接。若人已经验收或放弃，请通知负责人停止该目标的工作，不再派发。`,
     );
   }
   async notifyFollowUp(reference: HerdrReference, goalId: string, note: string) {

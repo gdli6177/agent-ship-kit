@@ -253,6 +253,8 @@ h1 em { color: var(--accent); font-style: normal; }
 .form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 13px; }
 .form-grid label { display: grid; gap: 8px; }
 .form-progress { margin: -5px 0 0; color: var(--accent); font-size: 10px; line-height: 1.7; }
+.goal-intake { min-height: 152px; font-size: 14px; line-height: 1.9; resize: vertical; }
+.intake-hint { margin: -9px 0 0; color: var(--muted); font-size: 11px; line-height: 1.8; }
 .file-input { display: flex; gap: 8px; }
 .file-input input { flex: 1; }
 .modal-actions { display: flex; justify-content: flex-end; gap: 9px; margin-top: 8px; }
@@ -281,6 +283,12 @@ h1 em { color: var(--accent); font-style: normal; }
 .activity span { color: var(--muted); font-size: 9px; }
 .activity p { margin: 5px 0 0; color: var(--secondary); font-size: 11px; line-height: 1.7; }
 .goal-actions { padding-top: 22px; flex-wrap: wrap; }
+.goal-feedback { display: grid; gap: 8px; margin-top: 20px; padding: 16px; border: 1px solid var(--line); border-radius: 12px; background: color-mix(in srgb, var(--surface-raised) 50%, transparent); }
+.goal-feedback label { color: var(--secondary); font-size: 12px; font-weight: 600; }
+.goal-feedback textarea { min-height: 80px; background: var(--bg); }
+.goal-feedback > div { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+.goal-feedback > div > span { color: var(--muted); font-size: 10px; line-height: 1.6; }
+.goal-feedback button { flex-shrink: 0; }
 .decision-input { display: grid; gap: 8px; margin-top: 22px; color: var(--secondary); font-size: 11px; }
 .decision-input textarea { min-height: 76px; background: var(--bg); }
 .goal-actions .primary { margin-left: auto; }

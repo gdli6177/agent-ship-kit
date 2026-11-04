@@ -194,6 +194,57 @@ export class WorkspaceService {
           state.goals.push(item);
           return item;
         }
+        case "goal.intake": {
+          const request = text(command.text, "事情说明", 20_000);
+          const projectId = command.projectId && command.projectId !== "personal" ? command.projectId : "personal";
+          const project = state.projects.find(item => item.id === id(projectId));
+          if (!project) throw new Error("请选择有效项目");
+          const at = nowIso(), firstLine = request.split("\n")[0]!.trim();
+          const item: Goal = {
+            id: newId("goal"), projectId: project.id,
+            title: text(firstLine || "新目标", "目标", 160).slice(0, 80), description: request,
+            mode: "concierge", status: "active",
+            steps: [{ id: "intake", name: "待管家梳理", prompt: "读取用户原文，整理目标、完成标准、合适工序和下一步。没有充分依据时不要猜测项目或执行范围；需要用户决定时再询问。" }],
+            stageId: "intake", next: "管家正在理解原文并整理目标。", owner: "待分配负责人",
+            attention: null,
+            activities: [{ id: newId("act"), at, actor: "你", kind: "created", text: request }],
+            createdAt: at, updatedAt: at,
+          };
+          state.goals.push(item);
+          return item;
+        }
+        case "goal.takeover": {
+          const item = goal(command.goalId);
+          ongoing(item);
+          if (item.mode === "manual") return item;
+          item.mode = "manual";
+          item.status = "active";
+          item.owner = "你";
+          item.next = "由你继续处理；可补充进展、更新安排或提交成果。";
+          item.waitingFor = undefined;
+          item.remindAt = undefined;
+          if (item.attention?.source === "dispatch") item.attention = null;
+          delete item.dispatch;
+          delete item.watchdog;
+          delete item.live;
+          activity(item, "session", "你已接管这个目标，不再向管家发送后续更新。", "你");
+          return item;
+        }
+        case "goal.delegate": {
+          const item = goal(command.goalId);
+          ongoing(item);
+          item.mode = "concierge";
+          item.status = "active";
+          item.owner = "待分配负责人";
+          item.next = "管家正在接手目标并安排下一步。";
+          item.waitingFor = undefined;
+          item.remindAt = undefined;
+          item.attention = null;
+          item.dispatch = { id: newId("handoff"), kind: "feedback", status: "pending", at: nowIso() };
+          delete item.watchdog;
+          activity(item, "session", "已重新交给管家统筹。", "你");
+          return item;
+        }
         case "goal.update": {
           const item = goal(command.goalId);
           ongoing(item, true);
@@ -238,6 +289,8 @@ export class WorkspaceService {
           const item = goal(command.goalId);
           if (command.requestId && item.dispatch?.id !== command.requestId) return item;
           ongoing(item, true);
+          if (command.status === "pending" && item.mode !== "concierge")
+            throw new Error("这个目标已由你接管");
           if (!["pending", "sent", "failed"].includes(command.status)) throw new Error("无效的派送状态");
           const at = nowIso(), detail = command.detail ? text(command.detail, "派送说明", 2000) : undefined;
           item.mode = "concierge";
@@ -294,6 +347,11 @@ export class WorkspaceService {
               throw new Error("该工序不在目标中");
             item.stageId = command.stageId;
           }
+          if ((command.actor || "管家") === "你" && item.mode === "concierge")
+            item.dispatch = {
+              id: newId("handoff"), kind: "feedback", note: command.summary,
+              status: "pending", at: nowIso(),
+            };
           activity(item, "progress", command.summary, command.actor || "管家");
           return item;
         }

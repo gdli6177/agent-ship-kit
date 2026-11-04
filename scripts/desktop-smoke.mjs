@@ -8,6 +8,11 @@ const home = await mkdtemp(join(tmpdir(), "crewvane-desktop-v04-")),
   workspace = join(home, "workspace");
 await mkdir(workspace);
 await mkdir(join(home, "userData"), { recursive: true });
+await mkdir(join(home, ".local/bin"), { recursive: true });
+const service = new WorkspaceService(workspace);
+// UI regression tests never start the user's signed-in model or Herdr Session.
+// Real transport and arbitrary CLI behavior are covered by onboarding-smoke.
+await service.execute({ type: "agents.configure", preferences: { concierge: "/missing/crewvane-test-agent" } });
 const app = await electron.launch({
   executablePath: resolve(process.env.CREWVANE_APP_PATH ||
     "apps/desktop/release/Crewvane-darwin-arm64/Crewvane.app/Contents/MacOS/Crewvane"),
@@ -17,6 +22,8 @@ const app = await electron.launch({
     CREWVANE_TEST_USER_DATA: join(home, "userData"),
     CREWVANE_TEST_HOME: home,
     CREWVANE_TEST_WORKSPACE: workspace,
+    CREWVANE_TEST_ISOLATE_TOOLS: "1",
+    CREWVANE_TEST_SKIP_HERDR_SETUP: "1",
   },
   timeout: 60_000,
 });
@@ -51,18 +58,23 @@ try {
     .locator(".top-actions")
     .getByRole("button", { name: "新目标" })
     .click();
-  await page.getByLabel("要处理什么？").fill("桌面试用交付");
-  await page
-    .getByLabel("背景与完成标准")
-    .fill("验证目标创建、提交验收、退回与完成。");
-  await page.getByLabel("交给谁？").selectOption("manual");
-  await page.getByRole("button", { name: "记录目标" }).click();
-  await page.getByText("桌面试用交付", { exact: true }).first().waitFor();
+  await page.getByLabel("要交给管家的事情").fill("桌面试用交付");
+  assert.equal(await page.locator('[role="dialog"] input, [role="dialog"] select').count(), 0);
+  await page.getByRole("button", { name: "交给管家", exact: true }).click();
+  await page.getByRole("dialog", { name: "桌面试用交付", exact: true }).waitFor();
+  await page.getByLabel("补充意见", { exact: true }).fill("请保留现有验收记录，不要扩大范围。");
+  const nextBeforeFeedback = (await page.evaluate(() => window.crewvane.command({type:"snapshot"}))).goals[0].next;
+  await page.getByRole("button", { name: "发给管家", exact: true }).click();
+  await page.getByText("补充意见：请保留现有验收记录，不要扩大范围。", { exact: true }).waitFor();
+  assert.equal((await page.evaluate(() => window.crewvane.command({type:"snapshot"}))).goals[0].next, nextBeforeFeedback);
   let state = await page.evaluate(() =>
       window.crewvane.command({ type: "snapshot" }),
     ),
     goalId = state.goals[0].id;
-  const service = new WorkspaceService(workspace);
+  await page.getByRole("button", { name: "我来处理", exact: true }).click();
+  assert.equal((await page.evaluate(() => window.crewvane.command({type:"snapshot"}))).goals[0].mode, "manual");
+  await page.screenshot({ path: join(home, "intake-dark.png"), animations: "disabled" });
+  await page.getByRole("button", { name: "关闭", exact: true }).click();
   await service.execute({
     type: "goal.wait",
     goalId,
@@ -146,11 +158,10 @@ try {
   await page.screenshot({ path: join(home, "home-light.png") });
   // A personal item must be manageable without asking an Agent or using CLI.
   await page.locator(".top-actions").getByRole("button", { name: "新目标" }).click();
-  await page.getByLabel("要处理什么？").fill("个人事项界面闭环");
-  await page.getByLabel("交给谁？").selectOption("manual");
-  await page.getByRole("button", { name: "记录目标", exact: true }).click();
-  await page.getByRole("button", { name: "全部目标", exact: true }).click();
-  await page.getByText("个人事项界面闭环", { exact: true }).click();
+  await page.getByLabel("要交给管家的事情").fill("个人事项界面闭环");
+  await page.getByLabel("要交给管家的事情").press("Meta+Enter");
+  await page.getByRole("dialog", { name: "个人事项界面闭环", exact: true }).waitFor();
+  await page.getByRole("button", { name: "我来处理", exact: true }).click();
   await page.getByText("手动处理", { exact: true }).click();
   await page.getByLabel("补充进展", { exact: true }).fill("审批已经通过，继续处理");
   const previousNext = (await service.read()).goals.find(item => item.title === "个人事项界面闭环").next;
@@ -192,13 +203,11 @@ try {
   assert.equal(state.workflows.find(item => item.name === "内容发布").steps.length, 1);
   assert.equal(state.workflows[0].steps[0].name, "理解与对齐");
   await page.locator(".top-actions").getByRole("button", { name: "新目标" }).click();
-  await page.getByLabel("要处理什么？").fill("等待审批操作");
-  await page.getByLabel("交给谁？").selectOption("manual");
-  await page.getByRole("button", { name: "记录目标", exact: true }).click();
+  await page.getByLabel("要交给管家的事情").fill("等待审批操作");
+  await page.getByRole("button", { name: "交给管家", exact: true }).click();
   const waiting = (await service.read()).goals.find(item => item.title === "等待审批操作");
   await service.execute({ type: "goal.wait", goalId: waiting.id, reason: "等 YR 审批", owner: "YR", remindAt: "2030-01-01T00:00:00Z" });
-  await page.getByRole("button", { name: "全部目标", exact: true }).click();
-  await page.getByText("等待审批操作", { exact: true }).click();
+  await page.getByRole("dialog", { name: "等待审批操作", exact: true }).waitFor();
   await page.getByRole("heading", { name: "这件事，接下来怎么走？" }).waitFor();
   assert.equal(await page.getByLabel("当前安排").count(), 0);
   await page.getByRole("button", { name: "稍后提醒我", exact: true }).click();
@@ -239,6 +248,9 @@ try {
         "manual progress/wait/review/accept through UI",
         "local reminder round trip",
         "custom workflow add/remove/save",
+        "single natural-language goal intake",
+        "keyboard submission for goal intake",
+        "visible goal feedback preserves the next step",
         "waiting snooze and resume directly without the manual editor",
       ],
       errors,

@@ -95,7 +95,7 @@ async function dispatchGoal(target: WorkspaceService, goalId: string): Promise<v
         const messenger = client(status.executable, target.root);
         if (item.dispatch?.kind === "follow_up")
           await messenger.notifyFollowUp(reference, item.id, item.dispatch.note || "");
-        else await messenger.notifyGoal(reference, item.id, item.title, item.dispatch?.kind === "resume" ? item.dispatch.note : undefined);
+        else await messenger.notifyGoal(reference, item.id, item.title, item);
       });
     } finally {
       if (root === target.root && !window.isDestroyed()) window.webContents.send("crewvane:event", {
@@ -263,8 +263,8 @@ app.whenReady().then(async () => {
       for (const value of Object.values(command.preferences)) if (value?.trim()) parseAgentCommand(value, kinds);
     }
     const target = activeService(), result = await target.execute(command);
-    if ((command.type === "goal.create" && command.input.mode === "concierge") ||
-      command.type === "goal.followup" || (command.type === "goal.resume" && command.mode === "concierge") ||
+    if (command.type === "goal.intake" || (command.type === "goal.create" && command.input.mode === "concierge") ||
+      command.type === "goal.followup" || command.type === "goal.delegate" || (command.type === "goal.resume" && command.mode === "concierge") ||
       (command.type === "goal.progress" && command.actor === "你" && (result as import("../../../packages/core/src/index.js").Goal).mode === "concierge")) {
       const item = result as import("../../../packages/core/src/index.js").Goal;
       void dispatchGoal(target, item.id).catch((error) => {
@@ -276,7 +276,7 @@ app.whenReady().then(async () => {
       if (item.mode === "concierge" && current.concierge.status === "ready") {
         const status = await herdrStatus();
         if (status.executable) {
-          try { await client(status.executable, target.root).notifyGoal(current.concierge, item.id, item.title); }
+          try { await client(status.executable, target.root).notifyGoal(current.concierge, item.id, item.title, item); }
           catch (error) { window.webContents.send("crewvane:event", { type: "diagnostic", message: error instanceof Error ? error.message : String(error) }); }
         }
       }

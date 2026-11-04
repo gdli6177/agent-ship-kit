@@ -22,7 +22,7 @@ export interface Goal {
   steps: WorkflowStep[]; stageId?: string; next: string; owner: string;
   waitingFor?: string; remindAt?: string; attention: Attention | null;
   delivery?: Delivery; herdr?: HerdrReference; live?: LivePresence;
-  dispatch?: { id?: string; kind?: "resume" | "follow_up"; note?: string; status: "pending" | "sent" | "failed"; at: string; detail?: string };
+  dispatch?: { id?: string; kind?: "resume" | "follow_up" | "feedback"; note?: string; status: "pending" | "sent" | "failed"; at: string; detail?: string };
   watchdog?: WatchdogState;
   activities: Activity[]; createdAt: string; updatedAt: string;
 }
@@ -39,10 +39,13 @@ export type CrewvaneCommand =
   | { type: "project.remove"; projectId: string }
   | { type: "workflow.save"; workflow: Workflow }
   | { type: "goal.create"; input: { title: string; description?: string; projectId: string; workflowId?: string; mode: "concierge" | "manual"; next?: string; waitingFor?: string; remindAt?: string } }
+  | { type: "goal.intake"; text: string; projectId?: string }
   | { type: "goal.update"; goalId: string; patch: { title?: string; description?: string; next?: string; owner?: string; stageId?: string; waitingFor?: string; remindAt?: string | null; status?: "active" | "waiting" } }
   | { type: "goal.progress"; goalId: string; summary: string; next?: string; stageId?: string; actor?: string }
   | { type: "goal.dispatch"; goalId: string; status: "pending" | "sent" | "failed"; detail?: string; requestId?: string }
   | { type: "goal.resume"; goalId: string; note: string; mode: "concierge" | "manual" }
+  | { type: "goal.takeover"; goalId: string }
+  | { type: "goal.delegate"; goalId: string }
   | { type: "goal.followup"; goalId: string; note?: string }
   | { type: "goal.wait"; goalId: string; reason: string; owner?: string; remindAt?: string; actor?: string }
   | { type: "goal.decide"; goalId: string; question: string; next?: string; actor?: string }

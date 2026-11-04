@@ -286,29 +286,14 @@ function App() {
   }
   async function saveGoal(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    const data = new FormData(event.currentTarget),
-      mode = data.get("mode") as "concierge" | "manual";
+    const data = new FormData(event.currentTarget);
     const created = await execute({
-      type: "goal.create",
-      input: {
-        title: String(data.get("title")),
-        description: String(data.get("description")),
-        projectId: String(data.get("projectId")),
-        workflowId: String(data.get("workflowId")),
-        mode,
-        next: String(data.get("next")) || undefined,
-        waitingFor: String(data.get("waitingFor")) || undefined,
-        remindAt: data.get("remindAt")
-          ? new Date(String(data.get("remindAt"))).toISOString()
-          : undefined,
-      },
-    });
-    setModal("");
-    notify(
-      mode === "concierge"
-        ? "目标已记录，正在联系管家。"
-        : "已记录。你可以安心去做下一件事。",
-    );
+      type: "goal.intake", text: String(data.get("request")),
+      projectId: projectId || undefined,
+    }) as Goal;
+    setGoalId(created.id);
+    setModal("goal");
+    notify("目标已保存，正在联系管家。");
     return created;
   }
   return (
@@ -970,69 +955,15 @@ function App() {
             className="form"
             onSubmit={(event) => void saveGoal(event).catch(() => {})}
           >
-            <label>
-              要处理什么？
-              <input
-                name="title"
-                required
-                maxLength={160}
-                placeholder="例如：梳理移动端结账流程"
-                autoFocus
-              />
-            </label>
-            <label>
-              背景与完成标准
-              <textarea
-                name="description"
-                placeholder="你知道的背景、约束，或者怎样算完成…"
-              />
-            </label>
-            <div className="form-grid">
-              <label>
-                关联项目（可选）
-                <select
-                  name="projectId"
-                  defaultValue={projectId || state.projects[0]?.id}
-                >
-                  {state.projects.map((item) => (
-                    <option value={item.id} key={item.id}>
-                      {item.id === "personal" ? "不关联项目" : item.name}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <label>
-                工序
-                <select name="workflowId">
-                  {state.workflows.map((item) => (
-                    <option value={item.id} key={item.id}>
-                      {item.name}
-                    </option>
-                  ))}
-                </select>
-              </label>
-            </div>
-            <label>
-              交给谁？
-              <select name="mode" defaultValue="concierge">
-                <option value="concierge">交给管家统筹</option>
-                <option value="manual">仅记录，我自己处理</option>
-              </select>
-            </label>
-            <div className="form-grid">
-              <label>
-                等待对象（可选）
-                <input name="waitingFor" placeholder="例如：YR" />
-              </label>
-              <label>
-                跟进提醒（可选）
-                <input name="remindAt" type="datetime-local" />
-              </label>
-            </div>
-            <label>
-              下一步 / 等待什么（可选）
-              <input name="next" placeholder="例如：等审批后继续联调" />
-            </label>
+            <textarea className="goal-intake" name="request" required autoFocus maxLength={20000} rows={5}
+              aria-label="要交给管家的事情"
+              placeholder="直接说：要做什么、知道哪些背景、怎样算完成……"
+              onKeyDown={event => {
+                if (event.key === "Enter" && (event.metaKey || event.ctrlKey) && !event.nativeEvent.isComposing) {
+                  event.preventDefault(); event.currentTarget.form?.requestSubmit();
+                }
+              }} />
+            <p className="intake-hint">管家会整理目标、项目、工序和下一步。⌘ / Ctrl + Enter 提交。</p>
             {busy && (
               <p className="form-progress" role="status">
                 正在记录并联系管家，首次准备可能需要几十秒…
@@ -1048,7 +979,7 @@ function App() {
               </button>
               <button className="primary" disabled={busy}>
                 <Sparkles size={15} />
-                {busy ? "正在交给管家…" : "记录目标"}
+                {busy ? "正在交给管家…" : "交给管家"}
               </button>
             </div>
           </form>
@@ -1467,7 +1398,7 @@ function GoalModal({
   retry: () => Promise<void>;
 }) {
   const current = goal.steps.findIndex((step) => step.id === goal.stageId),
-    [note, setNote] = useState("");
+    [note, setNote] = useState(""), [feedback, setFeedback] = useState("");
   const ended = goal.status === "completed" || goal.status === "dropped";
   const kind = attentionKind(goal);
   const needsDecision = goal.status !== "waiting" && (kind === "decision" || kind === "follow_up");
@@ -1500,6 +1431,24 @@ function GoalModal({
       </div>
       {goal.status === "waiting" && <WaitingActions key={goal.id} goal={goal} busy={busy} act={act} />}
       <p className="goal-description">{goal.description}</p>
+      {!ended && goal.status === "active" && <form className="goal-feedback" onSubmit={async event => {
+        event.preventDefault();
+        if (await act({ type: "goal.progress", goalId: goal.id, summary: `补充意见：${feedback}`, actor: "你" },
+          goal.mode === "concierge" ? "补充意见已保存，正在通知管家；原来的下一步保留" : "补充意见已记录，原来的下一步保留")) setFeedback("");
+      }}>
+        <label htmlFor={`feedback-${goal.id}`}>补充意见</label>
+        <textarea id={`feedback-${goal.id}`} aria-label="补充意见" required maxLength={2000} value={feedback}
+          onChange={event => setFeedback(event.target.value)}
+          onKeyDown={event => {
+            if (event.key === "Enter" && (event.metaKey || event.ctrlKey) && !event.nativeEvent.isComposing) {
+              event.preventDefault(); event.currentTarget.form?.requestSubmit();
+            }
+          }}
+          placeholder="有新的要求、约束或想法，直接补充…" />
+        <div><span>追加到目标动态，不覆盖原来的下一步。</span>
+          <button className="secondary" disabled={busy || !feedback.trim()}>{goal.mode === "concierge" ? "发给管家" : "记录意见"}<ArrowRight size={14} /></button>
+        </div>
+      </form>}
       {goal.dispatch && <p className={`dispatch-note ${goal.dispatch.status}`} role="status">
         {goal.dispatch.status === "pending" ? (goal.dispatch.kind === "follow_up" ? "正在通知管家跟进，目标仍保持等待。" : "正在准备管家并发送更新，你可以先处理其他事情。") :
           goal.dispatch.status === "failed" ? goal.dispatch.detail :
@@ -1588,9 +1537,17 @@ function GoalModal({
         </label>
       )}
       <div className="modal-actions goal-actions">
-        {!ended && ((goal.mode === "manual" && goal.status !== "waiting") || goal.dispatch?.status === "failed") &&
+        {!ended && goal.mode === "concierge" && goal.status !== "waiting" && goal.status !== "review" &&
+          <button className="secondary" disabled={busy} onClick={() => void act({
+            type: "goal.takeover", goalId: goal.id,
+          }, "已由你接管，不会再向管家发送后续更新")}>我来处理</button>}
+        {!ended && goal.mode === "manual" && goal.status !== "waiting" &&
+          <button className="secondary" disabled={busy} onClick={() => void act({
+            type: "goal.delegate", goalId: goal.id,
+          }, "已重新交给管家，正在联系")}>交给管家</button>}
+        {!ended && goal.dispatch?.status === "failed" &&
           <button className="secondary" disabled={busy} onClick={() => void retry()}>
-            {goal.mode === "manual" ? "交给管家" : "重试联系管家"}
+            重试联系管家
           </button>}
         {(goal.herdr || goal.mode === "concierge") && (
           <button className="secondary" disabled={busy} onClick={openHerdr}>

@@ -35,7 +35,15 @@ test("new goals notify the same concierge without creating an owner or another s
   const reference = { session: "crewvane-test", agent: "concierge" };
   await client.notifyGoal(reference, "goal_one", "事项一");
   await client.notifyGoal(reference, "goal_two", "事项二");
-  assert.equal(mock.calls.length, 2);
+  await client.notifyGoal(reference, "goal_three", "事项三", {
+    id: "goal_three", projectId: "personal", title: "事项三",
+    description: "完整原文\n保留全部约束", mode: "concierge", status: "active",
+    steps: [{ id: "intake", name: "待管家梳理", prompt: "先整理，再分发" }], stageId: "intake",
+    next: "管家正在整理", owner: "待分配负责人", attention: null,
+    activities: [{ id: "activity", at: new Date().toISOString(), actor: "你", kind: "created", text: "完整原文\n保留全部约束" }],
+    createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
+  });
+  assert.equal(mock.calls.length, 3);
   assert.ok(mock.calls.every(args => args.slice(0, 3).join(" ") === "agent prompt concierge"));
   assert.match(mock.calls[0]![3]!, /goal_one/);
   assert.match(mock.calls[1]![3]!, /goal_two/);
@@ -45,6 +53,8 @@ test("new goals notify the same concierge without creating an owner or another s
     assert.match(args[3]!, /退回修改转交原负责人/);
     assert.match(args[3]!, /向人交接/);
   }
+  assert.match(mock.calls[2]![3]!, /完整原文\\n保留全部约束/);
+  assert.match(mock.calls[2]![3]!, /待管家梳理/);
 });
 
 test("watchdog keeps recovery with owners instead of asking the concierge to execute", async () => {

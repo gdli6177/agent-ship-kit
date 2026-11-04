@@ -107,9 +107,13 @@ try {
   assert.equal(started.pid, state.concierge.processId);
   await page.evaluate(() => window.crewvane.prepareConcierge());
   assert.equal((await readFile(log, "utf8")).split("\n").filter(line => line.includes('"kind":"start"')).length, 1);
-  const created = await page.evaluate(() => window.crewvane.command({ type:"goal.create", input:{
-    title:"自定义 CLI 收到真实目标",projectId:"personal",mode:"concierge",
-  }}));
+  await page.locator(".top-actions").getByRole("button", { name:"新目标" }).click();
+  await page.getByLabel("要交给管家的事情").fill("自定义 CLI 收到真实目标\n请保留这段完整背景，先梳理工序再安排负责人。");
+  await page.getByRole("button", { name:"交给管家", exact:true }).click();
+  const created = (await page.evaluate(() => window.crewvane.command({type:"snapshot"}))).goals
+    .find(goal => goal.title === "自定义 CLI 收到真实目标");
+  assert.equal(created.description, "自定义 CLI 收到真实目标\n请保留这段完整背景，先梳理工序再安排负责人。");
+  assert.equal(created.steps[0].name, "待管家梳理");
   await expect.poll(async () => {
     const state = await page.evaluate(() => window.crewvane.command({type:"snapshot"}));
     return state.goals.find(goal => goal.id === created.id)?.dispatch?.status;
@@ -121,6 +125,17 @@ try {
     .filter(entry => entry.kind === "input" && entry.text.includes("不亲自执行目标"));
   assert.ok(roleInputs.length >= 2, "initial identity and new goal must both carry the no-execution boundary into real stdin");
   assert.ok(messages.includes("待执行的目标交给独立负责人"));
+  assert.ok(messages.includes("请保留这段完整背景"), "the full one-box intake must reach the real CLI");
+  assert.ok(messages.includes("待管家梳理"), "the initial intake step must reach the real CLI");
+  await page.getByRole("dialog", { name:"自定义 CLI 收到真实目标", exact:true }).waitFor();
+  await page.getByLabel("补充意见", { exact:true }).fill("补充约束：不要改变交付范围");
+  await page.getByRole("button", { name:"发给管家", exact:true }).click();
+  await expect.poll(() => readFile(log,"utf8"), {timeout:10_000}).toContain("自定义 CLI 收到真实目标");
+  assert.ok((await readFile(log,"utf8")).includes("目标有更新"), "goal feedback must notify the real CLI");
+  const feedbackGoal = (await page.evaluate(() => window.crewvane.command({type:"snapshot"}))).goals.find(goal => goal.id === created.id);
+  assert.equal(feedbackGoal.next, "管家正在理解原文并整理目标。");
+  assert.ok(feedbackGoal.activities.some(activity => activity.text === "补充意见：补充约束：不要改变交付范围"));
+  await page.getByRole("button", { name:"关闭", exact:true }).click();
   const waiting = await page.evaluate(() => window.crewvane.command({ type:"goal.create", input:{
     title:"等待审批后继续",projectId:"personal",mode:"manual",
   }}));
@@ -204,6 +219,7 @@ try {
     "same directory feedback", "cancel preserves state", "invalid workspace preserves state and shows readable error", "workspace switching",
     "arbitrary CLI saves and starts", "native argv preserved", "reuse custom concierge",
     "real goal and delegation-only role delivered to CLI stdin", "raw Herdr opens independently", "restart reuses installed latest and running CLI",
+    "visible goal feedback reaches CLI without replacing the next step",
     "waiting resume reaches CLI", "follow-up preserves waiting and reminder", "snooze and manual takeover",
     "exited CLI rejects dispatch",
   ] }));
