@@ -127,6 +127,25 @@ try {
   await page.getByRole("button", { name: "发给管家", exact: true }).click();
   await page.getByText("补充意见：请保留现有验收记录，不要扩大范围。", { exact: true }).waitFor();
   assert.equal((await page.evaluate(() => window.crewvane.command({type:"snapshot"}))).goals[0].next, nextBeforeFeedback);
+  for (let index = 1; index <= 5; index += 1) {
+    await page.evaluate(({ id, index }) => window.crewvane.command({
+      type: "goal.progress",
+      goalId: id,
+      summary: index === 5
+        ? "负责人具体答复：旧接口仍可只读调用，但新界面应改用 /v2/items，并保留两轮兼容期。"
+        : `负责人过程记录 ${index}`,
+      actor: "负责人 alpha-owner",
+    }), { id: goalId, index });
+  }
+  await page.locator(".conversation-feed").getByText(
+    "负责人具体答复：旧接口仍可只读调用，但新界面应改用 /v2/items，并保留两轮兼容期。",
+    { exact: true },
+  ).waitFor();
+  assert.equal(
+    await page.locator(".conversation-feed").getByText("补充意见：请保留现有验收记录，不要扩大范围。", { exact: true }).count(),
+    1,
+    "older conversation history must remain visible after more than four activity records",
+  );
   state = await page.evaluate(() =>
       window.crewvane.command({ type: "snapshot" }),
     );
@@ -363,6 +382,7 @@ try {
         "image paste, drag, file selection, preview, removal, and metadata-only persistence",
         "keyboard submission for goal intake",
         "visible goal feedback preserves the next step",
+        "complete goal conversation and substantive owner answer remain visible",
         "external terminal feedback refreshes the app without replaying a handoff",
         "waiting snooze and resume directly without the manual editor",
         "permanent deletion for completed goals",

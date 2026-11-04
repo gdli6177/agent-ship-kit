@@ -312,7 +312,7 @@ h1 em { color: var(--accent); font-style: normal; }
 .stage-track .current { background: var(--accent-soft); color: var(--accent); }
 .stage-track .done { color: var(--mint); }
 .delivery { padding: 20px 0; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); }
-.delivery h3, .activity h3 { margin: 0; font-size: 13px; font-weight: 550; }
+.delivery h3, .conversation h3 { margin: 0; font-size: 13px; font-weight: 550; }
 .delivery > p { color: var(--secondary); font-size: 13px; line-height: 1.8; }
 .delivery code { font-size: 11px; color: var(--muted); }
 .text-link { display: flex; align-items: center; gap: 8px; padding: 0; margin-top: 10px; color: var(--accent); font-size: 11px; }
@@ -322,10 +322,18 @@ h1 em { color: var(--accent); font-style: normal; }
 .checks strong { font-weight: 500; }
 .checks code { overflow-wrap: anywhere; }
 .checks span { grid-column: 3; color: var(--muted); }
-.activity { margin-top: 24px; }
-.activity > div { margin-top: 14px; }
-.activity span { color: var(--muted); font-size: 9px; }
-.activity p { margin: 5px 0 0; color: var(--secondary); font-size: 12px; line-height: 1.7; }
+.conversation { margin-top: 24px; }
+.conversation .section-heading h3 { display: flex; align-items: center; gap: 7px; }
+.conversation .section-heading small { color: var(--muted); font-size: 9px; }
+.conversation-feed { display: grid; gap: 9px; max-height: 340px; margin-top: 12px; padding: 3px 5px 3px 1px; overflow-y: auto; overscroll-behavior: contain; }
+.conversation-entry { max-width: 88%; padding: 11px 13px; border: 1px solid var(--line); border-radius: 5px 13px 13px 13px; background: var(--surface-soft); }
+.conversation-entry.mine { justify-self: end; border-color: color-mix(in srgb, var(--accent) 34%, var(--line)); border-radius: 13px 5px 13px 13px; background: color-mix(in srgb, var(--accent-soft) 46%, var(--surface)); }
+.conversation-entry.system { max-width: 100%; border-style: dashed; border-radius: 8px; background: transparent; }
+.conversation-entry header { display: flex; align-items: center; gap: 7px; }
+.conversation-entry strong { color: var(--secondary); font-size: 10px; font-weight: 620; }
+.conversation-entry header span, .conversation-entry time { color: var(--muted); font-size: 8px; }
+.conversation-entry time { margin-left: auto; }
+.conversation-entry p { margin: 7px 0 0; color: var(--secondary); font-size: 12px; line-height: 1.75; white-space: pre-wrap; overflow-wrap: anywhere; }
 .goal-actions { position: sticky; z-index: 2; bottom: -28px; flex-wrap: wrap; margin: 12px -28px -28px; padding: 18px 28px 24px; background: linear-gradient(180deg, transparent, var(--surface) 24%, var(--surface) 100%); }
 .goal-feedback { display: grid; gap: 8px; margin-top: 20px; padding: 16px; border: 1px solid var(--line); border-radius: 12px; background: color-mix(in srgb, var(--surface-raised) 50%, transparent); }
 .goal-feedback label { color: var(--secondary); font-size: 12px; font-weight: 600; }

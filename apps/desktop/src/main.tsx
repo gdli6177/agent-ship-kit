@@ -14,6 +14,7 @@ import {
   Inbox,
   LayoutList,
   ListChecks,
+  MessageCircle,
   Moon,
   Plus,
   Settings2,
@@ -372,6 +373,52 @@ function GoalAttachmentTile({
         <Trash2 size={13} />
       </button>
     </div>
+  );
+}
+const activityKindLabel = {
+  created: "目标",
+  progress: "答复",
+  waiting: "等待",
+  decision: "决定",
+  delivery: "交付",
+  accepted: "验收",
+  rework: "返工",
+  dropped: "放弃",
+  resolved: "处理",
+  reminder: "提醒",
+  session: "会话",
+  watchdog: "巡检",
+  ship: "上线",
+} as const;
+function ActivityFeed({ goal }: { goal: Goal }) {
+  const feed = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const node = feed.current;
+    if (node) node.scrollTop = node.scrollHeight;
+  }, [goal.id, goal.activities.length, goal.activities.at(-1)?.id]);
+  return (
+    <section className="conversation" aria-label="对话与动态">
+      <div className="section-heading">
+        <h3><MessageCircle size={14} />对话与动态</h3>
+        <small>{goal.activities.length} 条，完整保留</small>
+      </div>
+      <div className="conversation-feed" ref={feed}>
+        {goal.activities.map(item => {
+          const mine = item.actor.startsWith("你"),
+            system = item.actor === "系统" || item.actor === "巡检";
+          return (
+            <article className={`conversation-entry ${mine ? "mine" : system ? "system" : ""}`} key={item.id}>
+              <header>
+                <strong>{item.actor}</strong>
+                <span>{activityKindLabel[item.kind]}</span>
+                <time>{time(item.at)}</time>
+              </header>
+              <p>{item.text}</p>
+            </article>
+          );
+        })}
+      </div>
+    </section>
   );
 }
 function App() {
@@ -1782,20 +1829,7 @@ function GoalModal({
           </div>
         </section>
       )}
-      <div className="activity">
-        <h3>最近动态</h3>
-        {goal.activities
-          .slice(-4)
-          .reverse()
-          .map((item) => (
-            <div key={item.id}>
-              <span>
-                {item.actor} · {time(item.at)}
-              </span>
-              <p>{item.text}</p>
-            </div>
-          ))}
-      </div>
+      <ActivityFeed goal={goal} />
       {!ended && (needsDecision || goal.status === "review") && (
         <label className="decision-input">
           {kind === "decision" && <p className="decision-question">{goal.attention?.summary}</p>}

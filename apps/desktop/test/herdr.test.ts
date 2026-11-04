@@ -175,6 +175,7 @@ test("starts one replacement only after a stale pane is rejected", async () => {
   assert.match(instructions!, /由负责人产出真实成果、实际运行检查/);
   assert.match(instructions!, /crewvane direct --new/);
   assert.match(instructions!, /不能在终端里处理完却不写回 App/);
+    assert.match(instructions!, /不得只写「已回答」/);
   assert.doesNotMatch(instructions!, /简单事项你可以自己完成/);
 });
 
