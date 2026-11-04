@@ -24,6 +24,16 @@ function version(text) {
   return /(?:^|\s)v?(\d+\.\d+\.\d+)(?:\s|$)/.exec(text.trim())?.[1];
 }
 
+function githubHeaders(env, accept) {
+  const token = env.GITHUB_TOKEN ?? env.GH_TOKEN;
+  return {
+    Accept: accept,
+    "User-Agent": "Crewvane",
+    "X-GitHub-Api-Version": "2022-11-28",
+    ...(token ? { Authorization: `Bearer ${token}` } : {}),
+  };
+}
+
 async function checkedVersion(path, cacheDir) {
   // Some Herdr builds update themselves when invoked. Probe a disposable copy
   // so the verified release asset kept in the package cache remains byte-for-
@@ -88,14 +98,12 @@ export async function prepareHerdr(env = process.env) {
 
   const target = `${process.platform === "darwin" ? "macos" : process.platform}-${process.arch === "arm64" ? "aarch64" : process.arch === "x64" ? "x86_64" : process.arch}`;
   const response = await requestHerdr(releaseApi, {
-    headers: {
-      Accept: "application/vnd.github+json",
-      "User-Agent": "Crewvane",
-      "X-GitHub-Api-Version": "2022-11-28",
-    },
+    headers: githubHeaders(env, "application/vnd.github+json"),
   }, 30_000, "读取 Herdr 最新版本");
   if (!response.ok)
-    throw new Error(`无法读取 Herdr 最新版本（HTTP ${response.status}）`);
+    throw new Error(
+      `无法读取 Herdr 最新版本（HTTP ${response.status}）。CI 中请提供只读 GITHUB_TOKEN，或设置 CREWVANE_HERDR_BINARY 使用已验证的本地 Herdr 离线打包。`,
+    );
   const data = await response.json();
   const expectedVersion = /^v?(\d+\.\d+\.\d+)$/.exec(data.tag_name ?? "")?.[1];
   const asset = Array.isArray(data.assets)
@@ -114,11 +122,7 @@ export async function prepareHerdr(env = process.env) {
   } catch { /* download or replace an invalid cache */ }
 
   const download = await requestHerdr(asset.url, {
-    headers: {
-      Accept: "application/octet-stream",
-      "User-Agent": "Crewvane",
-      "X-GitHub-Api-Version": "2022-11-28",
-    },
+    headers: githubHeaders(env, "application/octet-stream"),
   }, 180_000, "下载 Herdr");
   if (!download.ok)
     throw new Error(`无法下载 Herdr ${expectedVersion}（HTTP ${download.status}）`);

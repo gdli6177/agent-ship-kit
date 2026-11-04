@@ -33,3 +33,54 @@ test("version probing never mutates the supplied or cached Herdr binary", async 
     await rm(root, { recursive: true, force: true });
   }
 });
+
+test("authenticated release downloads keep digest and version verification", async () => {
+  const root = await mkdtemp(join(tmpdir(), "crewvane-prepare-herdr-auth-"));
+  const originalFetch = globalThis.fetch;
+  const target = process.platform === "darwin"
+    ? `macos-${process.arch === "arm64" ? "aarch64" : "x86_64"}`
+    : `${process.platform}-${process.arch === "x64" ? "x86_64" : process.arch}`;
+  const assetUrl = "https://api.github.test/assets/herdr";
+  const bytes = Buffer.from('#!/bin/sh\nprintf "herdr 1.2.3\\n"\n');
+  const calls: Array<{ url: string; authorization: string | null }> = [];
+  globalThis.fetch = async (input, init) => {
+    const url = String(input);
+    calls.push({
+      url,
+      authorization: new Headers(init?.headers).get("authorization"),
+    });
+    if (url === "https://api.github.com/repos/herdrdev/herdr/releases/latest")
+      return Response.json({
+        tag_name: "v1.2.3",
+        assets: [{
+          name: `herdr-${target}`,
+          url: assetUrl,
+          digest: `sha256:${digest(bytes)}`,
+        }],
+      });
+    if (url === assetUrl)
+      return new Response(bytes, { status: 200 });
+    throw new Error(`unexpected request: ${url}`);
+  };
+  try {
+    const cached = await prepareHerdr({
+      GITHUB_TOKEN: "test-token",
+      CREWVANE_HERDR_CACHE_DIR: join(root, "cache"),
+    });
+
+    assert.deepEqual(await readFile(cached), bytes);
+    assert.deepEqual(
+      calls.map(({ url, authorization }) => ({ url, authorization })),
+      [
+        {
+          url: "https://api.github.com/repos/herdrdev/herdr/releases/latest",
+          authorization: "Bearer test-token",
+        },
+        { url: assetUrl, authorization: "Bearer test-token" },
+      ],
+    );
+  } finally {
+    globalThis.fetch = originalFetch;
+    await rm(root, { recursive: true, force: true });
+  }
+});

@@ -31,7 +31,11 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm typecheck
       - run: pnpm test
-      - run: pnpm desktop:dist
+      - name: Build and sign desktop installers
+        run: pnpm desktop:dist
+        env:
+          # Avoid the shared, unauthenticated GitHub API quota on hosted runners.
+          GITHUB_TOKEN: ${{ github.token }}
       - run: pnpm test:desktop
       - run: pnpm test:installers
       - run: pnpm test:onboarding
