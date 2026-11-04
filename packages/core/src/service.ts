@@ -411,6 +411,11 @@ export class WorkspaceService {
             !/^[a-zA-Z0-9_-]{1,80}$/.test(reference.session)
           )
             throw new Error("无效的 Herdr Session");
+          if (reference.transport !== undefined && reference.transport !== "pane")
+            throw new Error("无效的现场通信方式");
+          if (reference.transport === "pane" &&
+            (!reference.paneId || !Number.isSafeInteger(reference.processId) || reference.processId! <= 0))
+            throw new Error("自定义 CLI 现场需要真实 Pane 与前台进程 ID");
           if (command.goalId) {
             const item = goal(command.goalId);
             item.herdr = structuredClone(reference);

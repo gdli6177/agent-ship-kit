@@ -6,6 +6,7 @@ contextBridge.exposeInMainWorld("crewvane", {
   environment: () => ipcRenderer.invoke("crewvane:environment"), herdrStatus: () => ipcRenderer.invoke("crewvane:herdr-status"),
   agentChoices: () => ipcRenderer.invoke("crewvane:agent-choices"),
   installHerdr: () => ipcRenderer.invoke("crewvane:install-herdr"), cliStatus: () => ipcRenderer.invoke("crewvane:cli-status"),
+  openTerminal: () => ipcRenderer.invoke("crewvane:open-terminal"),
   installCli: () => ipcRenderer.invoke("crewvane:install-cli"), prepareConcierge: () => ipcRenderer.invoke("crewvane:prepare-concierge"),
   dispatchGoal: (goalId: string) => ipcRenderer.invoke("crewvane:dispatch-goal", goalId),
   terminalSnapshot: () => ipcRenderer.invoke("crewvane:terminal-snapshot"),

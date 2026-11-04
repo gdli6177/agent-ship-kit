@@ -147,7 +147,7 @@ function App() {
     [query, setQuery] = useState(""),
     [filter, setFilter] = useState("all");
   const [modal, setModal] = useState<
-      "new" | "project" | "goal" | "edit" | "delivery" | ""
+      "new" | "project" | "goal" | "edit" | "delivery" | "workspace" | ""
     >(""),
     [goalId, setGoalId] = useState(""),
     [selectedWorkflowId, setSelectedWorkflowId] = useState("feature"),
@@ -155,6 +155,7 @@ function App() {
   const [error, setError] = useState(""),
     [toast, setToast] = useState(""),
     [busy, setBusy] = useState(false),
+    [pickingWorkspace, setPickingWorkspace] = useState(false),
     [herdr, setHerdr] = useState<any>(),
     [cli, setCli] = useState<any>();
   const [agentOptions, setAgentOptions] = useState<{ kind: string; installed: boolean }[]>([]);
@@ -199,6 +200,7 @@ function App() {
         void api.command({ type: "snapshot" }).then(setState).catch(showError);
       }
       if (event.type === "diagnostic") setError(event.message);
+      if (event.type === "herdr-status") setHerdr(event.status);
       if (event.type === "open-goal") openGoal(event.goalId);
       if (event.type === "terminal-available") {
         setTerminal(current => current?.session === event.session ? current : { session: event.session, title: event.title, visible: false });
@@ -207,6 +209,7 @@ function App() {
         setTerminal({ session: event.session, title: event.title, visible: true });
       }
     });
+    void api.herdrStatus().then(setHerdr).catch(showError);
     return unsubscribe;
   }, []);
   useEffect(() => {
@@ -217,18 +220,19 @@ function App() {
     }
   }, [page]);
   useEffect(() => {
-    if (!error) return;
+    if (!error || modal) return;
     const timer = window.setTimeout(() => setError(""), 8_000);
     return () => window.clearTimeout(timer);
-  }, [error]);
+  }, [error, modal]);
   function showError(reason: unknown) {
-    setError(String(reason).replace(/^Error: /, ""));
+    setError(String(reason).replace(/^Error: /, "")
+      .replace(/^Error invoking remote method '[^']+': (?:Error: )?/, ""));
   }
-  async function openScene(id?: string) {
+  async function openScene(id?: string, terminalOnly = false) {
     if (busy) return;
     setModal("");
     setBusy(true); setError("");
-    try { await api.openHerdr(id); }
+    try { if (terminalOnly) await api.openTerminal(); else await api.openHerdr(id); }
     catch (reason) { showError(reason); }
     finally { setBusy(false); }
   }
@@ -251,6 +255,9 @@ function App() {
     }
   }
   async function pickWorkspace() {
+    if (pickingWorkspace) return;
+    setPickingWorkspace(true);
+    setError("");
     try {
       const selected = await api.selectWorkspace();
       if (selected) {
@@ -258,11 +265,15 @@ function App() {
         setDraft(undefined);
         setGoalId("");
         setModal("");
+        setPage("home");
         setWorkspace(selected);
         setState(await api.command({ type: "snapshot" }));
+        notify(selected === workspace ? "你已在这个工作区。" : `已打开工作区：${selected.split("/").filter(Boolean).at(-1)}`);
       }
     } catch (reason) {
       showError(reason);
+    } finally {
+      setPickingWorkspace(false);
     }
   }
   function openGoal(id: string) {
@@ -313,12 +324,13 @@ function App() {
         <button
           className="workspace-switch"
           aria-label="选择工作区"
-          onClick={() => void pickWorkspace()}
+          title={workspace ?? "设置存放所有项目和个人事项的工作区"}
+          onClick={() => setModal("workspace")}
         >
           <span className="pixel-dot" />
           <span>
             <strong>{state.name}</strong>
-            <small>所有项目与个人事项</small>
+            <small>{workspace ? `工作区 · ${workspace.split("/").filter(Boolean).at(-1)}` : "所有项目与个人事项"}</small>
           </span>
           <ChevronRight size={14} />
         </button>
@@ -451,6 +463,15 @@ function App() {
             </IconButton>
           </div>
         )}
+        {herdr && (herdr.phase === "checking" || herdr.phase === "downloading" || herdr.phase === "error") && (
+          <div className={`setup-status ${herdr.phase}`} role="status" aria-live="polite">
+            <SquareTerminal size={16} />
+            <span>{herdr.detail || "正在检查 Herdr…"}</span>
+            {herdr.phase === "error" && <button className="secondary" onClick={() => {
+              void api.installHerdr().catch(showError);
+            }}>重试准备 Herdr</button>}
+          </div>
+        )}
         <main>
           {!workspace ? (
             <section className="welcome">
@@ -468,9 +489,10 @@ function App() {
               </p>
               <button
                 className="primary large"
+                disabled={pickingWorkspace}
                 onClick={() => void pickWorkspace()}
               >
-                打开我的工作台
+                {pickingWorkspace ? "正在打开工作区…" : "打开我的工作台"}
                 <ArrowRight size={17} />
               </button>
             </section>
@@ -902,7 +924,10 @@ function App() {
                   setAgentOptions(await api.agentChoices());
                   setCli(await api.cliStatus());
                   setState(await api.command({ type: "snapshot" }));
-                  notify("已准备就绪");
+                  const ready = await api.herdrStatus();
+                  notify(action === "herdr" && ready.phase === "error"
+                    ? "本机版本可用，更新检查未完成，可稍后重试。"
+                    : action === "herdr" ? `Herdr ${ready.version ?? ""} 已就绪` : "已准备就绪");
                 } catch (reason) {
                   showError(reason);
                 } finally {
@@ -910,13 +935,26 @@ function App() {
                 }
               }}
               workspace={workspace ?? ""}
-              pickWorkspace={pickWorkspace}
-              openHerdr={() => void openScene()}
+              pickWorkspace={() => setModal("workspace")}
+              openHerdr={() => void openScene(undefined, true)}
             />
           )}
         </main>
       </div>
       {terminal && <Suspense fallback={null}><HerdrTerminal session={terminal.session} title={terminal.title} theme={theme} visible={terminal.visible && !modal} onClose={() => setTerminal(current => current ? { ...current, visible: false } : current)} /></Suspense>}
+      {modal === "workspace" && <Modal title="我的工作台" description="一个工作区，统筹所有项目和个人事项。这里存放目标与记录，不是某一个项目的代码目录。" error={error} onClose={() => setModal("")}>
+        <div className="workspace-location">
+          <Folder size={22} />
+          <div><strong>{workspace ? "当前工作区" : "先选择一个工作区文件夹"}</strong><p>{workspace || "建议创建一个专门的文件夹，例如 Documents/Crewvane。"}</p></div>
+        </div>
+        <p className="workspace-help">要处理某个代码项目，请在左侧「项目」旁点 + 添加。切换工作区后，将显示所选目录自己的目标和管家。</p>
+        <div className="form-actions">
+          <button className="secondary" onClick={() => setModal("")}>返回工作台</button>
+          <button className="primary" disabled={pickingWorkspace} onClick={() => void pickWorkspace()}>
+            {pickingWorkspace ? "正在打开工作区…" : workspace ? "选择其他工作区文件夹" : "选择工作区文件夹"}
+          </button>
+        </div>
+      </Modal>}
       {modal === "new" && (
         <Modal
           error={error}
@@ -1600,6 +1638,8 @@ function Settings({
           <span>
             <h3>Herdr 与全局管家</h3>
             <p>会话由 Herdr 托管，关闭 Crewvane 窗口也不会终止。</p>
+            <p>启动时自动检查最新版并准备，无需安装 Homebrew。</p>
+            {herdr?.executable && <code className="tool-location">{herdr.executable}</code>}
           </span>
         </div>
         <div>
@@ -1608,23 +1648,19 @@ function Settings({
               <i />
               已安装 {herdr.version}
             </span>
-          ) : (
-            <button
-              className="secondary"
-              disabled={busy}
-              onClick={() => void onAction("herdr")}
-            >
-              安装 Herdr
-            </button>
-          )}
+          ) : <span className="setting-progress">{herdr?.detail || "正在检测…"}</span>}
+          <button className="secondary" disabled={busy || herdr?.phase === "checking" || herdr?.phase === "downloading"}
+            onClick={() => void onAction("herdr")}>
+            {herdr?.phase === "downloading" ? "正在自动安装…" : herdr?.phase === "checking" ? "正在检查…" : herdr?.installed ? "检查更新" : "重试准备"}
+          </button>
           <button
             className="secondary"
-            disabled={busy || !herdr?.installed}
+            disabled={busy}
             onClick={() => void onAction("concierge")}
           >
             {busy ? "正在准备…" : "准备管家"}
           </button>
-          <button className="secondary" disabled={busy || !herdr?.installed} onClick={openHerdr}>
+          <button className="secondary" disabled={busy} onClick={openHerdr}>
             打开 Herdr
           </button>
         </div>
@@ -1726,7 +1762,7 @@ function AgentPreferencesEditor({ preferences, options, busy, onSave }: {
         </label>)}
       </div>
       <datalist id="installed-agent-commands">{installed.map(option => <option key={option.kind} value={option.kind} />)}</datalist>
-      <div className="agent-preference-footer"><small>只填写 CLI 和参数，例如 codex --model gpt-5。支持 Herdr 已识别的 CLI 与绝对路径；环境变量、shell 管道和变量展开请配置在 CLI 自身。</small><button className="secondary" disabled={busy}>保存偏好</button></div>
+      <div className="agent-preference-footer"><small>填写本机任意交互式 CLI 和参数，例如 codex --model gpt-5、npx --yes my-agent。支持绝对路径与 ~/ 路径；自定义 CLI 直接在终端启动，无需 Herdr 类型适配。环境变量和 shell 表达式请放入自己的启动脚本。</small><button className="secondary" disabled={busy}>保存偏好</button></div>
     </form>
   </section>;
 }

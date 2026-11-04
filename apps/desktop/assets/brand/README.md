@@ -14,4 +14,6 @@
 
 在 macOS 上运行 `node apps/desktop/scripts/build-icons.mjs`，从专用原稿生成 PNG 和含 16–1024px 尺寸的 ICNS。打包器使用 ICNS，开发与正式应用的 Dock 使用同源 PNG。
 
+菜单栏也使用 `crewvane-icon.png`，在运行时生成 18pt 和 Retina 36px 表示，保持彩色原图，不再使用独立的单色占位符 `crewvane-trayTemplate.png`。
+
 原稿编辑提示词要点：保留第一版像素魔法师身份与帽子、暗色脸、奶油色双眼；仅保留帽子和少量肩部，减少细节以适应 32–64px；深靛蓝圆角底板，透明外边距，无文字、星形、星环和长飘带。使用内置 ImageGen 编辑，随后仅做格式与尺寸导出。

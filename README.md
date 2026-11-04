@@ -11,7 +11,7 @@ Crewvane 是一个本地桌面注意力中心。你把项目目标和个人事�
 - 注意力只由明确决定、验收、到期跟进和 Herdr 介入产生，终端 `idle` / `done` 不代表完成。
 - 桌面与 `crewvane` CLI 共用同一份加锁、原子写入的本地记录。
 
-支持 macOS Apple Silicon。Herdr 可在应用设置中安装，Crewvane 会创建并管理按工作区隔离的命名 Session。关闭应用窗口不会终止 Agent 会话；Herdr 不可用时，记录、提醒、手工更新和验收仍可正常使用。
+支持 macOS Apple Silicon。启动时自动检测并准备最新 Herdr CLI，无需 Homebrew；Crewvane 创建并管理按工作区隔离的命名 Session。关闭应用窗口不会终止 Agent 会话；Herdr 暂时不可用时，记录、提醒、手工更新和验收仍可使用。
 
 [下载 macOS 安装包](https://github.com/gdli6177/crewvane/releases) · [使用说明](docs/crewvane.md) · [安装与发布](docs/releases.md) · [开发基线](docs/product/attention-center-development.md) · [架构](docs/ARCHITECTURE.md)
 

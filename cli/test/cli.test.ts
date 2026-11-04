@@ -38,6 +38,17 @@ test("CLI rejects incomplete or fabricated review records", async () => {
   const result = await call(root, ["goal", "review", created.json.id, "--summary", "声称完成"]);
   assert.equal(result.code, 1); assert.match(result.stderr, /至少提供一个/);
 });
+test("CLI records a custom terminal transport and rejects missing process identity", async () => {
+  const root = await fixture("crewvane-cli-custom-");
+  const created = await call(root, ["goal", "create", "--title", "自定义 CLI", "--project", "personal"]);
+  const missing = await call(root, ["session", "set", created.json.id, "--pane", "w1:p1", "--transport", "pane"]);
+  assert.equal(missing.code, 1); assert.match(missing.stderr, /前台进程 ID/);
+  const valid = await call(root, ["session", "set", created.json.id, "--pane", "w1:p1", "--transport", "pane", "--process-id", "123"]);
+  assert.equal(valid.code, 0);
+  assert.equal((await new WorkspaceService(root).read()).goals[0]?.herdr?.processId, 123);
+  const invalid = await call(root, ["session", "set", created.json.id, "--pane", "w1:p1", "--transport", "shell", "--process-id", "123"]);
+  assert.equal(invalid.code, 1);
+});
 test("spawned CLI updates an item and rejects a late update after cancellation", async () => {
   const root = await fixture("crewvane-cli-process-");
   const cli = (...args: string[]) => promisify(execFile)("pnpm", ["--dir", "cli", "exec", "tsx", "src/main.ts",

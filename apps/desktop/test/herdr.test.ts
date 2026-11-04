@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { HerdrClient, type HerdrRunner } from "../electron/herdr.ts";
+import { HerdrClient, terminalPrompt, type HerdrRunner } from "../electron/herdr.ts";
 
 function fake(responses: Record<string, string>) {
   const calls: string[][] = [];
@@ -73,4 +73,38 @@ test("starts one replacement only after a stale pane is rejected", async () => {
   assert.ok(start?.includes("sandbox_workspace_write.network_access=true"));
   assert.ok(start?.includes("workspace-write"));
   assert.ok(!start?.includes("danger-full-access"));
+});
+
+test("custom commands start in the real pane, preserve argv and reuse the recorded foreground process", async () => {
+  const mock = fake({
+    "agent list": '{"result":{"agents":[]}}',
+    "workspace create": '{"result":{"workspace":{"workspace_id":"w8"},"tab":{"tab_id":"w8:t1"},"root_pane":{"pane_id":"w8:p1"}}}',
+    "pane run": "{}", "pane wait-output": "{}", "tab focus": "{}",
+    "pane process-info": '{"result":{"process_info":{"shell_pid":12,"foreground_processes":[{"pid":42,"name":"custom-cli"}]}}}',
+  });
+  const client = new HerdrClient(mock.runner, "custom-session");
+  const reference = await client.prepareConcierge("/workspace", undefined, "", "/cli", "/bin", "/agents",
+    [], undefined, { concierge: 'custom-cli --model "custom model"' }, ["--model", "custom model"], "/agents/custom-cli");
+  assert.equal(reference.transport, "pane"); assert.equal(reference.processId, 42);
+  assert.ok(mock.calls.some(args => args[0] === "pane" && args[3] === "'/agents/custom-cli' '--model' 'custom model'"));
+  assert.ok(!mock.calls.some(args => args[0] === "agent" && args[1] === "start"));
+  assert.equal((await client.prepareConcierge("/workspace", reference)).processId, 42);
+  await client.notifyGoal(reference, "g1", "目标");
+  assert.equal(mock.calls.filter(args => args[0] === "workspace" && args[1] === "create").length, 1);
+  assert.ok(mock.calls.some(args => args[0] === "pane" && args[1] === "run" && args[3]?.includes("g1")));
+});
+
+test("custom command exit or a replaced foreground process never receives task text", async () => {
+  for (const foreground_processes of [[], [{ pid: 99 }]]) {
+    const mock = fake({ "pane process-info": JSON.stringify({ result: { process_info: { shell_pid: 12, foreground_processes } } }) });
+    const client = new HerdrClient(mock.runner);
+    await assert.rejects(client.notifyGoal({ session: "crewvane", paneId: "w1:p1", transport: "pane", processId: 42 }, "g1", "任务"), /已退出或现场已更换/);
+    assert.ok(!mock.calls.some(args => args[1] === "run"), "never send instructions to an idle shell or replacement program");
+  }
+});
+test("custom CLI prompt fits canonical terminal lines and preserves Unicode content", () => {
+  const text = "长提示词✨".repeat(400);
+  const wrapped = terminalPrompt(text);
+  assert.equal(wrapped.replaceAll("\n", ""), text);
+  assert.ok(wrapped.split("\n").every(line => Buffer.byteLength(line) <= 768));
 });

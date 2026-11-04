@@ -1,6 +1,6 @@
 {
   "name": "crewvane",
-  "version": "0.4.1",
+  "version": "0.4.2",
   "description": "Crewvane｜协航 — 一位管家，整理所有事。",
   "license": "MIT",
   "type": "module",
@@ -21,6 +21,7 @@
     "test:installers": "node scripts/installer-smoke.mjs",
     "test:desktop": "tsx scripts/desktop-smoke.mjs",
     "test:terminal": "node scripts/herdr-terminal-smoke.mjs",
+    "test:onboarding": "tsx scripts/onboarding-smoke.mjs",
     "desktop": "pnpm --dir apps/desktop dev",
     "build": "pnpm --dir apps/desktop build",
     "package:mac": "pnpm --dir apps/desktop package"

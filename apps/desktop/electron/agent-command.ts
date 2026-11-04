@@ -16,9 +16,8 @@ export function parseAgentCommand(command: string, kinds: string[]) {
   if (!executable || executable.startsWith("-")) throw new Error("启动命令缺少 CLI 可执行文件");
   if (/^[A-Za-z_][A-Za-z0-9_]*=/.test(executable) || executable === "env")
     throw new Error("启动命令不能设置环境变量；请把 CLI 需要的环境配置写入该 CLI 自身的配置文件");
-  const kind = basename(executable);
-  if (!kinds.includes(kind))
-    throw new Error(`Herdr 暂不支持 ${kind}。请填写受支持的 CLI 命令：${kinds.join("、") || "请先安装 Herdr"}；参数直接写在命令后。`);
+  const name = basename(executable);
+  const kind = kinds.includes(name) ? name : undefined;
   return { executable, kind, args };
 }
 

@@ -11,7 +11,12 @@ test("parses CLI commands, quoted arguments and absolute paths without a shell",
   for (const command of ["codex | tee log", "codex; echo hi", "codex $(pwd)", "codex\nls", 'codex --model "oops'])
     assert.throws(() => parseAgentCommand(command, ["codex"]));
   assert.throws(() => parseAgentCommand("FOO=bar codex", ["codex"]), /环境变量/);
-  assert.throws(() => parseAgentCommand("unknown-agent --model x", ["codex"]), /暂不支持/);
+  assert.deepEqual(parseAgentCommand("unknown-agent --model x", ["codex"]), {
+    executable: "unknown-agent", kind: undefined, args: ["--model", "x"],
+  });
+  assert.deepEqual(parseAgentCommand('npx --yes custom-agent --model local', ["codex"]), {
+    executable: "npx", kind: undefined, args: ["--yes", "custom-agent", "--model", "local"],
+  });
 });
 
 test("preserves native model and explicit policy arguments", () => {

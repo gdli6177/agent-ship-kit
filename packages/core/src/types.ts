@@ -6,7 +6,7 @@ export interface WorkflowStep { id: string; name: string; prompt: string }
 export interface Workflow { id: string; name: string; steps: WorkflowStep[] }
 export interface AgentPreferences { concierge: string; owner?: string; worker?: string }
 export interface Attention { kind: AttentionKind; summary: string; since: string; notifiedAt?: string; source?: "live" | "dispatch" | "watchdog" }
-export interface HerdrReference { session: string; workspaceId?: string; tabId?: string; paneId?: string; agent?: string }
+export interface HerdrReference { session: string; workspaceId?: string; tabId?: string; paneId?: string; agent?: string; transport?: "pane"; processId?: number }
 export interface LivePresence { state: LiveState; checkedAt: string; reachable?: boolean }
 export type WatchdogReason = "blocked" | "missing" | "stale";
 export interface WatchdogState {

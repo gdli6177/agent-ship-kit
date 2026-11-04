@@ -111,6 +111,19 @@ nav b { margin-left: auto; padding: 1px 7px; border-radius: 10px; background: va
 .icon-button:hover { color: var(--text); background: var(--surface-soft); }
 .error { display: flex; align-items: center; gap: 10px; margin: 18px 42px -4px; padding: 10px 12px; background: var(--warm-soft); border: 1px solid var(--warm); border-radius: 8px; color: var(--warm); font-size: 12px; }
 .error span { flex: 1; }
+.setup-status { display: flex; align-items: center; gap: 10px; margin: 16px 42px 0; padding: 10px 14px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); color: var(--secondary); font-size: 12px; line-height: 1.6; }
+.setup-status > svg { flex-shrink: 0; color: var(--accent); }
+.setup-status > span { flex: 1; overflow-wrap: anywhere; }
+.setup-status.error { color: var(--warm); border-color: var(--warm); }
+.workspace-location { display: flex; gap: 14px; align-items: flex-start; padding: 18px; background: var(--surface-soft); border: 1px solid var(--line); border-radius: 12px; }
+.workspace-location > svg { color: var(--accent); flex-shrink: 0; }
+.workspace-location strong { font-size: 13px; }
+.workspace-location p, .workspace-help { color: var(--secondary); font-size: 12px; line-height: 1.8; overflow-wrap: anywhere; }
+.workspace-location p { margin: 8px 0 0; }
+.workspace-help { margin: 18px 0; }
+.form-actions { display: flex; justify-content: flex-end; gap: 10px; }
+.setting .tool-location { display: block; max-width: 440px; overflow-wrap: anywhere; white-space: normal; color: var(--muted); font-size: 10px; margin-top: 8px; }
+.setting-progress { max-width: 250px; font-size: 12px; color: var(--secondary); }
 .content { width: min(100%, 1170px); margin: 0 auto; padding: 46px 50px 70px; }
 .intro { display: flex; align-items: center; justify-content: space-between; gap: 24px; min-height: 146px; }
 .eyebrow { color: var(--muted); font-size: 10px; font-weight: 450; letter-spacing: 1.7px; }
