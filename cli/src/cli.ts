@@ -11,22 +11,24 @@ import { join } from "node:path";
 import { runBoard } from "./board.js";
 const usage = `Crewvane — 把所有事整理成清晰的下一步
 
-用法：
+人的消息入口（只追加原话，不改变目标状态）：
   crewvane status [--json]
   crewvane attention [--json]
   crewvane board [--new] [--once]
   crewvane ask TEXT [--project ID] [--attachment PATH ...]
-  crewvane direct TEXT [--new] [--goal ID] [--next TEXT] [--project ID]
+  crewvane direct TEXT [--new] [--goal ID] [--project ID]
     [--attachment PATH ...]
-  crewvane event herdr [--json]
   crewvane goal list [--all] [--json]
   crewvane goal show ID [--json]
-  crewvane goal comment ID --text TEXT
+  crewvane goal message ID --text TEXT [--attachment PATH ...]
+
+Agent 状态协议（仅在明确事实发生后使用）：
+  crewvane event herdr [--json]
   crewvane goal create --title TEXT [--project ID] [--description TEXT]
-    [--workflow ID] [--mode concierge|manual]
+    [--mode concierge|manual]
   crewvane goal update ID [--title TEXT] [--description TEXT] [--next TEXT]
-    [--owner TEXT] [--stage ID] [--status active|waiting] [--remind-at ISO]
-  crewvane goal progress ID --summary TEXT [--next TEXT] [--stage ID] [--owner NAME]
+    [--owner TEXT] [--status active|waiting] [--remind-at ISO]
+  crewvane goal progress ID --summary TEXT [--next TEXT] [--owner NAME]
   crewvane goal wait ID --reason TEXT [--owner TEXT] [--remind-at ISO]
   crewvane goal decide ID --question TEXT [--next TEXT] [--key KEY]
   crewvane goal risk ID --category CATEGORY --summary TEXT [--key KEY]
@@ -40,9 +42,9 @@ const usage = `Crewvane — 把所有事整理成清晰的下一步
   crewvane goal remind ID --at ISO [--note TEXT]
   crewvane session set [ID] [--workspace ID] [--tab ID] [--pane ID] [--agent NAME]
     [--transport pane --process-id PID]（自定义 CLI）
-  crewvane workflow list [--json]
 
 使用 --root DIR 或 CREWVANE_WORKSPACE 指定工作区。所有读写与桌面共用状态。
+goal message 与 direct 不修改 status、next、等待对象或提醒；禁止用正文猜测批准、验收或完成。
 高风险动作类别：delete-data、stop-service、spend-money、external-message、
 product-direction、create-secret、rotate-secret、change-permissions、change-ship-policy。
 goal ship 只按项目策略给出放行或审批判断；外部动作仍由负责人执行并核实。
@@ -212,11 +214,7 @@ export async function run(argv: string[], io = { out: console.log, error: consol
         result = { name: state.name, agents: state.agents ?? { concierge: "codex" },
           project: state.projects.find(project => project.id === goal.projectId) };
         coordinatorRead = true;
-      } else if (group === "workflow" && action === "list") {
-        result = (await service.read()).workflows;
-        coordinatorRead = true;
-      }
-      else if (group === "goal" && action === "show") {
+      } else if (group === "goal" && action === "show") {
         const goalId = target ?? args.one("id");
         assertCoordinatorCase(coordinatorCase, goalId);
         result = (await service.read()).goals.find(goal => goal.id === goalId);
@@ -238,7 +236,6 @@ export async function run(argv: string[], io = { out: console.log, error: consol
     if (!coordinatorRead) {
       if (group === "status") result = await service.read();
       else if (group === "attention") result = attentionGoals((await service.read()).goals);
-      else if (group === "workflow" && action === "list") result = (await service.read()).workflows;
       else if (group === "ask") {
         const attachments = await importAttachmentFiles(service.root, args.all("attachment"));
         command = { type: "goal.intake", text: args.positional.slice(1).join(" "), projectId: args.one("project"), ...(attachments.length ? { attachments } : {}) };
@@ -246,6 +243,8 @@ export async function run(argv: string[], io = { out: console.log, error: consol
       else if (group === "direct") {
         const directText = args.positional.slice(1).join(" ").trim();
         if (!directText) throw new Error("需要一个要同步给管家的终端消息");
+        if (args.has("next"))
+          throw new Error("direct 只同步人的原话，不修改下一步；状态更新请使用明确命令");
         if (args.has("new") && args.one("goal"))
           throw new Error("--new 不能与 --goal 同时使用");
         if (args.has("current") && (args.has("new") || args.one("goal")))
@@ -258,7 +257,6 @@ export async function run(argv: string[], io = { out: console.log, error: consol
           text: directText,
           goalId: args.has("new") ? undefined
             : args.has("current") ? coordinatorCase : args.one("goal") ?? coordinatorCase,
-          next: args.one("next"),
           projectId: args.one("project"),
           ...(attachments.length ? { attachments } : {}),
         };
@@ -269,17 +267,28 @@ export async function run(argv: string[], io = { out: console.log, error: consol
       }
       else if (group === "goal" && action === "list") { const state = await service.read(); result = args.has("all") ? state.goals : state.goals.filter((goal) => !["completed", "dropped"].includes(goal.status)); }
       else if (group === "goal" && action === "show") { const goalId = target ?? args.one("id"); if (!goalId) throw new Error("需要目标 ID"); result = (await service.read()).goals.find((goal) => goal.id === goalId); if (!result) throw new Error("找不到目标"); }
-      else if (group === "goal" && action === "create") command = { type: "goal.create", input: { title: args.one("title")!, projectId: args.one("project") ?? "personal", description: args.one("description"), workflowId: args.one("workflow"), mode: (args.one("mode") ?? "concierge") as "concierge" | "manual", next: args.one("next"), waitingFor: args.one("owner"), remindAt: args.one("remind-at") } };
+      else if (group === "goal" && action === "create") {
+        if (args.has("workflow")) throw new Error("工序已移除；请在目标说明中直接写清工作要求");
+        command = { type: "goal.create", input: { title: args.one("title")!, projectId: args.one("project") ?? "personal", description: args.one("description"), mode: (args.one("mode") ?? "concierge") as "concierge" | "manual", next: args.one("next"), waitingFor: args.one("owner"), remindAt: args.one("remind-at") } };
+      }
       else if (group === "goal" && action === "update") command = { type: "goal.update", goalId: target!, patch: {
+        ...(args.has("stage") ? (() => { throw new Error("工序已移除；请直接更新目标下一步"); })() : {}),
         title: args.one("title"), description: args.one("description"), next: args.one("next"),
-        owner: args.one("owner"), stageId: args.one("stage"),
+        owner: args.one("owner"),
         status: args.one("status") as "active" | "waiting" | undefined,
         remindAt: args.one("remind-at"),
       } };
-      else if (group === "goal" && action === "progress") command = { type: "goal.progress", goalId: target!, summary: args.one("summary")!, next: args.one("next"), stageId: args.one("stage"), actor: args.one("actor") ?? args.one("owner") };
-      else if (group === "goal" && action === "comment") {
-        const comment = textArg(args.one("text") ?? args.one("summary"), "--text");
-        command = { type: "goal.progress", goalId: target!, summary: `补充意见：${comment}`, actor: "你" };
+      else if (group === "goal" && action === "progress") {
+        if (args.has("stage")) throw new Error("工序已移除；请直接写清当前实际结果和下一步");
+        command = { type: "goal.progress", goalId: target!, summary: args.one("summary")!, next: args.one("next"), actor: args.one("actor") ?? args.one("owner") };
+      }
+      else if (group === "goal" && action === "message") {
+        const message = textArg(args.one("text"), "--text");
+        const attachments = await importAttachmentFiles(service.root, args.all("attachment"));
+        command = {
+          type: "goal.message", goalId: target!, text: message,
+          ...(attachments.length ? { attachments } : {}),
+        };
       }
       else if (group === "goal" && action === "wait") command = { type: "goal.wait", goalId: target!, reason: args.one("reason")!, owner: args.one("owner"), remindAt: args.one("remind-at"), actor: args.one("actor") };
       else if (group === "goal" && action === "decide") command = { type: "goal.decide", goalId: target!, question: args.one("question")!, next: args.one("next"), actor: args.one("actor"), key: args.one("key") };

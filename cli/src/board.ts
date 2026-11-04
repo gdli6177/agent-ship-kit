@@ -223,7 +223,7 @@ export async function runBoard(
         });
       }
       else
-        await service.execute({ type: "goal.progress", goalId: goal.id, summary: text, actor: "你" });
+        await service.execute({ type: "goal.message", goalId: goal.id, text, actor: "你" });
       return decision ? "决定已写入账本，正在交给管家。" : "补充意见已保存，正在交给管家。";
     });
   };

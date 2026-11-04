@@ -1,4 +1,5 @@
 import { createRequire } from "node:module";
+import { execFile } from "node:child_process";
 import { packager } from "@electron/packager";
 import {
   cp,
@@ -8,9 +9,12 @@ import {
   writeFile,
 } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { promisify } from "node:util";
+import { prepareHerdr } from "./scripts/prepare-herdr.mjs";
 
+const exec = promisify(execFile);
 const here = dirname(fileURLToPath(import.meta.url)),
   electronVersion = createRequire(import.meta.url)("electron/package.json")
     .version,
@@ -18,6 +22,9 @@ const here = dirname(fileURLToPath(import.meta.url)),
     await readFile(join(here, "package.json"), "utf8"),
   ),
   signingIdentity = process.env.CREWVANE_MACOS_SIGN_IDENTITY,
+  electronZipDir = process.env.CREWVANE_ELECTRON_ZIP_DIR
+    ? resolve(process.env.CREWVANE_ELECTRON_ZIP_DIR)
+    : undefined,
   stage = await mkdtemp(join(tmpdir(), "crewvane-package-"));
 
 try {
@@ -43,6 +50,7 @@ try {
   await cp(join(here, "assets/brand/crewvane-icon.png"), join(stage, "dist/assets/crewvane-icon.png"));
   const cliNode = join(stage, "cli-node");
   await cp(process.execPath, cliNode);
+  const herdrBinary = await prepareHerdr();
   await writeFile(
     join(stage, "package.json"),
     JSON.stringify({
@@ -65,11 +73,12 @@ try {
     arch: "arm64",
     icon: join(here, "assets/brand/crewvane-icon.icns"),
     asar: { unpack: "{**/dist/cli/**,**/node_modules/node-pty/**}" },
-    extraResource: [cliNode, join(here, "herdr-plugin")],
+    extraResource: [cliNode, join(here, "herdr-plugin"), herdrBinary],
     ignore: [/^\/cli-node$/, /^\/dist\/.*\.map$/],
     overwrite: true,
     prune: true,
     appCategoryType: "public.app-category.developer-tools",
+    ...(electronZipDir ? { electronZipDir } : {}),
     // Electron patches its binaries while packaging. Re-sign every nested
     // executable and seal the app afterwards so Gatekeeper does not report the
     // downloaded app as damaged. An explicitly configured Developer ID enables

@@ -31,6 +31,12 @@ async function verifyDownloadedApp(appPath, label) {
     `${label}: shipped application must use the current Dock icon`,
   );
   await exec("codesign", ["--verify", "--deep", "--strict", "--verbose=2", appPath]);
+  const bundledHerdr = join(appPath, "Contents/Resources/herdr");
+  await access(bundledHerdr);
+  const { stdout: herdrVersion } = await exec(bundledHerdr, ["--version"]);
+  assert.match(herdrVersion, /^herdr \d+\.\d+\.\d+/,
+    `${label}: downloaded app must include a runnable Herdr binary`);
+  await exec("codesign", ["--verify", "--strict", "--verbose=2", bundledHerdr]);
   assert.match(
     await readFile(join(appPath, "Contents/Resources/herdr-plugin/herdr-plugin.toml"), "utf8"),
     /id = "dev\.crewvane"/,

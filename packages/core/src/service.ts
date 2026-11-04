@@ -4,7 +4,7 @@ import {
   removeAttachmentFiles,
   validateGoalAttachments,
 } from "./attachments.js";
-import type { CrewvaneCommand, Goal, GoalAttachment, WorkflowStep } from "./types.js";
+import type { CrewvaneCommand, Goal, GoalAttachment, WorkspaceState, WorkflowStep } from "./types.js";
 import {
   isHighRiskCategory,
   isShipPolicy,
@@ -261,15 +261,8 @@ export class WorkspaceService {
             (p) => p.id === id(input.projectId),
           );
           if (!project) throw new Error("请选择有效项目");
-          const workflow =
-            state.workflows.find((w) => w.id === input.workflowId) ??
-            state.workflows[0];
-          if (
-            input.workflowId &&
-            !state.workflows.some((w) => w.id === input.workflowId)
-          )
-            throw new Error("找不到所选工序");
-          if (!workflow) throw new Error("请先创建工序");
+          if (input.workflowId)
+            throw new Error("工序已移除；请在目标说明中直接写清工作要求");
           const at = nowIso();
           const item: Goal = {
             id: newId("goal"),
@@ -281,8 +274,7 @@ export class WorkspaceService {
             ),
             mode: input.mode,
             status: input.mode === "manual" ? "waiting" : "active",
-            steps: steps(workflow.steps),
-            stageId: workflow.steps[0]?.id,
+            steps: [],
             next:
               input.next?.trim() ||
               (input.mode === "concierge"
@@ -329,8 +321,7 @@ export class WorkspaceService {
             id: newId("goal"), projectId: project.id,
             title: text(firstLine || "新目标", "目标", 160).slice(0, 80), description: request,
             mode: "concierge", status: "active",
-            steps: [{ id: "intake", name: "待管家梳理", prompt: "读取用户原文，整理目标、完成标准、合适工序和下一步。没有充分依据时不要猜测项目或执行范围；需要用户决定时再询问。" }],
-            stageId: "intake", next: "管家正在理解原文并整理目标。", owner: "待分配负责人",
+            steps: [], next: "管家正在理解原文并整理目标。", owner: "待分配负责人",
             attention: null,
             dispatch: { id: newId("handoff"), kind: "feedback", status: "pending", at },
             ...(goalAttachments.length ? { attachments: goalAttachments } : {}),
@@ -347,13 +338,23 @@ export class WorkspaceService {
             const item = goal(command.goalId);
             if (["completed", "dropped"].includes(item.status))
               throw new Error("目标已结束，不能再追加终端消息");
-            if (command.next) item.next = text(command.next, "下一步", 2000);
             const combined = await validateGoalAttachments(this.root, [
               ...(item.attachments ?? []),
               ...incomingAttachments,
             ]);
             if (combined.length) item.attachments = combined;
-            activity(item, "progress", attachmentActivity(request, incomingAttachments), "你 · Herdr 直聊");
+            const at = nowIso();
+            item.activities.push({
+              id: newId("act"),
+              at,
+              actor: "你 · Herdr 直聊",
+              kind: "message",
+              text: attachmentActivity(request, incomingAttachments),
+              ...(incomingAttachments.length
+                ? { attachmentIds: incomingAttachments.map(attachment => attachment.id) }
+                : {}),
+            });
+            item.updatedAt = at;
             return item;
           }
 
@@ -365,8 +366,7 @@ export class WorkspaceService {
             id: newId("goal"), projectId: project.id,
             title: text(firstLine || "新目标", "目标", 160).slice(0, 80), description: request,
             mode: "concierge", status: "active",
-            steps: [{ id: "intake", name: "待管家梳理", prompt: "读取用户原文，整理目标、完成标准、合适工序和下一步。没有充分依据时不要猜测项目或执行范围；需要用户决定时再询问。" }],
-            stageId: "intake", next: "管家正在理解 Herdr 终端中的原文并整理目标。", owner: "待分配负责人",
+            steps: [], next: "管家正在理解 Herdr 终端中的原文并整理目标。", owner: "待分配负责人",
             attention: null,
             // The concierge already received this message in its terminal turn.
             // Mark it as delivered so desktop dispatch does not replay the same text.
@@ -376,6 +376,41 @@ export class WorkspaceService {
             createdAt: at, updatedAt: at,
           };
           state.goals.push(item);
+          return item;
+        }
+        case "goal.message": {
+          const item = goal(command.goalId);
+          if (["completed", "dropped"].includes(item.status))
+            throw new Error("目标已结束，不能再发送消息");
+          const message = text(command.text, "消息", 12_000);
+          const incomingAttachments = await validateGoalAttachments(this.root, command.attachments);
+          const combined = await validateGoalAttachments(this.root, [
+            ...(item.attachments ?? []),
+            ...incomingAttachments,
+          ]);
+          if (combined.length) item.attachments = combined;
+          if (item.attention?.source === "dispatch") item.attention = null;
+          if (item.mode === "concierge")
+            item.dispatch = {
+              id: newId("handoff"),
+              kind: "feedback",
+              note: message,
+              status: "pending",
+              at: nowIso(),
+            };
+          const at = nowIso(),
+            actor = command.actor?.trim() ? text(command.actor, "操作者", 120) : "你";
+          item.activities.push({
+            id: newId("act"),
+            at,
+            actor,
+            kind: "message",
+            text: message,
+            ...(incomingAttachments.length
+              ? { attachmentIds: incomingAttachments.map(attachment => attachment.id) }
+              : {}),
+          });
+          item.updatedAt = at;
           return item;
         }
         case "goal.takeover": {
@@ -426,9 +461,7 @@ export class WorkspaceService {
                 field === "description" ? 20_000 : 500,
               );
           if (command.patch.stageId !== undefined) {
-            if (!item.steps.some((s) => s.id === command.patch.stageId))
-              throw new Error("该工序不在目标中");
-            item.stageId = command.patch.stageId;
+            throw new Error("工序已移除；请直接更新目标下一步");
           }
           if (command.patch.waitingFor !== undefined)
             item.waitingFor = text(command.patch.waitingFor, "等待对象", 120);
@@ -462,6 +495,8 @@ export class WorkspaceService {
           item.dispatch = { ...item.dispatch,
             id: command.status === "pending" && !command.requestId ? newId("handoff") : item.dispatch?.id,
             status: command.status, at, detail };
+          if (command.status !== "failed" && item.attention?.source === "dispatch")
+            item.attention = null;
           if (command.status === "failed" && !item.attention) item.attention = {
             kind: "intervention", source: "dispatch", summary: detail || "目标尚未送达管家，请重试。", since: at,
           };
@@ -512,9 +547,7 @@ export class WorkspaceService {
           if (item.attention?.kind === "follow_up") item.attention = null;
           if (command.next) item.next = text(command.next, "下一步", 2000);
           if (command.stageId) {
-            if (!item.steps.some((s) => s.id === command.stageId))
-              throw new Error("该工序不在目标中");
-            item.stageId = command.stageId;
+            throw new Error("工序已移除；请直接写清当前实际结果和下一步");
           }
           if (actor === "你" && item.mode === "concierge")
             item.dispatch = {
@@ -852,6 +885,7 @@ export class WorkspaceService {
             ...state.concierge,
             ...structuredClone(reference),
           };
+          delete state.concierge.live;
           return state.concierge;
         }
         case "session.release": {
@@ -867,14 +901,32 @@ export class WorkspaceService {
         case "concierge.status": {
           if (!["ready", "error", "not_ready"].includes(command.status))
             throw new Error("无效的管家状态");
-          state.concierge = {
-            session: "crewvane",
-            ...command.reference,
+          if (command.live &&
+            !["working", "idle", "done", "blocked", "unknown"].includes(command.live.state))
+            throw new Error("无效的 Herdr 状态");
+          const reference = command.reference;
+          const concierge: WorkspaceState["concierge"] = {
+            session: reference?.session ?? "crewvane",
+            ...(reference?.workspaceId === undefined ? {} : { workspaceId: reference.workspaceId }),
+            ...(reference?.tabId === undefined ? {} : { tabId: reference.tabId }),
+            ...(reference?.paneId === undefined ? {} : { paneId: reference.paneId }),
+            ...(reference?.agent === undefined ? {} : { agent: reference.agent }),
+            ...(reference?.transport === undefined ? {} : { transport: reference.transport }),
+            ...(reference?.processId === undefined ? {} : { processId: reference.processId }),
+            ...(reference?.launchPolicy === undefined ? {} : { launchPolicy: reference.launchPolicy }),
             status: command.status,
-            ...(command.detail
-              ? { detail: text(command.detail, "状态说明", 1000) }
-              : {}),
           };
+          if (command.detail)
+            concierge.detail = text(command.detail, "状态说明", 1000);
+          if (command.live)
+            concierge.live = {
+              state: command.live.state,
+              checkedAt: iso(command.live.checkedAt),
+              ...(command.live.reachable === undefined
+                ? {}
+                : { reachable: Boolean(command.live.reachable) }),
+            };
+          state.concierge = concierge;
           return state.concierge;
         }
         case "live.sync": {

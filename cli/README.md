@@ -2,6 +2,13 @@
 
 Crewvane 桌面应用在“设置”中安装自包含 CLI，管家和负责人通过它读取目标、写回进展并提交交付。CLI 与桌面使用同一个 `packages/core` 状态服务，不需要单独运行后台服务。
 
+命令分为两类：
+
+- **消息入口**：`ask`、`goal message`、`direct`。只追加人的原话和附件，不修改状态、下一步、等待对象或提醒。
+- **Agent 状态协议**：`progress`、`wait`、`review`、`decide`、`risk`、`ship` 等。仅在明确事实发生后由管家、负责人或受信任适配器调用。
+
+人通过“验收通过、批准、拒绝、继续推进”等桌面明确按钮触发状态变化。CLI 不解析自然语言来猜测批准、验收或完成。
+
 ```sh
 crewvane --help
 crewvane status --json
@@ -9,10 +16,10 @@ crewvane attention --json
 crewvane board
 crewvane ask "检查发布流程并补齐证据"
 crewvane ask "按截图修复布局" --attachment /path/to/screenshot.png
-crewvane workflow list --json
 crewvane goal list --json
 crewvane goal show <ID> --json
-crewvane goal comment <ID> --text "增加回滚验证"
+crewvane goal message <ID> --text "增加回滚验证"
+crewvane direct --current "补充背景，不改下一步"
 crewvane goal risk <ID> --category delete-data --summary "删除生产数据库"
 crewvane goal ship <ID> --operation deploy --checks passed
 HERDR_PLUGIN_EVENT_JSON='…' crewvane event herdr --json
@@ -28,7 +35,7 @@ CREWVANE_WORKSPACE=/path/to/workspace crewvane goal list --json
 
 `crewvane board` 是随应用的 Herdr 插件打开的注意力控制台。它显示决定、验收、到期跟进和介入，支持补充/决定、等待跟进、继续推进、人工接管、验收、退回、聚焦真实负责人现场，以及按 `g` 回到全局管家。`--once` 输出静态文本，适合诊断。桌面未运行时，`ask` 与补充意见仍会保存在同一个工作区，下一次启动桌面后自动派发。
 
-用户直接在 Herdr 管家终端里追加要求时，管家必须先用 `crewvane direct "<原话>"`（当前案卷）、`crewvane direct --goal ID "<原话>"`，或以 `crewvane direct --new "<原话>"` 创建新目标，把输入写到共享状态，再继续执行。新建成功后，管家的案卷 scope 会原子切到新目标，后续写回直接落在同一个 App 目标，不产生重复派发。Herdr 0.9.5 不向插件暴露用户提交的 prompt 文本，所以这条同步由管家通过 CLI 完成；没有执行这一步的普通终端聊天不会出现在桌面或注意力面板。
+用户直接在 Herdr 管家终端里追加要求时，管家必须先用 `crewvane direct "<原话>"`（当前案卷）、`crewvane direct --goal ID "<原话>"`，或以 `crewvane direct --new "<原话>"` 创建新目标，把输入写到共享状态，再继续协调。`direct` 只追加人的消息，不接受 `--next`，也不改变状态；确有状态变化时必须另用明确命令。新建成功后，管家的案卷 scope 会原子切到新目标，后续写回直接落在同一个 App 目标，不产生重复派发。Herdr 0.9.5 不向插件暴露用户提交的 prompt 文本，所以这条同步由管家通过 CLI 完成；没有执行这一步的普通终端聊天不会出现在桌面或注意力面板。
 
 图片使用可重复的 `--attachment PATH` 传入：
 
@@ -46,7 +53,7 @@ CLI 只接受 PNG、JPEG、WebP、GIF；单张最多 10 MB，每个目标最多 
 
 管家由 Crewvane 启动时带有 `CREWVANE_COORDINATOR=1` 和当前案卷 scope。此时 CLI 只允许：
 
-- `status`、`workflow list`；
+- `status`；
 - `goal show <当前ID>`；
 - 当前目标的 `goal update/progress/wait/decide/risk/ship`；
 - 当前目标的 `session set`。
@@ -57,8 +64,19 @@ CLI 只接受 PNG、JPEG、WebP、GIF；单张最多 10 MB，每个目标最多 
 
 ## 写回目标
 
+人的消息：
+
 ```sh
-crewvane goal progress <ID> --summary "已完成方案" --next "开始实现" --stage build
+crewvane goal message <ID> --text "预算已经批了，按方案 A 继续"
+crewvane direct --current "再参考这张图" --attachment ~/Desktop/detail.jpg
+```
+
+这两条命令只保存原话和附件，并通知管家读取；目标状态和下一步不变。
+
+Agent 在明确事实发生后使用结构化协议：
+
+```sh
+crewvane goal progress <ID> --summary "已完成方案" --next "开始实现"
 crewvane goal wait <ID> --reason "等待审批" --owner YR --remind-at 2026-11-05T10:00:00+08:00
 crewvane goal decide <ID> --question "是否保留旧接口？" --next "等待你的决定"
 crewvane goal risk <ID> --category external-message --summary "向全部客户发送公告"

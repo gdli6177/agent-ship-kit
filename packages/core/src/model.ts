@@ -1,5 +1,4 @@
 import type { AttentionKind, Goal, ProjectPolicy, WorkspaceState } from "./types.js";
-import { defaultWorkflows } from "./workflows.js";
 export const newId = (prefix: string) => `${prefix}_${globalThis.crypto.randomUUID().replaceAll("-", "").slice(0, 16)}`;
 export const defaultProjectPolicy = (): ProjectPolicy => ({
   shipPolicy: "external-approval",
@@ -11,7 +10,7 @@ export const initialState = (): WorkspaceState => ({
   version: 2,
   name: "我的工作台",
   projects: [{ id: "personal", name: "个人事项", policy: defaultProjectPolicy(), createdAt: new Date().toISOString() }],
-  workflows: defaultWorkflows(),
+  workflows: [],
   goals: [],
   decisions: [],
   concierge: { session: "crewvane", status: "not_ready" },

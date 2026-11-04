@@ -1,6 +1,7 @@
 import type { CrewvaneCommand, GoalAttachment } from "../../../packages/core/src/index.js";
 import type { HerdrStatus } from "../electron/herdr-install.js";
 import type { HerdrPluginStatus } from "../electron/herdr-plugin.js";
+import type { WebhookSaveInput, WebhookSettings } from "../electron/webhook-notifications.js";
 export interface DesktopApi {
   command(command: CrewvaneCommand): Promise<any>;
   importAttachments(inputs: { name: string; bytes: ArrayBuffer }[]): Promise<GoalAttachment[]>;
@@ -10,6 +11,9 @@ export interface DesktopApi {
   environment(): Promise<{ workspace?: string; version: string }>;
   herdrStatus(): Promise<HerdrStatus & { session: string; plugin: HerdrPluginStatus }>;
   agentChoices(): Promise<{ kind: string; installed: boolean }[]>;
+  webhookSettings(): Promise<WebhookSettings>;
+  saveWebhook(input: WebhookSaveInput): Promise<WebhookSettings>;
+  testWebhook(): Promise<WebhookSettings>;
   installHerdr(): Promise<unknown>; cliStatus(): Promise<{ installed: boolean; path: string; directory: string }>;
   installCli(): Promise<{ output: string }>; prepareConcierge(): Promise<unknown>;
   dispatchGoal(goalId: string): Promise<unknown>;

@@ -9,7 +9,7 @@ export { initialState, newId } from "./model.js";
 export function validateState(value: unknown): WorkspaceState {
   const state = value as WorkspaceState;
   if (!state || state.version !== 2 || !Array.isArray(state.goals) || !Array.isArray(state.projects) || !Array.isArray(state.workflows) || !state.concierge)
-    throw new Error("不支持的工作区状态版本。请打开一个新的 Crewvane 0.4 工作区。");
+    throw new Error("不支持的工作区状态版本。请打开一个新的 Crewvane 0.5 工作区。");
   state.decisions ??= [];
   for (const project of state.projects) project.policy ??= defaultProjectPolicy();
   return state;

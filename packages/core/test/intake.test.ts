@@ -8,7 +8,7 @@ import { WorkspaceService, type Goal } from "../src/index.js";
 const roots: string[] = [];
 afterEach(async () => { await Promise.all(roots.splice(0).map(root => rm(root, { recursive: true, force: true }))); });
 
-test("one natural-language request preserves the full request without asking for project or workflow", async () => {
+test("one natural-language request preserves the full request without a workflow", async () => {
   const root = await mkdtemp(join(tmpdir(), "crewvane-intake-")); roots.push(root);
   const service = new WorkspaceService(root);
   const request = "修复等待审批后无法继续的问题\nYR 已通过，验证真实通知管家和负责人。";
@@ -16,7 +16,7 @@ test("one natural-language request preserves the full request without asking for
   assert.equal(goal.title, "修复等待审批后无法继续的问题");
   assert.equal(goal.description, request);
   assert.equal(goal.projectId, "personal");
-  assert.equal(goal.steps[0]?.name, "待管家梳理");
+  assert.deepEqual(goal.steps, []);
   assert.equal(goal.activities[0]?.text, request);
   assert.equal(goal.mode, "concierge");
   assert.equal(goal.owner, "待分配负责人");
@@ -60,7 +60,7 @@ test("human feedback replaces an in-flight notification and can be handed back t
   const goal = await service.execute({ type: "goal.intake", text: "先理解目标" }) as Goal;
   await service.execute({ type: "goal.dispatch", goalId: goal.id, status: "pending", requestId: "initial" });
   const updated = await service.execute({
-    type: "goal.progress", goalId: goal.id, summary: "补充意见：保留现有范围", actor: "你",
+    type: "goal.message", goalId: goal.id, text: "保留现有范围",
   }) as Goal;
   assert.equal(updated.dispatch?.kind, "feedback");
   assert.notEqual(updated.dispatch?.id, "initial");

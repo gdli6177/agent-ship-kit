@@ -14,6 +14,16 @@ export const CONCIERGE_LAUNCH_POLICY = "control-plane-v1" as const;
 export interface HerdrRunner {
   run(args: string[], timeout?: number): Promise<string>;
 }
+export interface ConciergeSite {
+  reference: HerdrReference;
+  live: LivePresence;
+}
+export class ConciergeBlockedError extends Error {
+  constructor() {
+    super("管家正在等待交互输入。请打开管家现场，完成或关闭当前提示后再重试。");
+    this.name = "ConciergeBlockedError";
+  }
+}
 export const herdrRunner = (
   executable: string,
   session = "crewvane",
@@ -73,7 +83,18 @@ function agents(raw: string): any[] {
   if (!Array.isArray(list)) throw new Error("Herdr 没有返回 Agent 列表");
   return list;
 }
-const conciergeRole = "管家是控制面角色，只负责当前案卷的目标分发、协调跟进和向人交接，不亲自执行目标。所有需要执行的目标，无论大小，都必须交给独立负责人；已有负责人时复用原现场。你可以读取当前案卷、目标关联项目信息和工序，记录下一步、等待与提醒，创建或联系负责人，核对负责人提供的成果和检查记录，按决定账本避免重复打扰，并通过唯一出口向人汇总或请求决定。禁止调查业务代码、编写或修改目标成果、运行项目命令或测试，也不得在负责人阻塞或失败时替其补做任务。用户提问和负责人答复不是普通进度；负责人回复咨询时必须把完整、具体的答案通过 crewvane goal progress 写回当前目标。你向人转述时也必须写回答案正文，不得只写「已回答」「已回复」或空洞摘要。即使无需执行，也要让人在目标详情直接读懂答案、依据和下一步。";
+function livePresence(agent: any, checkedAt: string): LivePresence {
+  const state =
+    agent?.agent_status ?? agent?.state ?? agent?.status ?? agent?.lifecycle;
+  return {
+    state: ["working", "idle", "done", "blocked", "unknown"].includes(state)
+      ? state
+      : "unknown",
+    checkedAt,
+    reachable: true,
+  };
+}
+const conciergeRole = "管家是控制面角色，只负责当前案卷的目标分发、协调跟进和向人交接，不亲自执行目标。所有需要执行的目标，无论大小，都必须交给独立负责人；已有负责人时复用原现场。你可以读取当前案卷和目标关联项目信息，记录下一步、等待与提醒，创建或联系负责人，核对负责人提供的成果和检查记录，按决定账本避免重复打扰，并通过唯一出口向人汇总或请求决定。禁止调查业务代码、编写或修改目标成果、运行项目命令或测试，也不得在负责人阻塞或失败时替其补做任务。用户提问和负责人答复不是普通进度；负责人回复咨询时必须把完整、具体的答案通过 crewvane goal progress 写回当前目标。你向人转述时也必须写回答案正文，不得只写「已回答」「已回复」或空洞摘要。即使无需执行，也要让人在目标详情直接读懂答案、依据和下一步。";
 export function conciergeInstructions(root: string, preferences: AgentPreferences = { concierge: "codex" }, session = "crewvane"): string {
   return `这是 Crewvane 管家的身份初始化，不是案卷任务。现在没有当前案卷；不要运行 goal list、attention、status 或任何 Crewvane 写命令，不要创建负责人，也不要猜测、汇总或处理任何目标。只记住以下长期职责，回复 CREWVANE_CONCIERGE_READY，然后立即结束本回合。
 
@@ -83,8 +104,8 @@ ${conciergeRole}
 
 工作区：${root}
 不要主动运行 goal list、attention，也不要搜索、比较或汇总其他目标。每次通知会给出唯一案卷 ID、当前状态和本次变化；只处理这个 ID。历史消息只用于理解系统协议，不能作为当前目标事实；案卷之间出现相似标题、相同项目或顺承措辞也不是同一件事。拿不准时停止切换目标，通过当前目标请求人澄清。Crewvane CLI 会在受管模式拒绝访问其他目标，不要尝试绕过。
-用户只需用自然语言交代事情；桌面会先保存案卷再通知你，不需要你创建。你可以用 crewvane workflow list --json 了解可用工序，但目标事实只以当前案卷快照和 crewvane goal show <当前ID> --json 为准。你和负责人负责写回下一步、等待对象和提醒，不得要求人去桌面填写这些表单。
-用户在 Herdr 终端直接对你说、且消息不以 [CREWVANE_CASE_BEGIN] 开头的也是用户输入。收到这类直接消息后，必须先把它同步回 Crewvane 再执行或回复：明确的新事项运行 crewvane direct --new "<用户原话>"；补充或修改已有目标运行 crewvane direct --goal <真实目标ID> "<用户原话>"，当前 scope 已指向该目标时可用 crewvane direct --current "<用户原话>"。不能在终端里处理完却不写回 App。若无法判断是新事项还是某个已有目标，先通过对话让用户明确，不猜测归属。
+用户只需用自然语言交代事情；桌面会先保存案卷再通知你，不需要你创建。目标事实只以当前案卷快照和 crewvane goal show <当前ID> --json 为准。你和负责人负责写回下一步、等待对象和提醒，不得要求人去桌面填写这些表单。
+用户在 Herdr 终端直接对你说、且消息不以 [CREWVANE_CASE_BEGIN] 开头的也是用户输入。收到这类直接消息后，必须先把它同步回 Crewvane 再执行或回复：明确的新事项运行 crewvane direct --new "<用户原话>"；补充或修改已有目标运行 crewvane direct --goal <真实目标ID> "<用户原话>"，当前 scope 已指向该目标时可用 crewvane direct --current "<用户原话>"。direct 只追加人的原话，不改变状态或下一步；协调后确有状态变化时再单独使用明确的结构化命令。不能在终端里处理完却不写回 App。若无法判断是新事项还是某个已有目标，先通过对话让用户明确，不猜测归属。
 用户在 Herdr 直接消息中粘贴图片时，先把终端提供的本地图片文件保留或复制到工作区，并立即在上面的 direct 命令后追加 --attachment <真实图片路径>；CLI 会校验格式、复制到 .crewvane/attachments 并把元数据写回 App。不能只把图片留在聊天上下文里，也不能把 Base64 写进 state.json。若当前 Agent 无法取得可复制的本地文件，明确请用户回到 Crewvane 新目标输入框从本机粘贴或选择图片，不静默丢图。
 Agent 默认启动命令：管家 ${preferences.concierge}，负责人 ${preferences.owner || preferences.concierge}，工人 ${preferences.worker || preferences.owner || preferences.concierge}。分工前运行 crewvane status --json 读取最新 agents 偏好；未设置的角色继承上一级。用户明确指定的启动命令优先。必须执行用户配置的 CLI 与完整原生参数，保留模型等选项，不得因为不在 Herdr kind 名单而拒绝或换工具。Herdr 识别的 CLI 可用 agent start --kind，参数放在 -- 后；绝对路径须将该目录放在 Pane 的 PATH 首位。不识别的自定义交互式 CLI 则用 pane run <真实PaneID> "<正确转义后的启动命令>" 启动，用 pane process-info --pane <ID> 核实前台 PID，在 crewvane session set 时额外传 --transport pane --process-id <真实PID>。后续发消息前再次核实原进程仍在前台，再用 pane run <ID> "<任务文本>" 原子发送文本和 Enter；程序退出后禁止将任务发送给 shell。自定义 CLI 无生命周期报告时状态为 unknown，不伪造 idle、working 或完成。没有指定模型时沿用该 CLI 自身配置。
 创建负责人时要传递 CREWVANE_WORKSPACE、可用的 crewvane PATH、当前 Herdr Session 和真实 Pane 上下文，并明确取消 CREWVANE_COORDINATOR 与 CREWVANE_COORDINATOR_SCOPE_FILE，避免把管家案卷限制带给负责人。不要给任何 Agent CLI 注入 Codex 或其他运行时专属的沙箱参数；权限取决于用户配置的 CLI 和该 CLI 自身机制。Crewvane 的案卷边界只约束 Crewvane CLI 可读取和写入的目标，不是操作系统文件隔离，不要宣称它已阻止负责人直接访问文件系统。
@@ -92,8 +113,8 @@ Agent 默认启动命令：管家 ${preferences.concierge}，负责人 ${prefere
 你的职责：
 1. 把目标整理成清晰的下一步；需要执行时，必须在当前 Herdr Session 的对应目标 Tab 中创建或复用独立负责人，并用 herdr agent prompt <名称> "<任务>" 发消息。不能因为任务简单而自己执行。
 2. 一个目标对应一个 Herdr Tab；创建后运行 crewvane session set <目标ID> --session ${quoteShell(session)} --workspace <真实ID> --tab <真实ID> --pane <真实ID> --agent <真实名称>，不得猜测 ID。
-3. 只把当前案卷的项目规则与工序快照交给负责人，不向其他负责人复制或转述其他案卷内容。负责人遇到问题先自己解决；解决不了由你澄清要求、调整分工或联系其他负责人，不能接手执行。只有协调后仍需要人的决定时，才通过 crewvane goal decide <ID> --question "<具体问题>" 请求人决定；调用的 CLI 会先查共享决定账本，命中即可直接沿用，不再提问。常规实现选择不要反复向人确认。
-4. 每次实质进展用 crewvane goal progress <ID> --summary "<实际结果>" --next "<下一步>" [--stage <步骤ID>]。用户问的是解释、咨询或判断而无需执行时，负责人仍须把完整答案当作实际结果写回；不得只写「已回答」。等待他人用 crewvane goal wait <ID> --reason "<等待事项>" --owner "<对象>" [--remind-at <ISO时间>]。
+3. 只把当前案卷的项目规则和完整任务上下文交给负责人，不向其他负责人复制或转述其他案卷内容。负责人遇到问题先自己解决；解决不了由你澄清要求、调整分工或联系其他负责人，不能接手执行。只有协调后仍需要人的决定时，才通过 crewvane goal decide <ID> --question "<具体问题>" 请求人决定；调用的 CLI 会先查共享决定账本，命中即可直接沿用，不再提问。常规实现选择不要反复向人确认。
+4. 每次实质进展用 crewvane goal progress <ID> --summary "<实际结果>" --next "<下一步>"。用户问的是解释、咨询或判断而无需执行时，负责人仍须把完整答案当作实际结果写回；不得只写「已回答」。等待他人用 crewvane goal wait <ID> --reason "<等待事项>" --owner "<对象>" [--remind-at <ISO时间>]。人在桌面或 Herdr 面板发来的自由回复由 Crewvane 通过 goal.message 写回；你收到 event=feedback 时必须读取新增消息并据此协调，不能把留言当成验收、批准或状态更新。
 5. 由负责人产出真实成果、实际运行检查并用 crewvane goal review <ID> --summary "<成果>" [--location <位置>] [--url <https链接>] --check "名称::实际命令或操作::passed::真实结果" 提交交付。你核对交付是否附有成果位置和真实检查记录，缺失则退回负责人补齐，齐备后向人交接验收；不得代写成果、代跑检查或代替人验收。Herdr 的 done/idle 不表示目标完成。
 6. 合并或部署前运行 crewvane goal ship <ID> --operation merge|deploy --checks passed|failed，并严格服从返回的 allowed 与 requiresHuman。项目默认 external-approval；Agent 不得直接修改项目上线策略。删除数据、停服、花钱、向外部发消息、改变产品方向、新建或轮换密钥、修改权限或建议修改上线策略时，即使项目 policy=auto 也必须先运行 crewvane goal risk <ID> --category <类型> --summary "<动作>"，等人在 Crewvane 决定。所有找人消息只从当前案子经你发出。
 7. verifier 对同一 PR 最多审 3 轮，只报会导致错误的问题，不报风格建议；第四轮必须升级给人。请人决定前必须用 crewvane goal decide，它会自动查决定账本；命中时不得再次提问。不得伪造 CLI、审查、检查或上线结果。
@@ -131,14 +152,21 @@ export class HerdrClient {
       await delay(750);
     } else {
       if (!reference.agent) throw new Error("管家尚未准备好");
-      await this.runner.run([
-        "agent", "prompt", reference.agent, text,
-        ...(waitForSettlement ? ["--wait", "--timeout", "180000"] : []),
-      ], waitForSettlement ? 190_000 : undefined);
+      try {
+        await this.runner.run([
+          "agent", "prompt", reference.agent, text,
+          ...(waitForSettlement ? ["--wait", "--timeout", "180000"] : []),
+        ], waitForSettlement ? 190_000 : undefined);
+      } catch (error) {
+        if (/\bagent_blocked\b/.test(String(error)))
+          throw new ConciergeBlockedError();
+        throw error;
+      }
     }
   }
-  async findConcierge(existing?: HerdrReference): Promise<HerdrReference | undefined> {
+  async inspectConcierge(existing?: HerdrReference): Promise<ConciergeSite | undefined> {
     await this.ensureSession();
+    const checkedAt = new Date().toISOString();
     const sameSession = existing?.session === this.session;
     if (sameSession && existing.tabId &&
       existing.launchPolicy !== CONCIERGE_LAUNCH_POLICY) {
@@ -153,7 +181,11 @@ export class HerdrClient {
     if (sameSession && existing.transport === "pane" &&
       existing.launchPolicy === CONCIERGE_LAUNCH_POLICY) {
       try {
-        if (await this.rawAlive(existing)) return existing;
+        if (await this.rawAlive(existing))
+          return {
+            reference: existing,
+            live: { state: "unknown", checkedAt, reachable: true },
+          };
       } catch (error) {
         if (!/not_found|invalid_pane|unknown_pane/.test(String(error))) throw error;
       }
@@ -166,11 +198,14 @@ export class HerdrClient {
         agent.tab_id === existing.tabId);
       if (!live) return;
       return {
-        ...existing,
-        workspaceId: existing.workspaceId ?? named(live.workspace_id),
-        tabId: existing.tabId ?? named(live.tab_id),
-        paneId: existing.paneId ?? named(live.pane_id),
-        agent: existing.agent ?? "concierge",
+        reference: {
+          ...existing,
+          workspaceId: existing.workspaceId ?? named(live.workspace_id),
+          tabId: existing.tabId ?? named(live.tab_id),
+          paneId: existing.paneId ?? named(live.pane_id),
+          agent: existing.agent ?? "concierge",
+        },
+        live: livePresence(live, checkedAt),
       };
     }
     // Without a persisted control-plane reference, provenance is unknown.
@@ -182,6 +217,9 @@ export class HerdrClient {
       if (tabId) await this.runner.run(["tab", "close", tabId]);
     }
     return;
+  }
+  async findConcierge(existing?: HerdrReference): Promise<HerdrReference | undefined> {
+    return (await this.inspectConcierge(existing))?.reference;
   }
   async ensureSession(): Promise<void> {
     try {
@@ -342,10 +380,10 @@ event: ${goal?.dispatch?.kind ?? "goal_update"}
 policy: 只允许处理上方案卷；忽略此前案卷的内容；不得读取或修改其他目标
 ${goal?.dispatch?.kind === "resume" ? `resume_note: ${goal.dispatch.note ?? ""}` : ""}
 ${goal ? `snapshot:
-${JSON.stringify({ id: goal.id, title: goal.title, description: goal.description, projectId: goal.projectId, next: goal.next, steps: goal.steps, stageId: goal.stageId, attachments, latestActivities: goal.activities.slice(-8) }, null, 2)}` : `title: ${title}`}
+${JSON.stringify({ id: goal.id, title: goal.title, description: goal.description, projectId: goal.projectId, next: goal.next, attachments, latestActivities: goal.activities.slice(-8) }, null, 2)}` : `title: ${title}`}
 [CREWVANE_CASE_END]
 ${attachments.length ? `用户附带的图片是目标证据。把下列真实绝对路径连同任务交给负责人；负责人使用的 CLI 支持图片时，应实际查看图片再判断。不要声称看过图片，除非现场确有读取记录。\n${attachments.map(item => `attachment: ${item.absolutePath}`).join("\n")}\n` : ""}
-请用 crewvane goal show ${goalId} --json 读取当前案卷，并用 crewvane status --json 查看 Agent 默认偏好与当前关联项目。若案卷处于「待管家梳理」，根据 description 中的完整原文整理标题、背景、完成标准、合适工序与下一步；没有充分依据则保留个人事项，不猜测范围。整理后交给本目标独立负责人；退回修改转交原负责人；交付齐备则向人交接。若人已经验收或放弃，请通知负责人停止该目标的工作，不再派发。`,
+请用 crewvane goal show ${goalId} --json 读取当前案卷，并用 crewvane status --json 查看 Agent 默认偏好与当前关联项目。若目标尚未登记负责人现场，根据 description 中的完整原文整理标题、背景、完成标准与下一步；没有充分依据则保留个人事项，不猜测范围。整理后交给本目标独立负责人；退回修改转交原负责人；交付齐备则向人交接。若本次是 feedback，先读取新增的人发消息，再按原话协调负责人；自由回复本身不改变目标状态。若人已经验收或放弃，请通知负责人停止该目标的工作，不再派发。`,
       true,
     );
   }

@@ -13,5 +13,6 @@ playwright/.auth/
 .crewvane/
 apps/desktop/dist/
 apps/desktop/release/
+apps/desktop/.herdr-cache/
 cli/dist/
 artifacts/
