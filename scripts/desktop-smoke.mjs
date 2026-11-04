@@ -221,7 +221,9 @@ try {
   state = await page.evaluate(() => window.crewvane.command({ type: "snapshot" }));
   assert.equal(state.goals[0].attachments.length, 1);
   assert.ok(!state.goals[0].attachments.some(item => item.id === removedAttachment.id));
-  await page.getByRole("button", { name: "给管家留言", exact: true }).click();
+  await page
+    .getByRole("button", { name: /^(给管家留言|先留言)$/ })
+    .click();
   await page.getByLabel("发给管家的消息", { exact: true }).fill("请保留现有验收记录，不要扩大范围。");
   await page.getByLabel("选择回复图片", { exact: true }).setInputFiles({
     name: "reply.png",
