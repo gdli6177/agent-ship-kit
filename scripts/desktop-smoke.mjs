@@ -485,6 +485,12 @@ try {
   await page.getByRole("button", { name: "交给管家", exact: true }).click();
   await page.getByRole("dialog", { name: /等待审批操作/ }).waitFor();
   const waiting = (await service.read()).goals.find(item => item.title === "等待审批操作");
+  await page.locator(".goal-detail-advanced").evaluate(element => { element.open = true; });
+  await page.getByRole("button", { name: "我来处理", exact: true }).click();
+  await page.waitForFunction(async goalId => {
+    const state = await window.crewvane.command({ type: "snapshot" });
+    return state.goals.find(item => item.id === goalId)?.mode === "manual";
+  }, waiting.id);
   await service.execute({ type: "goal.wait", goalId: waiting.id, reason: "等 YR 审批", owner: "YR", remindAt: "2030-01-01T00:00:00Z" });
   await page.getByText("现在不用处理", { exact: true }).waitFor();
   assert.equal(await page.getByLabel("当前安排").count(), 0);
