@@ -47,7 +47,7 @@ export interface WatchdogState {
 }
 export interface DeliveryCheck { name: string; command: string; result: "passed" | "failed"; note?: string }
 export interface Delivery { summary: string; location?: string; url?: string; checks: DeliveryCheck[]; submittedAt: string; submittedBy: string }
-export interface Activity { id: string; at: string; actor: string; kind: "created" | "progress" | "waiting" | "decision" | "delivery" | "accepted" | "rework" | "dropped" | "resolved" | "reminder" | "session" | "watchdog" | "ship"; text: string }
+export interface Activity { id: string; at: string; actor: string; kind: "created" | "message" | "progress" | "waiting" | "decision" | "delivery" | "accepted" | "rework" | "dropped" | "resolved" | "reminder" | "session" | "watchdog" | "ship"; text: string; attachmentIds?: string[] }
 export interface GoalAttachment {
   id: string; name: string; path: string; mime: string; size: number; sha256: string; addedAt: string;
 }
@@ -68,7 +68,11 @@ export interface WorkspaceState {
   version: 2; name: string; projects: Project[]; workflows: Workflow[]; goals: Goal[];
   decisions: DecisionRecord[];
   agents?: AgentPreferences;
-  concierge: HerdrReference & { status: "not_ready" | "ready" | "error"; detail?: string };
+  concierge: HerdrReference & {
+    status: "not_ready" | "ready" | "error";
+    detail?: string;
+    live?: LivePresence;
+  };
 }
 export type CrewvaneCommand =
   | { type: "snapshot" }
@@ -80,11 +84,12 @@ export type CrewvaneCommand =
   | { type: "workflow.save"; workflow: Workflow }
   | { type: "goal.create"; input: { title: string; description?: string; projectId: string; workflowId?: string; mode: "concierge" | "manual"; next?: string; waitingFor?: string; remindAt?: string } }
   | { type: "goal.intake"; text: string; projectId?: string; attachments?: GoalAttachment[] }
-  | { type: "goal.direct"; text: string; goalId?: string; next?: string; projectId?: string; attachments?: GoalAttachment[] }
+  | { type: "goal.direct"; text: string; goalId?: string; projectId?: string; attachments?: GoalAttachment[] }
   | { type: "goal.attachment.remove"; goalId: string; attachmentId: string; actor?: string }
   | { type: "attachments.cleanup"; retentionDays?: number; at?: string }
   | { type: "goal.delete"; goalId: string; actor?: string }
   | { type: "goal.update"; goalId: string; patch: { title?: string; description?: string; next?: string; owner?: string; stageId?: string; waitingFor?: string; remindAt?: string | null; status?: "active" | "waiting" } }
+  | { type: "goal.message"; goalId: string; text: string; attachments?: GoalAttachment[]; actor?: string }
   | { type: "goal.progress"; goalId: string; summary: string; next?: string; stageId?: string; actor?: string }
   | { type: "goal.dispatch"; goalId: string; status: "pending" | "sent" | "failed"; detail?: string; requestId?: string }
   | { type: "goal.resume"; goalId: string; note: string; mode: "concierge" | "manual" }
@@ -102,7 +107,7 @@ export type CrewvaneCommand =
   | { type: "goal.remind"; goalId: string; at: string; note?: string }
   | { type: "session.set"; goalId?: string; reference: HerdrReference }
   | { type: "session.release"; goalId: string }
-  | { type: "concierge.status"; status: "not_ready" | "ready" | "error"; detail?: string; reference?: HerdrReference }
+  | { type: "concierge.status"; status: "not_ready" | "ready" | "error"; detail?: string; reference?: HerdrReference; live?: LivePresence | null }
   | { type: "live.sync"; presences: Record<string, LivePresence> }
   | { type: "live.event"; target: LiveEventTarget; presence: LivePresence; reference?: LiveEventReferenceUpdate }
   | { type: "watchdog.inspect"; at: string }

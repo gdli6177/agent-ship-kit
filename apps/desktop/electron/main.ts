@@ -14,9 +14,12 @@ import {
   validateGoalAttachments,
   WorkspaceService,
   type CrewvaneCommand,
+  type HerdrReference,
+  type LivePresence,
   type WatchdogRequest,
 } from "../../../packages/core/src/index.js";
-import { HerdrClient, herdrRunner, quoteShell } from "./herdr.js";
+import { ConciergeBlockedError, HerdrClient, herdrRunner, quoteShell } from "./herdr.js";
+import { openPersistedConcierge, refreshConciergeIfSafe } from "./concierge-lifecycle.js";
 import { TerminalHost } from "./terminal-host.js";
 import { parseAgentCommand } from "./agent-command.js";
 import { Executables } from "./executables.js";
@@ -24,16 +27,20 @@ import { HerdrInstallation, type HerdrStatus } from "./herdr-install.js";
 import { HerdrPlugin } from "./herdr-plugin.js";
 import { deliverGoalUpdate } from "./goal-delivery.js";
 import { CoordinatorQueue } from "./coordinator-queue.js";
+import { WebhookNotifier, type WebhookSaveInput } from "./webhook-notifications.js";
 const exec = promisify(execFile);
 let window: BrowserWindow, tray: Tray, root: string | undefined, service: WorkspaceService | undefined, syncing = false, quitting = false;
 let stateWatcher: FSWatcher | undefined, stateRefreshTimer: ReturnType<typeof setTimeout> | undefined;
 const selections = new Set<string>();
 const here = __dirname;
+// Native window chrome needs a startup color before renderer CSS is available.
+// Keep this synchronized with the dark `--bg` design token and DESIGN.md.
+const WINDOW_BACKGROUND = "#111520";
 const terminals = new TerminalHost((event) => {
   if (window && !window.isDestroyed()) window.webContents.send("crewvane:event", event);
 });
 const rendererURL = pathToFileURL(join(here, "renderer/index.html")).href;
-let tools: Executables, herdrInstallation: HerdrInstallation, herdrPlugin: HerdrPlugin;
+let tools: Executables, herdrInstallation: HerdrInstallation, herdrPlugin: HerdrPlugin, webhookNotifier: WebhookNotifier;
 function sessionName(path = root) { return process.env.CREWVANE_HERDR_SESSION ?? `crewvane-${createHash("sha256").update(path ?? "").digest("hex").slice(0, 10)}`; }
 function sender(event: Electron.IpcMainInvokeEvent) { if (event.sender !== window.webContents || event.senderFrame?.url !== rendererURL) throw new Error("不受信任的界面请求"); }
 function activeService() { if (!service) throw new Error("请先打开工作区"); return service; }
@@ -167,9 +174,9 @@ async function closeEndedGoalSession(target: WorkspaceService, goalId: string, e
   await target.execute({ type: "session.release", goalId });
   return true;
 }
-const preparations = new Map<string, Promise<import("../../../packages/core/src/index.js").HerdrReference>>();
+const preparations = new Map<string, Promise<HerdrReference>>();
 const refreshedConcierges = new Map<string, string>();
-function conciergeIdentity(reference: import("../../../packages/core/src/index.js").HerdrReference) {
+function conciergeIdentity(reference: HerdrReference) {
   return JSON.stringify([reference.session, reference.paneId, reference.agent, reference.processId]);
 }
 const handoffs = new Map<string, Promise<void>>();
@@ -229,16 +236,39 @@ async function doPrepareConcierge(target: WorkspaceService) {
   if (plugin.phase === "error") throw new Error(plugin.detail);
   await rm(coordinatorScope(target), { force: true });
   const state = await target.read();
-  await target.execute({ type: "concierge.status", status: "not_ready", reference: state.concierge, detail: "正在准备全局管家…" });
+  await target.execute({
+    type: "concierge.status",
+    status: "not_ready",
+    reference: state.concierge,
+    live: null,
+    detail: "正在准备全局管家…",
+  });
   try {
-    const existing = await client(status.executable, target.root).findConcierge(state.concierge);
-    if (existing) {
+    const connection = client(status.executable, target.root);
+    const site = await connection.inspectConcierge(state.concierge);
+    if (site) {
+      const existing = site.reference;
       const identity = conciergeIdentity(existing);
-      if (refreshedConcierges.get(target.root) !== identity) {
-        await client(status.executable, target.root).refreshConcierge(existing, target.root, state.agents);
+      const refreshResult = await refreshConciergeIfSafe({
+        reference: existing,
+        live: site.live,
+        alreadyRefreshed: refreshedConcierges.get(target.root) === identity,
+        refresh: candidate => connection.refreshConcierge(candidate, target.root, state.agents),
+      });
+      if (refreshResult === "refreshed")
         refreshedConcierges.set(target.root, identity);
-      }
-      await target.execute({ type: "concierge.status", status: "ready", reference: existing });
+      const live: LivePresence = refreshResult === "blocked"
+        ? { state: "blocked", checkedAt: new Date().toISOString(), reachable: true }
+        : site.live;
+      await target.execute({
+        type: "concierge.status",
+        status: "ready",
+        reference: existing,
+        live,
+        ...(live.state === "blocked"
+          ? { detail: "管家正在等待交互输入；已保留现有现场。" }
+          : {}),
+      });
       return existing;
     }
     const home = app.getPath("home");
@@ -246,7 +276,7 @@ async function doPrepareConcierge(target: WorkspaceService) {
     const command = parseAgentCommand(preferences.concierge, (await agentChoices()).map(option => option.kind));
     const agentExecutable = await executable(command.executable, target.root);
     if (!agentExecutable) throw new Error(`未找到 ${command.executable} CLI，请先安装，或在设置中修改管家启动命令。`);
-    const reference = await client(status.executable, target.root).prepareConcierge(
+    const reference = await connection.prepareConcierge(
       target.root,
       state.concierge,
       command.kind ?? "",
@@ -261,15 +291,31 @@ async function doPrepareConcierge(target: WorkspaceService) {
       agentExecutable,
     );
     refreshedConcierges.set(target.root, conciergeIdentity(reference));
-    await target.execute({ type: "concierge.status", status: "ready", reference });
+    await target.execute({
+      type: "concierge.status",
+      status: "ready",
+      reference,
+      live: { state: "unknown", checkedAt: new Date().toISOString(), reachable: true },
+    });
     return reference;
   } catch (error) {
+    if (error instanceof ConciergeBlockedError) {
+      const reference = (await target.read()).concierge;
+      await target.execute({
+        type: "concierge.status",
+        status: "ready",
+        reference,
+        live: { state: "blocked", checkedAt: new Date().toISOString(), reachable: true },
+        detail: "管家正在等待交互输入；已保留现有现场。",
+      });
+      return reference;
+    }
     const detail = error instanceof Error ? error.message : String(error);
     await target.execute({ type: "concierge.status", status: "error", reference: (await target.read()).concierge, detail });
     throw new Error(`管家尚未准备好：${detail}`);
   }
 }
-async function openHerdr(reference?: import("../../../packages/core/src/index.js").HerdrReference) {
+async function openHerdr(reference?: HerdrReference) {
   const target = activeService(), session = sessionName(target.root);
   const status = await herdrInstallation.ensure(); if (!status.executable) throw new Error("Herdr 尚未准备好，请在设置中重试");
   const connection = client(status.executable, target.root);
@@ -279,6 +325,28 @@ async function openHerdr(reference?: import("../../../packages/core/src/index.js
   if (root === target.root) window.webContents.send("crewvane:event", {
     type: "terminal-open", session, title: reference?.agent === "concierge" ? "全局管家" : "工作现场",
   });
+}
+async function openConcierge(target = activeService()) {
+  const state = await target.read();
+  const reference = await openPersistedConcierge({
+    reference: state.concierge,
+    prepare: () => prepareConcierge(target),
+    open: openHerdr,
+  });
+  const latest = (await target.read()).concierge;
+  if (latest.status !== "ready" || latest.detail) {
+    await target.execute({
+      type: "concierge.status",
+      status: "ready",
+      reference: latest,
+      live: latest.live ?? null,
+    });
+  }
+  if (root === target.root && !window.isDestroyed())
+    window.webContents.send("crewvane:event", {
+      type: "snapshot", state: await target.read(), workspace: target.root,
+    });
+  return reference;
 }
 function watchWorkspaceState(target: WorkspaceService) {
   stateWatcher?.close();
@@ -301,6 +369,23 @@ function watchWorkspaceState(target: WorkspaceService) {
       }
     }, 80);
   });
+}
+async function deliverAttentionNotifications(target: WorkspaceService, state: Awaited<ReturnType<WorkspaceService["read"]>>, workspace: string) {
+  for (const goal of attentionGoals(state.goals)) {
+    if (root !== workspace) break;
+    const kind = attentionKind(goal)!;
+    if (!goal.attention?.notifiedAt && Notification.isSupported()) {
+      try {
+        const notification = new Notification({ title: kind === "review" ? "有一份成果等你验收" : kind === "follow_up" ? "到了该跟进的时候" : "Crewvane · 需要你处理", body: `${goal.title}\n${goal.attention?.summary ?? goal.next}`.slice(0, 220) });
+        notification.on("click", () => { window.show(); window.webContents.send("crewvane:event", { type: "open-goal", goalId: goal.id }); });
+        notification.show();
+        await target.execute({ type: "notification.sent", goalId: goal.id, kind, at: new Date().toISOString() });
+      } catch {
+        // The external channel and inbox remain available if system notification persistence fails.
+      }
+    }
+    void webhookNotifier.deliver({ workspace: { name: state.name }, goal, kind }).catch(() => {});
+  }
 }
 async function openWorkspace(path: string) {
   const canonical = await realpath(path); if (!(await stat(canonical)).isDirectory()) throw new Error("工作区必须是目录");
@@ -327,7 +412,9 @@ async function synchronize() {
   syncing = true;
   const target = service, workspace = root;
   try {
-    let state = await target.read(), status = await herdrStatus();
+    let state = await target.read();
+    await deliverAttentionNotifications(target, state, workspace);
+    let status = await herdrStatus();
     if (status.executable) {
       for (const goal of state.goals.filter(goal =>
         ["completed", "dropped"].includes(goal.status) && goal.herdr)) {
@@ -357,14 +444,6 @@ async function synchronize() {
     }
     const requests = (await target.execute({ type: "watchdog.inspect", at: new Date().toISOString() }) as WatchdogRequest[]).slice(0, 10);
     state = await target.read();
-    for (const goal of attentionGoals(state.goals)) {
-      if (root !== workspace) break;
-      const kind = attentionKind(goal)!;
-      if (goal.attention?.notifiedAt || !Notification.isSupported()) continue;
-      const notification = new Notification({ title: kind === "review" ? "有一份成果等你验收" : kind === "follow_up" ? "到了该跟进的时候" : "Crewvane · 需要你处理", body: `${goal.title}\n${goal.attention?.summary ?? goal.next}`.slice(0, 220) });
-      notification.on("click", () => { window.show(); window.webContents.send("crewvane:event", { type: "open-goal", goalId: goal.id }); }); notification.show();
-      await target.execute({ type: "notification.sent", goalId: goal.id, kind, at: new Date().toISOString() });
-    }
     if (requests.length && root === workspace) {
       let failure: string | undefined;
       try {
@@ -383,6 +462,7 @@ async function synchronize() {
       });
     }
     state = await target.read();
+    await deliverAttentionNotifications(target, state, workspace);
     if (root === workspace && !window.isDestroyed()) window.webContents.send("crewvane:event", { type: "snapshot", state, workspace });
   } catch (error) {
     if (root === workspace && !window.isDestroyed()) window.webContents.send("crewvane:event", { type: "diagnostic", message: `后台同步暂未成功：${error instanceof Error ? error.message : String(error)}` });
@@ -394,10 +474,19 @@ app.on("second-instance", () => { window?.show(); window?.focus(); });
 app.whenReady().then(async () => {
   if (process.env.CREWVANE_TEST_USER_DATA) app.setPath("userData", process.env.CREWVANE_TEST_USER_DATA);
   if (process.env.CREWVANE_TEST_HOME) app.setPath("home", process.env.CREWVANE_TEST_HOME);
+  webhookNotifier = new WebhookNotifier(app.getPath("userData"), app.getVersion());
   const managedBin = join(app.getPath("userData"), "runtime");
   tools = new Executables(app.getPath("home"), managedBin, process.env,
     !!process.env.CREWVANE_TEST_HOME && process.env.CREWVANE_TEST_ISOLATE_TOOLS === "1");
-  herdrInstallation = new HerdrInstallation(tools, join(managedBin, "herdr"), broadcastHerdrStatus);
+  herdrInstallation = new HerdrInstallation(
+    tools,
+    join(managedBin, "herdr"),
+    broadcastHerdrStatus,
+    fetch,
+    process.platform,
+    process.arch,
+    app.isPackaged ? join(process.resourcesPath, "herdr") : undefined,
+  );
   const integrationEnvironment = process.env.CREWVANE_TEST_HOME ? {
     ...process.env,
     HOME: app.getPath("home"),
@@ -416,7 +505,7 @@ app.whenReady().then(async () => {
   app.dock?.setIcon(nativeImage.createFromPath(join(here, "assets/crewvane-icon.png")));
   process.env.PATH = (await tools.paths()).join(":");
   const width = Number(process.env.CREWVANE_TEST_WINDOW_WIDTH), height = Number(process.env.CREWVANE_TEST_WINDOW_HEIGHT);
-  window = new BrowserWindow({ width: Number.isFinite(width) && width >= 900 ? width : 1440, height: Number.isFinite(height) && height >= 700 ? height : 960, minWidth: 900, minHeight: 700, title: "Crewvane · 协航", titleBarStyle: "hiddenInset", backgroundColor: "#10131e", icon: join(here, "assets/crewvane-icon.png"), webPreferences: { preload: join(here, "preload.cjs"), contextIsolation: true, nodeIntegration: false, sandbox: true } });
+  window = new BrowserWindow({ width: Number.isFinite(width) && width >= 900 ? width : 1440, height: Number.isFinite(height) && height >= 700 ? height : 960, minWidth: 900, minHeight: 700, title: "Crewvane · 协航", titleBarStyle: "hiddenInset", backgroundColor: WINDOW_BACKGROUND, icon: join(here, "assets/crewvane-icon.png"), webPreferences: { preload: join(here, "preload.cjs"), contextIsolation: true, nodeIntegration: false, sandbox: true } });
   window.webContents.setWindowOpenHandler(() => ({ action: "deny" })); window.webContents.on("will-navigate", (event) => event.preventDefault());
   window.webContents.session.setPermissionRequestHandler((_wc, _permission, callback) => callback(false));
   window.on("close", (event) => { if (!quitting) { event.preventDefault(); window.hide(); } });
@@ -461,7 +550,7 @@ app.whenReady().then(async () => {
         await closeEndedGoalSession(target, item.id);
     }
     const result = await target.execute(command);
-    if (command.type === "goal.intake" || (command.type === "goal.create" && command.input.mode === "concierge") ||
+    if (command.type === "goal.intake" || command.type === "goal.message" || (command.type === "goal.create" && command.input.mode === "concierge") ||
       command.type === "goal.followup" || command.type === "goal.delegate" || (command.type === "goal.resume" && command.mode === "concierge") ||
       command.type === "goal.resolve" ||
       (command.type === "goal.progress" && command.actor === "你" && (result as import("../../../packages/core/src/index.js").Goal).mode === "concierge")) {
@@ -497,6 +586,15 @@ app.whenReady().then(async () => {
   });
   ipcMain.handle("crewvane:herdr-status", (event) => { sender(event); return herdrStatus(); });
   ipcMain.handle("crewvane:agent-choices", (event) => { sender(event); return agentChoices(); });
+  ipcMain.handle("crewvane:webhook-settings", (event) => { sender(event); return webhookNotifier.status(); });
+  ipcMain.handle("crewvane:webhook-save", (event, input: WebhookSaveInput) => {
+    sender(event);
+    return webhookNotifier.save(input);
+  });
+  ipcMain.handle("crewvane:webhook-test", async (event) => {
+    sender(event);
+    return webhookNotifier.test((await activeService().read()).name);
+  });
   ipcMain.handle("crewvane:install-herdr", (event) => { sender(event); return installHerdr(); });
   ipcMain.handle("crewvane:cli-status", (event) => { sender(event); return cliStatus(); });
   ipcMain.handle("crewvane:install-cli", (event) => { sender(event); return installCli(); });
@@ -505,11 +603,18 @@ app.whenReady().then(async () => {
   ipcMain.handle("crewvane:open-terminal", async event => { sender(event); await openHerdr(); });
   ipcMain.handle("crewvane:open-herdr", async (event, goalId?: string) => {
     sender(event);
-    const state = await snapshot();
+    const target = activeService(), state = await target.read();
+    if (!goalId) {
+      await openConcierge(target);
+      return;
+    }
     const item = goalId ? state.goals.find((goal) => goal.id === goalId) : undefined;
     if (goalId && !item) throw new Error("目标不存在");
-    if (!goalId || (item?.mode === "concierge" && !item.herdr)) await prepareConcierge();
-    await openHerdr(item?.herdr ?? (item?.mode === "manual" ? undefined : (await snapshot()).concierge));
+    if (item?.mode === "concierge" && !item.herdr) {
+      await openConcierge(target);
+      return;
+    }
+    await openHerdr(item?.herdr);
   });
   ipcMain.handle("crewvane:terminal-snapshot", (event) => { sender(event); activeService(); return terminals.snapshot(sessionName()); });
   ipcMain.handle("crewvane:terminal-write", (event, session: string, data: string) => {

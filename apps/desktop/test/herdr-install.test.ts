@@ -19,10 +19,16 @@ function server(bytes = binary("0.9.5"), checksum?: string) {
   const calls: string[] = [];
   const fetcher = (async (url: string) => {
     calls.push(url);
-    if (url.endsWith("latest.json")) return Response.json({ version: "0.9.5",
-      assets: { "macos-aarch64": "https://github.com/herdrdev/herdr/releases/download/v0.9.5/herdr-macos-aarch64" },
-      sha256: { "macos-aarch64": checksum ?? createHash("sha256").update(bytes).digest("hex") } });
-    return new Response(bytes);
+    if (url.endsWith("/releases/latest")) return Response.json({
+      tag_name: "v0.9.5",
+      assets: [{
+        name: "herdr-macos-aarch64",
+        url: "https://api.github.com/repos/herdrdev/herdr/releases/assets/123",
+        browser_download_url: "https://github.com/herdrdev/herdr/releases/download/v0.9.5/herdr-macos-aarch64",
+        digest: `sha256:${checksum ?? createHash("sha256").update(bytes).digest("hex")}`,
+      }],
+    });
+    return new Response(bytes, { headers: { "content-length": String(bytes.length) } });
   }) as typeof fetch;
   return { calls, fetcher };
 }
@@ -65,11 +71,12 @@ test("an older CLI gets a private latest copy without changing the user's instal
   assert.equal(result.version, "0.9.5"); assert.equal(result.executable, path);
   assert.deepEqual(await readFile(external), binary("0.8.0"));
 }));
-test("checksum failures leave the existing binary untouched and provide a retryable error", () => fixture(async ({ tools, path }) => {
+test("checksum failures leave the existing binary untouched and keep it usable", () => fixture(async ({ tools, path }) => {
   await writeFile(path, binary("0.8.0"), { mode: 0o700 });
   const install = new HerdrInstallation(tools, path, () => {}, server(binary("0.9.5"), "0".repeat(64)).fetcher, "darwin", "arm64");
   const result = await install.ensure();
-  assert.equal(result.phase, "error"); assert.match(result.detail!, /校验失败/);
+  assert.equal(result.phase, "ready"); assert.equal(result.version, "0.8.0");
+  assert.match(result.detail!, /校验失败.*继续使用本机 Herdr 0\.8\.0/);
   assert.deepEqual(await readFile(path), binary("0.8.0"));
 }));
 test("offline with no CLI fails visibly, offline with a local CLI remains usable", () => fixture(async ({ tools, path }) => {
@@ -79,5 +86,18 @@ test("offline with no CLI fails visibly, offline with a local CLI remains usable
   assert.equal((await install.status()).installed, false);
   await writeFile(path, binary("0.9.5"), { mode: 0o700 });
   const result = await install.ensure();
-  assert.equal(result.installed, true); assert.match(result.detail!, /继续使用/);
+  assert.equal(result.phase, "ready"); assert.equal(result.installed, true);
+  assert.match(result.detail!, /继续使用本机 Herdr 0\.9\.5/);
+}));
+test("a bundled Herdr remains usable when update metadata is unavailable", () => fixture(async ({ home, tools, path }) => {
+  const bundled = join(home, "app/Contents/Resources/herdr");
+  await mkdir(join(home, "app/Contents/Resources"), { recursive: true });
+  await writeFile(bundled, binary("0.9.5"), { mode: 0o700 });
+  const offline = (async () => { throw new Error("offline"); }) as typeof fetch;
+  const install = new HerdrInstallation(tools, path, () => {}, offline,
+    "darwin", "arm64", bundled);
+  const result = await install.ensure();
+  assert.equal(result.phase, "ready");
+  assert.equal(result.executable, bundled);
+  assert.match(result.detail!, /继续使用应用内置 Herdr 0\.9\.5/);
 }));

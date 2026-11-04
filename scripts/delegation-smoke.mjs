@@ -133,7 +133,9 @@ try {
   const syncedDirect = directState.goals.find(goal => goal.id === directGoal.id);
   assert.equal(syncedDirect.dispatch?.id, dispatchBeforeDirect,
     "a terminal direct message must not create a duplicate handoff");
-  assert.equal(syncedDirect.activities.at(-1).actor, "你 · Herdr 直聊");
+  const directActivity = syncedDirect.activities.find(activity =>
+    activity.text.includes(directMarker));
+  assert.equal(directActivity?.actor, "你 · Herdr 直聊");
   console.log(JSON.stringify({step:"direct-terminal-synced",goalId:directGoal.id,directMarker}));
   const newTaskMarker = `DIRECT_NEW_${randomUUID().slice(0, 8)}`;
   const newTaskPrompt = await app.evaluate(async (_electron, {session,newTaskMarker}) => {

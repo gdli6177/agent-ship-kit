@@ -5,7 +5,8 @@ import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { Executables } from "./executables.js";
 const exec = promisify(execFile);
-const MANIFEST = "https://herdr.dev/latest.json";
+const MANIFEST =
+  "https://api.github.com/repos/herdrdev/herdr/releases/latest";
 export interface HerdrStatus {
   installed: boolean; executable?: string; version?: string; latestVersion?: string;
   phase: "checking" | "downloading" | "ready" | "error";
@@ -25,12 +26,17 @@ export class HerdrInstallation {
   constructor(readonly tools: Executables, readonly managedPath: string,
     readonly emit: (status: HerdrStatus) => void,
     readonly fetcher: typeof fetch = fetch,
-    readonly platform = process.platform, readonly arch = process.arch) {}
+    readonly platform = process.platform, readonly arch = process.arch,
+    readonly bundledPath?: string) {}
   private publish(status: HerdrStatus) { this.current = status; this.emit({ ...status }); return { ...status }; }
   private async installed() {
     // A file existing is not enough: wrong-architecture/stale executables must
     // not be advertised as usable. Continue looking after an invalid candidate.
-    const candidates = [...new Set([this.managedPath, ...(await this.tools.paths()).map(dir => `${dir}/herdr`)])];
+    const candidates = [...new Set([
+      this.managedPath,
+      ...(this.bundledPath ? [this.bundledPath] : []),
+      ...(await this.tools.paths()).map(dir => `${dir}/herdr`),
+    ])];
     let best: { executable: string; version: string } | undefined;
     for (const executable of candidates) {
       try {
@@ -57,16 +63,41 @@ export class HerdrInstallation {
   }
   private async latest(force: boolean) {
     if (!force && this.manifest && Date.now() - this.manifest.at < 6 * 3600_000) return this.manifest.value;
-    const response = await this.fetcher(MANIFEST, { signal: AbortSignal.timeout(15_000), redirect: "error" });
+    // The official herdr.dev index contains the complete release history and
+    // can be very slow on constrained networks. The GitHub latest-release API
+    // carries the same current version and an immutable asset digest in a much
+    // smaller payload.
+    const response = await this.fetcher(MANIFEST, {
+      signal: AbortSignal.timeout(30_000),
+      headers: {
+        Accept: "application/vnd.github+json",
+        "User-Agent": "Crewvane",
+        "X-GitHub-Api-Version": "2022-11-28",
+      },
+    });
     if (!response.ok) throw new Error(`版本检查失败（HTTP ${response.status}）`);
     const data = await response.json() as any;
     const target = `${this.platform === "darwin" ? "macos" : this.platform}-${this.arch === "arm64" ? "aarch64" : this.arch === "x64" ? "x86_64" : this.arch}`;
-    const url = data.assets?.[target], sha256 = data.sha256?.[target];
-    // Use the official TUI manifest, not the separate Herdr native app.
-    const expected = `https://github.com/herdrdev/herdr/releases/download/v${data.version}/herdr-${target}`;
-    if (!/^\d+\.\d+\.\d+$/.test(data.version) || url !== expected || !/^[a-f\d]{64}$/i.test(sha256 ?? ""))
+    const expectedVersion = typeof data.tag_name === "string"
+      ? /^v?(\d+\.\d+\.\d+)$/.exec(data.tag_name)?.[1]
+      : undefined;
+    const asset = Array.isArray(data.assets)
+      ? data.assets.find((item: any) =>
+        item?.name === `herdr-${target}` &&
+        typeof item?.url === "string" &&
+        typeof item?.browser_download_url === "string")
+      : undefined;
+    const digest = typeof asset?.digest === "string"
+      ? /^sha256:([a-f\d]{64})$/i.exec(asset.digest)?.[1]
+      : undefined;
+    if (!expectedVersion || !asset || !digest)
       throw new Error("官方版本清单缺少当前平台的有效下载与 SHA-256");
-    const value = { version: data.version as string, url, sha256: sha256.toLowerCase() };
+    const value = {
+      version: expectedVersion,
+      url: asset.url as string,
+      browserUrl: asset.browser_download_url as string,
+      sha256: digest.toLowerCase(),
+    };
     this.manifest = { at: Date.now(), value };
     return value;
   }
@@ -80,8 +111,18 @@ export class HerdrInstallation {
         return this.publish({ installed: true, ...local, latestVersion: latest.version, phase: "ready" });
       this.publish({ installed: !!local, ...local, latestVersion: latest.version, phase: "downloading",
         updateAvailable: !!local, detail: local ? `正在准备 Herdr ${latest.version}…` : "正在自动安装 Herdr，无需 Homebrew…" });
-      const response = await this.fetcher(latest.url, { signal: AbortSignal.timeout(120_000) });
+      const response = await this.fetcher(latest.url, {
+        signal: AbortSignal.timeout(120_000),
+        headers: {
+          Accept: "application/octet-stream",
+          "User-Agent": "Crewvane",
+          "X-GitHub-Api-Version": "2022-11-28",
+        },
+      });
       if (!response.ok) throw new Error(`下载失败（HTTP ${response.status}）`);
+      const declaredSize = Number(response.headers.get("content-length"));
+      if (Number.isFinite(declaredSize) && declaredSize > 100 * 1024 * 1024)
+        throw new Error("Herdr 下载文件大小异常，未安装该文件");
       const bytes = Buffer.from(await response.arrayBuffer());
       if (bytes.length > 100 * 1024 * 1024 || createHash("sha256").update(bytes).digest("hex") !== latest.sha256)
         throw new Error("Herdr 下载校验失败，未安装该文件");
@@ -97,9 +138,13 @@ export class HerdrInstallation {
         version: checked, latestVersion: latest.version, phase: "ready" });
     } catch (error) {
       const detail = `Herdr 自动准备未完成：${error instanceof Error ? error.message : String(error)}`;
-      this.publish({ installed: !!local, ...local, phase: "error",
-        detail: local ? `${detail}。继续使用本机 ${local.version}，可稍后重试检查。` : `${detail}。请检查网络后点击重试。` });
-      if (local) return { ...this.current };
+      if (local) {
+        const source = this.bundledPath && local.executable === this.bundledPath ? "应用内置" : "本机";
+        return this.publish({ installed: true, ...local, phase: "ready",
+          detail: `${detail}。继续使用${source} Herdr ${local.version}，可稍后重试更新。` });
+      }
+      this.publish({ installed: false, phase: "error",
+        detail: `${detail}。请检查网络后点击重试。` });
       throw new Error(this.current.detail);
     } finally {
       if (temporary) await rm(temporary, { force: true });

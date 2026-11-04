@@ -76,6 +76,9 @@ test("goal intake and terminal follow-ups retain image metadata without embeddin
   }) as Goal;
   assert.deepEqual(followed.attachments, [first, second]);
   assert.match(followed.activities.at(-1)!.text, /second\.png/);
+  assert.equal(followed.next, goal.next, "terminal messages must not rewrite the coordinator's next step");
+  assert.equal(followed.activities.at(-1)!.kind, "message");
+  assert.deepEqual(followed.activities.at(-1)!.attachmentIds, [second!.id]);
   const [third] = await importAttachmentBytes(root, [{ name: "third.png", bytes: png }]);
   const directNew = await service.execute({
     type: "goal.direct",
@@ -83,6 +86,14 @@ test("goal intake and terminal follow-ups retain image metadata without embeddin
     attachments: [third!],
   }) as Goal;
   assert.deepEqual(directNew.attachments, [third]);
+  const messaged = await service.execute({
+    type: "goal.message",
+    goalId: goal.id,
+    text: "桌面回复再补一张",
+    attachments: [third!],
+  }) as Goal;
+  assert.deepEqual(messaged.attachments, [first, second, third]);
+  assert.deepEqual(messaged.activities.at(-1)?.attachmentIds, [third!.id]);
   const stateText = await readFile(join(root, ".crewvane", "state.json"), "utf8");
   assert.doesNotMatch(stateText, /iVBORw0KGgo|data:image|base64/i);
 });

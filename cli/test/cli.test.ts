@@ -40,8 +40,8 @@ test("real CLI writes goals that desktop service can read", async () => {
   const created = await call(root, ["goal", "create", "--title", "从 CLI 交给管家", "--project", "personal"]);
   assert.equal(created.code, 0, created.stderr);
   const item = created.json as Goal;
-  const progress = await call(root, ["goal", "progress", item.id, "--summary", "方案已完成", "--next", "开始实现", "--stage", "build"]);
-  assert.equal(progress.json.stageId, "build");
+  const progress = await call(root, ["goal", "progress", item.id, "--summary", "方案已完成", "--next", "开始实现"]);
+  assert.equal(progress.json.next, "开始实现");
   assert.equal((await new WorkspaceService(root).read()).goals[0]?.next, "开始实现");
   await call(root, ["goal", "wait", item.id, "--reason", "等审批", "--owner", "YR", "--remind-at", "2030-01-01T00:00:00Z"]);
   assert.equal((await call(root, ["attention"])).json.length, 0);
@@ -180,7 +180,7 @@ test("CLI governs high-risk actions and ship decisions through the shared ledger
   assert.equal(ship.json.requiresHuman, true);
   assert.match(await readFile(join(root, ".crewvane", "rejected.md"), "utf8"), /拒绝删除生产数据库/);
 });
-test("ask creates a persisted concierge handoff and comment appends feedback", async () => {
+test("ask creates a persisted concierge handoff and message appends feedback without changing state", async () => {
   const root = await fixture("crewvane-cli-ask-");
   const created = await call(root, ["ask", "检查发布流程", "并补齐证据"]);
   assert.equal(created.code, 0, created.stderr);
@@ -189,12 +189,18 @@ test("ask creates a persisted concierge handoff and comment appends feedback", a
   assert.equal(created.json.dispatch.status, "pending");
   const initialRequest = created.json.dispatch.id;
 
-  const commented = await call(root, ["goal", "comment", created.json.id, "--text", "增加一份回滚验证"]);
-  assert.equal(commented.code, 0, commented.stderr);
-  assert.equal(commented.json.dispatch.status, "pending");
-  assert.notEqual(commented.json.dispatch.id, initialRequest);
-  assert.equal(commented.json.activities.at(-1).actor, "你");
-  assert.match(commented.json.activities.at(-1).text, /增加一份回滚验证/);
+  const waited = await call(root, ["goal", "wait", created.json.id, "--reason", "等 YR 审批", "--owner", "YR"]);
+  assert.equal(waited.code, 0, waited.stderr);
+  const nextBefore = waited.json.next;
+  const messaged = await call(root, ["goal", "message", created.json.id, "--text", "增加一份回滚验证"]);
+  assert.equal(messaged.code, 0, messaged.stderr);
+  assert.equal(messaged.json.status, "waiting");
+  assert.equal(messaged.json.next, nextBefore);
+  assert.equal(messaged.json.dispatch.status, "pending");
+  assert.notEqual(messaged.json.dispatch.id, initialRequest);
+  assert.equal(messaged.json.activities.at(-1).kind, "message");
+  assert.equal(messaged.json.activities.at(-1).actor, "你");
+  assert.match(messaged.json.activities.at(-1).text, /增加一份回滚验证/);
   assert.equal((await new WorkspaceService(root).read()).goals[0]?.dispatch?.status, "pending");
 });
 
@@ -243,13 +249,18 @@ test("direct terminal messages sync once and never create a duplicate handoff", 
   const root = await fixture("crewvane-cli-direct-");
   const created = (await call(root, ["ask", "已有目标"])).json as Goal;
   await coordinator(root, created.id, async () => {
-    const appended = await call(root, ["direct", "追加下一步：补充回滚验证", "--next", "补充回滚验证"]);
+    const rejectedProgressAlias = await call(root, ["direct", "追加下一步：补充回滚验证", "--next", "补充回滚验证"]);
+    assert.equal(rejectedProgressAlias.code, 1);
+    assert.match(rejectedProgressAlias.stderr, /只同步人的原话/);
+
+    const appended = await call(root, ["direct", "补充背景：保留回滚验证"]);
     assert.equal(appended.code, 0, appended.stderr);
     assert.equal(appended.json.id, created.id);
     assert.equal(appended.json.status, "active");
-    assert.equal(appended.json.next, "补充回滚验证");
-    assert.match(appended.json.activities.at(-1).text, /追加下一步/);
+    assert.equal(appended.json.next, created.next, "terminal chat must not silently change the next step");
+    assert.match(appended.json.activities.at(-1).text, /补充背景/);
     assert.equal(appended.json.activities.at(-1).actor, "你 · Herdr 直聊");
+    assert.equal(appended.json.activities.at(-1).kind, "message");
 
     const newGoal = await call(root, ["direct", "--new", "整理下周发布计划"]);
     assert.equal(newGoal.code, 0, newGoal.stderr);
@@ -374,11 +385,11 @@ test("coordinator CLI is limited to the current case and cannot read or mutate a
     assert.equal(crossDirect.code, 1);
     assert.match(crossDirect.stderr, /当前只处理目标/);
 
-    for (const argv of [["goal", "list"], ["attention"], ["ask", "新目标"], ["goal", "comment", first.id, "--text", "回环"]]) {
+    for (const argv of [["goal", "list"], ["attention"], ["ask", "新目标"], ["goal", "message", first.id, "--text", "回环"]]) {
       const denied = await call(root, argv);
       assert.equal(denied.code, 1, `${argv.join(" ")} should be denied`);
     }
-    assert.equal((await call(root, ["workflow", "list"])).code, 0);
+    assert.equal((await call(root, ["workflow", "list"])).code, 1);
   });
   const state = await new WorkspaceService(root).read();
   assert.equal(state.goals.find(goal => goal.id === first.id)?.next, first.next);

@@ -1,5 +1,7 @@
 # v0.4.2 工作台与 Herdr 验收
 
+> 历史记录：本文件保留 v0.4.2 的验收证据；其中目标详情、工序和测试数量不是当前版本契约。当前边界见 [开发说明](../product/attention-center-development.md)。
+
 日期：2026-11-04。环境：macOS arm64，正式打包的 Crewvane.app。
 
 ## 修复范围
