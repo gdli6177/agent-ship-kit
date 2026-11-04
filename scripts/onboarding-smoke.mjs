@@ -95,6 +95,9 @@ try {
   let state = await page.evaluate(() => window.crewvane.command({type:"snapshot"}));
   assert.equal(state.concierge.transport, "pane");
   const firstReference = state.concierge;
+  // A foreground PID proves process creation, not that its JS startup has
+  // already opened the log. Wait for the fixture's actual readiness evidence.
+  await expect.poll(() => readFile(log, "utf8").catch(() => ""), {timeout:10_000}).toContain('"kind":"start"');
   const started = JSON.parse((await readFile(log, "utf8")).split("\n")[0]);
   assert.deepEqual(started.args, ["--model", "local test model"]);
   assert.equal(started.pid, state.concierge.processId);
@@ -107,8 +110,13 @@ try {
     const state = await page.evaluate(() => window.crewvane.command({type:"snapshot"}));
     return state.goals.find(goal => goal.id === created.id)?.dispatch?.status;
   }, {timeout:60_000}).toBe("sent");
+  await expect.poll(() => readFile(log, "utf8"), {timeout:10_000}).toContain(created.id);
   const messages = await readFile(log, "utf8");
   assert.ok(messages.includes(created.id), "actual custom CLI stdin must receive the goal ID");
+  const roleInputs = messages.trim().split("\n").map(line => JSON.parse(line))
+    .filter(entry => entry.kind === "input" && entry.text.includes("不亲自执行目标"));
+  assert.ok(roleInputs.length >= 2, "initial identity and new goal must both carry the no-execution boundary into real stdin");
+  assert.ok(messages.includes("待执行的目标交给独立负责人"));
   await page.getByRole("button", { name: "打开 Herdr", exact: true }).click();
   await page.getByRole("region", { name: "Herdr 工作现场" }).waitFor();
   await page.screenshot({ path: join(home, "onboarding-dark.png"), animations:"disabled" });
@@ -152,7 +160,7 @@ try {
     "official verified auto-install without Homebrew or system PATH", "first workspace selection feedback",
     "same directory feedback", "cancel preserves state", "invalid workspace preserves state and shows readable error", "workspace switching",
     "arbitrary CLI saves and starts", "native argv preserved", "reuse custom concierge",
-    "real goal delivered to CLI stdin", "raw Herdr opens independently", "restart reuses installed latest and running CLI",
+    "real goal and delegation-only role delivered to CLI stdin", "raw Herdr opens independently", "restart reuses installed latest and running CLI",
     "exited CLI rejects dispatch",
   ] }));
 } catch (error) {

@@ -40,7 +40,9 @@ Crewvane 不运行模型，不扫描或适配 Agent 协议，不管理模型凭�
 
 应用打开工作区后使用按路径派生的命名 Session，也可以通过 `CREWVANE_HERDR_SESSION` 固定名称。准备管家会检查 CLI 和 Server，优先复用实时 `concierge`，检查登记的 Pane，再显式设置工作区、Session 和 CLI `PATH`，最后启动默认的 Codex 管家。Session 未运行时，应用内 PTY 启动 `herdr session attach <session>` 并等待 Server 就绪，不打开系统 Terminal。同一工作区复用一个连接；收起面板不终止会话，重启应用重新 attach。输入和尺寸 IPC 只允许访问当前工作区的连接，不接受渲染器指定的可执行文件。
 
-管家通过 `crewvane` 读取和写回目标。负责人使用 Herdr Tab、Pane 和 Agent 消息，但 Crewvane 不预设任务图、分配算法或固定层级拓扑。
+管家通过 `crewvane` 读取和写回目标，只负责分发、协调跟进与向人交接。所有实际执行，包括简单任务、返工和检查，都交给独立负责人；管家不得在阻塞时接手执行。负责人使用 Herdr Tab、Pane 和 Agent 消息，但 Crewvane 不预设任务图、分配算法或固定层级拓扑。
+
+职责边界通过初始身份说明、每次目标通知与巡检消息传达，复用已有管家时也会随新消息重申。它是 Agent 行为契约，不是操作系统权限隔离；Crewvane 无法拦截任意第三方 CLI 内部的工具调用。
 
 ## 桌面 IPC
 

@@ -39,6 +39,25 @@ test("new goals notify the same concierge without creating an owner or another s
   assert.ok(mock.calls.every(args => args.slice(0, 3).join(" ") === "agent prompt concierge"));
   assert.match(mock.calls[0]![3]!, /goal_one/);
   assert.match(mock.calls[1]![3]!, /goal_two/);
+  for (const args of mock.calls) {
+    assert.match(args[3]!, /不亲自执行目标/);
+    assert.match(args[3]!, /待执行的目标交给独立负责人/);
+    assert.match(args[3]!, /退回修改转交原负责人/);
+    assert.match(args[3]!, /向人交接/);
+  }
+});
+
+test("watchdog keeps recovery with owners instead of asking the concierge to execute", async () => {
+  const mock = fake({ "agent prompt": "{}" });
+  await new HerdrClient(mock.runner, "crewvane-test").notifyWatchdog(
+    { session: "crewvane-test", agent: "concierge" }, [{ goalId: "goal_blocked", reason: "blocked" }],
+  );
+  const message = mock.calls[0]![3]!;
+  assert.match(message, /goal_blocked/);
+  assert.match(message, /不亲自执行目标/);
+  assert.match(message, /联系其他负责人协调恢复/);
+  assert.match(message, /不能自己接手执行/);
+  assert.doesNotMatch(message, /能处理的由你处理/);
 });
 
 test("surfaces a stopped server without inventing a session", async () => {
@@ -73,6 +92,11 @@ test("starts one replacement only after a stale pane is rejected", async () => {
   assert.ok(start?.includes("sandbox_workspace_write.network_access=true"));
   assert.ok(start?.includes("workspace-write"));
   assert.ok(!start?.includes("danger-full-access"));
+  const instructions = mock.calls.find(args => args[0] === "agent" && args[1] === "prompt")?.[3];
+  assert.match(instructions!, /不亲自执行目标/);
+  assert.match(instructions!, /不能因为任务简单而自己执行/);
+  assert.match(instructions!, /由负责人产出真实成果、实际运行检查/);
+  assert.doesNotMatch(instructions!, /简单事项你可以自己完成/);
 });
 
 test("custom commands start in the real pane, preserve argv and reuse the recorded foreground process", async () => {
@@ -92,6 +116,8 @@ test("custom commands start in the real pane, preserve argv and reuse the record
   await client.notifyGoal(reference, "g1", "目标");
   assert.equal(mock.calls.filter(args => args[0] === "workspace" && args[1] === "create").length, 1);
   assert.ok(mock.calls.some(args => args[0] === "pane" && args[1] === "run" && args[3]?.includes("g1")));
+  const messages = mock.calls.filter(args => args[0] === "pane" && args[1] === "run" && args[3]?.includes("不亲自执行目标"));
+  assert.equal(messages.length, 2, "both initial instructions and a reused custom CLI receive the role boundary");
 });
 
 test("custom command exit or a replaced foreground process never receives task text", async () => {
