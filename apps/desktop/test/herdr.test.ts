@@ -15,18 +15,51 @@ function fake(responses: Record<string, string>) {
   return { calls, runner };
 }
 
-test("uses Herdr 0.8 agent response and never creates a second concierge", async () => {
+test("reuses only a persisted control-plane concierge", async () => {
   const mock = fake({
     "agent list": JSON.stringify({ result: { agents: [{
       name: "concierge", agent_status: "idle", workspace_id: "w7", tab_id: "w7:t1", pane_id: "w7:p1",
     }] } }),
   });
-  const reference = await new HerdrClient(mock.runner, "crewvane-test").prepareConcierge("/tmp/workspace");
+  const reference = await new HerdrClient(mock.runner, "crewvane-test").prepareConcierge(
+    "/tmp/workspace",
+    {
+      session: "crewvane-test", workspaceId: "w7", tabId: "w7:t1", paneId: "w7:p1",
+      agent: "concierge", launchPolicy: "control-plane-v1",
+    },
+  );
   assert.deepEqual(reference, {
-    session: "crewvane-test", workspaceId: "w7", tabId: "w7:t1", paneId: "w7:p1", agent: "concierge",
+    session: "crewvane-test", workspaceId: "w7", tabId: "w7:t1", paneId: "w7:p1",
+    agent: "concierge", launchPolicy: "control-plane-v1",
   });
   assert.equal(mock.calls.some((args) => args[0] === "workspace"), false);
   assert.equal(mock.calls.some((args) => args[0] === "agent" && args[1] === "start"), false);
+});
+
+test("closes an orphaned concierge without a governed launch reference", async () => {
+  const mock = fake({
+    "agent list": JSON.stringify({ result: { agents: [{
+      name: "concierge", agent_status: "idle", workspace_id: "w7", tab_id: "w7:t1", pane_id: "w7:p1",
+    }] } }),
+    "tab close": "{}",
+  });
+  const reference = await new HerdrClient(mock.runner, "crewvane-test").findConcierge();
+  assert.equal(reference, undefined);
+  assert.deepEqual(mock.calls.at(-1), ["tab", "close", "w7:t1"]);
+});
+
+test("closes an old ungoverned concierge once before rebuilding the control plane", async () => {
+  const mock = fake({
+    "tab close": "{}",
+    "agent list": JSON.stringify({ result: { agents: [{
+      name: "concierge", agent_status: "idle", workspace_id: "w7", tab_id: "w7:t1", pane_id: "w7:p1",
+    }] } }),
+  });
+  const reference = await new HerdrClient(mock.runner, "crewvane-test").findConcierge({
+    session: "crewvane-test", workspaceId: "w7", tabId: "w7:t1", paneId: "w7:p1", agent: "concierge",
+  });
+  assert.equal(reference, undefined);
+  assert.deepEqual(mock.calls, [["agent", "list"], ["tab", "close", "w7:t1"]]);
 });
 
 test("new goals notify the same concierge without creating an owner or another session", async () => {
@@ -35,29 +68,51 @@ test("new goals notify the same concierge without creating an owner or another s
   const reference = { session: "crewvane-test", agent: "concierge" };
   await client.notifyGoal(reference, "goal_one", "事项一");
   await client.notifyGoal(reference, "goal_two", "事项二");
-  assert.equal(mock.calls.length, 2);
+  await client.notifyGoal(reference, "goal_three", "事项三", {
+    id: "goal_three", projectId: "personal", title: "事项三",
+    description: "完整原文\n保留全部约束", mode: "concierge", status: "active",
+    steps: [{ id: "intake", name: "待管家梳理", prompt: "先整理，再分发" }], stageId: "intake",
+    next: "管家正在整理", owner: "待分配负责人", attention: null,
+    activities: [{ id: "activity", at: new Date().toISOString(), actor: "你", kind: "created", text: "完整原文\n保留全部约束" }],
+    createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
+  });
+  assert.equal(mock.calls.length, 3);
   assert.ok(mock.calls.every(args => args.slice(0, 3).join(" ") === "agent prompt concierge"));
   assert.match(mock.calls[0]![3]!, /goal_one/);
   assert.match(mock.calls[1]![3]!, /goal_two/);
   for (const args of mock.calls) {
     assert.match(args[3]!, /不亲自执行目标/);
-    assert.match(args[3]!, /待执行的目标交给独立负责人/);
+    assert.match(args[3]!, /整理后交给本目标独立负责人/);
     assert.match(args[3]!, /退回修改转交原负责人/);
     assert.match(args[3]!, /向人交接/);
+    assert.equal((args[3]!.match(/\[CREWVANE_CASE_BEGIN\]/g) ?? []).length, 1);
+    assert.equal((args[3]!.match(/\[CREWVANE_CASE_END\]/g) ?? []).length, 1);
   }
+  assert.match(mock.calls[2]![3]!, /完整原文\\n保留全部约束/);
+  assert.match(mock.calls[2]![3]!, /待管家梳理/);
+  assert.ok(mock.calls.every(args => args.includes("--wait") && args.includes("--timeout")));
 });
 
 test("watchdog keeps recovery with owners instead of asking the concierge to execute", async () => {
   const mock = fake({ "agent prompt": "{}" });
   await new HerdrClient(mock.runner, "crewvane-test").notifyWatchdog(
-    { session: "crewvane-test", agent: "concierge" }, [{ goalId: "goal_blocked", reason: "blocked" }],
+    { session: "crewvane-test", agent: "concierge" }, [
+      { goalId: "goal_blocked", reason: "blocked" },
+      { goalId: "goal_stale", reason: "stale" },
+    ],
   );
-  const message = mock.calls[0]![3]!;
-  assert.match(message, /goal_blocked/);
-  assert.match(message, /不亲自执行目标/);
-  assert.match(message, /联系其他负责人协调恢复/);
-  assert.match(message, /不能自己接手执行/);
-  assert.doesNotMatch(message, /能处理的由你处理/);
+  assert.equal(mock.calls.length, 2);
+  for (const [index, goalId] of ["goal_blocked", "goal_stale"].entries()) {
+    const message = mock.calls[index]![3]!;
+    assert.match(message, new RegExp(goalId));
+    assert.match(message, /不亲自执行目标/);
+    assert.match(message, /联系其他负责人协调恢复/);
+    assert.match(message, /不能自己接手执行/);
+    assert.equal((message.match(/case_id:/g) ?? []).length, 1);
+    assert.doesNotMatch(message, /能处理的由你处理/);
+  }
+  assert.doesNotMatch(mock.calls[0]![3]!, /goal_stale/);
+  assert.doesNotMatch(mock.calls[1]![3]!, /goal_blocked/);
 });
 test("resumed concierge receives current role instructions without starting another agent", async () => {
   const mock=fake({"agent prompt":"{}"});
@@ -68,6 +123,7 @@ test("resumed concierge receives current role instructions without starting anot
   assert.deepEqual(mock.calls[0]!.slice(0,3),["agent","prompt","concierge"]);
   assert.match(mock.calls[0]![3]!,/不亲自执行目标/);
   assert.match(mock.calls[0]![3]!,/custom-cli/);
+  assert.doesNotMatch(mock.calls[0]![3]!,/Codex 负责人使用 workspace-write/);
 });
 
 test("surfaces a stopped server without inventing a session", async () => {
@@ -85,7 +141,8 @@ test("starts one replacement only after a stale pane is rejected", async () => {
     "workspace create": JSON.stringify({ result: {
       workspace: { workspace_id: "w8" }, tab: { tab_id: "w8:t1" }, root_pane: { pane_id: "w8:p1" },
     } }),
-    "pane run": "{}", "pane wait-output": "{}", "agent start": "{}", "agent prompt": "{}", "tab focus": "{}",
+    "pane run": "{}", "pane wait-output": "{}", "agent start": "{}", "agent prompt": "{}",
+    "tab close": "{}", "tab focus": "{}",
   });
   const reference = await new HerdrClient(mock.runner, "crewvane-test").prepareConcierge(
     "/tmp/workspace",
@@ -99,13 +156,16 @@ test("starts one replacement only after a stale pane is rejected", async () => {
   assert.equal(mock.calls.filter((args) => args[0] === "workspace" && args[1] === "create").length, 1);
   const start = mock.calls.find((args) => args[0] === "agent" && args[1] === "start");
   assert.deepEqual(start?.slice(0, 6), ["agent", "start", "concierge", "--kind", "codex", "--pane"]);
-  assert.ok(start?.includes("sandbox_workspace_write.network_access=true"));
-  assert.ok(start?.includes("workspace-write"));
+  assert.ok(mock.calls.some(args => args[0] === "tab" && args[1] === "close" && args[2] === "w1:t1"));
+  assert.ok(!start?.includes("workspace-write"));
+  assert.ok(!start?.includes("sandbox_workspace_write.network_access=true"));
   assert.ok(!start?.includes("danger-full-access"));
   const instructions = mock.calls.find(args => args[0] === "agent" && args[1] === "prompt")?.[3];
   assert.match(instructions!, /不亲自执行目标/);
   assert.match(instructions!, /不能因为任务简单而自己执行/);
   assert.match(instructions!, /由负责人产出真实成果、实际运行检查/);
+  assert.match(instructions!, /crewvane direct --new/);
+  assert.match(instructions!, /不能在终端里处理完却不写回 App/);
   assert.doesNotMatch(instructions!, /简单事项你可以自己完成/);
 });
 
@@ -118,7 +178,7 @@ test("custom commands start in the real pane, preserve argv and reuse the record
   });
   const client = new HerdrClient(mock.runner, "custom-session");
   const reference = await client.prepareConcierge("/workspace", undefined, "", "/cli", "/bin", "/agents",
-    [], undefined, { concierge: 'custom-cli --model "custom model"' }, ["--model", "custom model"], "/agents/custom-cli");
+    undefined, { concierge: 'custom-cli --model "custom model"' }, ["--model", "custom model"], "/agents/custom-cli");
   assert.equal(reference.transport, "pane"); assert.equal(reference.processId, 42);
   assert.ok(mock.calls.some(args => args[0] === "pane" && args[3] === "'/agents/custom-cli' '--model' 'custom model'"));
   assert.ok(!mock.calls.some(args => args[0] === "agent" && args[1] === "start"));

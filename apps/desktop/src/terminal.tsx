@@ -69,7 +69,11 @@ export function HerdrTerminal({ session, title, theme, visible, onClose }: {
   return (
     <section className={`terminal-panel ${expanded ? "expanded" : ""} ${visible ? "" : "terminal-hidden"}`} aria-label="Herdr 工作现场" aria-hidden={!visible} inert={!visible}>
       <header className="terminal-heading">
-        <div><span className={`terminal-dot ${error ? "offline" : ""}`} /><strong>{title}</strong><small>HERDR · 会话持续保留</small></div>
+        <div>
+          <span className={`terminal-dot ${error ? "offline" : ""}`} />
+          <strong>{title}</strong>
+          <small>{title === "全局管家" ? "HERDR · 直聊由管家写回 App" : "HERDR · 会话持续保留"}</small>
+        </div>
         <div>
           <button className="icon-button" aria-label={expanded ? "还原现场面板" : "展开现场面板"} onClick={() => setExpanded(!expanded)}>{expanded ? <Minimize2 size={16} /> : <Maximize2 size={16} />}</button>
           <button className="secondary terminal-hide" title="隐藏面板，Agent 继续执行" onClick={onClose}><X size={15} />隐藏终端</button>

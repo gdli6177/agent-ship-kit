@@ -1,5 +1,7 @@
 export * from "./types.js";
 export * from "./store.js";
+export * from "./model.js";
+export * from "./governance.js";
 export * from "./workflows.js";
 export * from "./service.js";
 export * from "./watchdog.js";

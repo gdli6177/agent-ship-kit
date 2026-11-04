@@ -32,6 +32,8 @@ import type {
   CrewvaneCommand,
   AgentPreferences,
   Goal,
+  Project,
+  ShipPolicy,
   Workflow,
   WorkspaceState,
 } from "../../../packages/core/src/types.js";
@@ -201,6 +203,7 @@ function App() {
       }
       if (event.type === "diagnostic") setError(event.message);
       if (event.type === "herdr-status") setHerdr(event.status);
+      if (event.type === "cli-status") setCli(event.status);
       if (event.type === "open-goal") openGoal(event.goalId);
       if (event.type === "terminal-available") {
         setTerminal(current => current?.session === event.session ? current : { session: event.session, title: event.title, visible: false });
@@ -286,29 +289,14 @@ function App() {
   }
   async function saveGoal(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    const data = new FormData(event.currentTarget),
-      mode = data.get("mode") as "concierge" | "manual";
+    const data = new FormData(event.currentTarget);
     const created = await execute({
-      type: "goal.create",
-      input: {
-        title: String(data.get("title")),
-        description: String(data.get("description")),
-        projectId: String(data.get("projectId")),
-        workflowId: String(data.get("workflowId")),
-        mode,
-        next: String(data.get("next")) || undefined,
-        waitingFor: String(data.get("waitingFor")) || undefined,
-        remindAt: data.get("remindAt")
-          ? new Date(String(data.get("remindAt"))).toISOString()
-          : undefined,
-      },
-    });
-    setModal("");
-    notify(
-      mode === "concierge"
-        ? "目标已记录，正在联系管家。"
-        : "已记录。你可以安心去做下一件事。",
-    );
+      type: "goal.intake", text: String(data.get("request")),
+      projectId: projectId || undefined,
+    }) as Goal;
+    setGoalId(created.id);
+    setModal("goal");
+    notify("目标已保存，正在联系管家。");
     return created;
   }
   return (
@@ -912,6 +900,10 @@ function App() {
                 await execute({ type: "agents.configure", preferences });
                 notify("Agent 偏好已保存，将用于新启动的会话。");
               }}
+              savePolicy={async (projectId: string, policy: { shipPolicy: ShipPolicy; approvers: string[] }) => {
+                await execute({ type: "project.policy.set", projectId, policy, actor: "你" });
+                notify("项目上线策略已更新。");
+              }}
               theme={theme}
               setTheme={(value: string) => setTheme(value)}
               onAction={async (action: string) => {
@@ -970,69 +962,15 @@ function App() {
             className="form"
             onSubmit={(event) => void saveGoal(event).catch(() => {})}
           >
-            <label>
-              要处理什么？
-              <input
-                name="title"
-                required
-                maxLength={160}
-                placeholder="例如：梳理移动端结账流程"
-                autoFocus
-              />
-            </label>
-            <label>
-              背景与完成标准
-              <textarea
-                name="description"
-                placeholder="你知道的背景、约束，或者怎样算完成…"
-              />
-            </label>
-            <div className="form-grid">
-              <label>
-                关联项目（可选）
-                <select
-                  name="projectId"
-                  defaultValue={projectId || state.projects[0]?.id}
-                >
-                  {state.projects.map((item) => (
-                    <option value={item.id} key={item.id}>
-                      {item.id === "personal" ? "不关联项目" : item.name}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <label>
-                工序
-                <select name="workflowId">
-                  {state.workflows.map((item) => (
-                    <option value={item.id} key={item.id}>
-                      {item.name}
-                    </option>
-                  ))}
-                </select>
-              </label>
-            </div>
-            <label>
-              交给谁？
-              <select name="mode" defaultValue="concierge">
-                <option value="concierge">交给管家统筹</option>
-                <option value="manual">仅记录，我自己处理</option>
-              </select>
-            </label>
-            <div className="form-grid">
-              <label>
-                等待对象（可选）
-                <input name="waitingFor" placeholder="例如：YR" />
-              </label>
-              <label>
-                跟进提醒（可选）
-                <input name="remindAt" type="datetime-local" />
-              </label>
-            </div>
-            <label>
-              下一步 / 等待什么（可选）
-              <input name="next" placeholder="例如：等审批后继续联调" />
-            </label>
+            <textarea className="goal-intake" name="request" required autoFocus maxLength={20000} rows={5}
+              aria-label="要交给管家的事情"
+              placeholder="直接说：要做什么、知道哪些背景、怎样算完成……"
+              onKeyDown={event => {
+                if (event.key === "Enter" && (event.metaKey || event.ctrlKey) && !event.nativeEvent.isComposing) {
+                  event.preventDefault(); event.currentTarget.form?.requestSubmit();
+                }
+              }} />
+            <p className="intake-hint">管家会整理目标、项目、工序和下一步。⌘ / Ctrl + Enter 提交。</p>
             {busy && (
               <p className="form-progress" role="status">
                 正在记录并联系管家，首次准备可能需要几十秒…
@@ -1048,7 +986,7 @@ function App() {
               </button>
               <button className="primary" disabled={busy}>
                 <Sparkles size={15} />
-                {busy ? "正在交给管家…" : "记录目标"}
+                {busy ? "正在交给管家…" : "交给管家"}
               </button>
             </div>
           </form>
@@ -1198,8 +1136,8 @@ function GoalEditor({
     : "";
   return (
     <Modal
-      title="更新下一步"
-      description="记录等待对象和跟进时间，之后不必一直记着。"
+      title="编辑目标"
+      description="修改目标说明或接下来的安排。它不会提交成果，也不会表示等待已经结束。"
       error={error}
       onClose={onClose}
     >
@@ -1376,6 +1314,78 @@ function DeliveryEditor({
     </Modal>
   );
 }
+function WaitingActions({ goal, busy, act }: {
+  goal: Goal;
+  busy: boolean;
+  act: (command: CrewvaneCommand, message: string) => Promise<boolean>;
+}) {
+  const [action, setAction] = useState<"resume" | "remind" | "">(""),
+    [update, setUpdate] = useState(""),
+    [reminder, setReminder] = useState(""),
+    [validation, setValidation] = useState(""),
+    decision = goal.attention?.kind === "decision";
+  async function remind(at: string) {
+    const timestamp = Date.parse(at);
+    if (!Number.isFinite(timestamp) || timestamp <= Date.now()) {
+      setValidation("请选择未来的提醒时间。"); return;
+    }
+    if (await act({ type: "goal.remind", goalId: goal.id, at: new Date(timestamp).toISOString() }, "提醒已更新，到时再通知你")) {
+      setAction(""); setValidation("");
+    }
+  }
+  return <section className="waiting-actions" aria-label="推进等待事项">
+    <div className="section-heading">
+      <h3>这件事，接下来怎么走？</h3>
+      <span>正在等 {goal.waitingFor || goal.owner}</span>
+    </div>
+    {decision && <p>{goal.attention?.summary}</p>}
+    <div className="waiting-choices">
+      <button className="primary" disabled={busy} aria-expanded={action === "resume"}
+        onClick={() => { setAction("resume"); setValidation(""); }}>有结果了，继续推进<ArrowRight size={14} /></button>
+      <button className="secondary" disabled={busy || goal.dispatch?.status === "pending"}
+        onClick={() => void act({ type: "goal.followup", goalId: goal.id }, "跟进请求已保存，正在联系管家")}>请管家跟进</button>
+      <button className="secondary" disabled={busy} aria-expanded={action === "remind"}
+        onClick={() => { setAction("remind"); setValidation(""); }}>稍后提醒我</button>
+    </div>
+    {action === "resume" && <form className="form waiting-form" onSubmit={async event => {
+      event.preventDefault();
+      const saved = decision
+        ? await act({ type: "goal.resolve", goalId: goal.id, note: update, actor: "你", outcome: "approved", source: "desktop" },
+          "决定已记入批准账本，正在通知管家继续推进")
+        : await act({ type: "goal.resume", goalId: goal.id, note: update, mode: "concierge" },
+          "等待已结束，正在通知管家继续推进");
+      if (saved) setUpdate("");
+    }}>
+      <label>{decision ? "你的决定原话" : "最新结果与下一步"}
+        <textarea autoFocus required maxLength={2000} value={update} onChange={event => setUpdate(event.target.value)}
+          placeholder="例如：YR 已批准，按原方案继续开发。" />
+      </label>
+      <p className="quiet-copy">决定会写入共享账本；管家把更新交给原负责人，没有可用现场时再安排独立负责人。</p>
+      <div className="modal-actions">
+        <button className="secondary" type="button" disabled={busy} onClick={() => setAction("")}>取消</button>
+        {decision ? <button className="secondary danger-action" type="button" disabled={busy || !update.trim()} onClick={() => void act({
+          type: "goal.resolve", goalId: goal.id, note: update, actor: "你", outcome: "rejected", source: "desktop",
+        }, "决定已记入拒绝账本，管家会按你的决定继续")}>拒绝</button> :
+          <button className="secondary" type="button" disabled={busy || !update.trim()} onClick={() => void act({
+            type: "goal.resume", goalId: goal.id, note: update, mode: "manual",
+          }, "已恢复推进，由你处理")}>我来处理</button>}
+        <button className="primary" disabled={busy || !update.trim()}>{decision ? "批准并继续" : "交给管家继续"}</button>
+      </div>
+    </form>}
+    {action === "remind" && <form className="form waiting-form" onSubmit={event => { event.preventDefault(); void remind(reminder); }}>
+      <div className="waiting-choices">
+        <button type="button" className="secondary" disabled={busy} onClick={() => void remind(new Date(Date.now() + 3_600_000).toISOString())}>1 小时后</button>
+        <button type="button" className="secondary" disabled={busy} onClick={() => void remind(new Date(Date.now() + 86_400_000).toISOString())}>24 小时后</button>
+      </div>
+      <label>自定义提醒时间<input type="datetime-local" required value={reminder} onChange={event => setReminder(event.target.value)} /></label>
+      {validation && <p role="alert" className="modal-error">{validation}</p>}
+      <div className="modal-actions">
+        <button type="button" className="secondary" disabled={busy} onClick={() => setAction("")}>取消</button>
+        <button className="primary" disabled={busy}>保存提醒</button>
+      </div>
+    </form>}
+  </section>;
+}
 function GoalModal({
   goal,
   state,
@@ -1404,17 +1414,19 @@ function GoalModal({
   retry: () => Promise<void>;
 }) {
   const current = goal.steps.findIndex((step) => step.id === goal.stageId),
-    [note, setNote] = useState("");
+    [note, setNote] = useState(""), [feedback, setFeedback] = useState("");
   const ended = goal.status === "completed" || goal.status === "dropped";
   const kind = attentionKind(goal);
-  const needsDecision = kind === "decision" || kind === "follow_up";
+  const needsDecision = goal.status !== "waiting" && (kind === "decision" || kind === "follow_up");
   async function act(command: CrewvaneCommand, message: string) {
     try {
       await execute(command);
       setNote("");
       notify(message);
+      return true;
     } catch {
       /* execute reports errors inside this modal. */
+      return false;
     }
   }
   return (
@@ -1431,12 +1443,35 @@ function GoalModal({
         <span>
           {goal.owner}
           {goal.remindAt ? ` · ${time(goal.remindAt)} 跟进` : ""}
+          {goal.reviewRounds ? ` · 审查 ${goal.reviewRounds}/${goal.reviewLimit ?? 3}` : ""}
         </span>
       </div>
+      {goal.status === "waiting" && <WaitingActions key={goal.id} goal={goal} busy={busy} act={act} />}
       <p className="goal-description">{goal.description}</p>
+      {!ended && goal.status === "active" && <form className="goal-feedback" onSubmit={async event => {
+        event.preventDefault();
+        if (await act({ type: "goal.progress", goalId: goal.id, summary: `补充意见：${feedback}`, actor: "你" },
+          goal.mode === "concierge" ? "补充意见已保存，正在通知管家；原来的下一步保留" : "补充意见已记录，原来的下一步保留")) setFeedback("");
+      }}>
+        <label htmlFor={`feedback-${goal.id}`}>补充意见</label>
+        <textarea id={`feedback-${goal.id}`} aria-label="补充意见" required maxLength={2000} value={feedback}
+          onChange={event => setFeedback(event.target.value)}
+          onKeyDown={event => {
+            if (event.key === "Enter" && (event.metaKey || event.ctrlKey) && !event.nativeEvent.isComposing) {
+              event.preventDefault(); event.currentTarget.form?.requestSubmit();
+            }
+          }}
+          placeholder="有新的要求、约束或想法，直接补充…" />
+        <div><span>追加到目标动态，不覆盖原来的下一步。</span>
+          <button className="secondary" disabled={busy || !feedback.trim()}>{goal.mode === "concierge" ? "发给管家" : "记录意见"}<ArrowRight size={14} /></button>
+        </div>
+      </form>}
       {goal.dispatch && <p className={`dispatch-note ${goal.dispatch.status}`} role="status">
-        {goal.dispatch.status === "pending" ? "正在准备管家并发送目标，你可以先处理其他事情。" :
+        {goal.dispatch.status === "pending" ? (goal.dispatch.kind === "follow_up" ? "正在通知管家跟进，目标仍保持等待。" : "正在准备管家并发送更新，你可以先处理其他事情。") :
           goal.dispatch.status === "failed" ? goal.dispatch.detail :
+            goal.dispatch.kind === "follow_up" ? `跟进请求已送达管家 · ${time(goal.dispatch.at)}，仍在等待实际结果。` :
+            goal.dispatch.kind === "resume" ? `继续推进的更新已送达管家 · ${time(goal.dispatch.at)}。` :
+            goal.dispatch.at ? `已通知管家 · ${time(goal.dispatch.at)}` :
             goal.status === "active" && !goal.herdr ? "已通知管家，等待分配独立负责人；尚未确认执行现场。" :
             goal.status === "active" && goal.live?.reachable === false ? "负责人现场暂时不可达，管家将先核查。" :
             goal.status === "active" && goal.herdr ? (goal.live?.reachable === true ? "负责人现场已连接。" : "已登记负责人现场，正在核实连接。") :
@@ -1519,9 +1554,17 @@ function GoalModal({
         </label>
       )}
       <div className="modal-actions goal-actions">
-        {!ended && (goal.mode === "manual" || goal.dispatch?.status === "failed") &&
+        {!ended && goal.mode === "concierge" && goal.status !== "waiting" && goal.status !== "review" &&
+          <button className="secondary" disabled={busy} onClick={() => void act({
+            type: "goal.takeover", goalId: goal.id,
+          }, "已由你接管，不会再向管家发送后续更新")}>我来处理</button>}
+        {!ended && goal.mode === "manual" && goal.status !== "waiting" &&
+          <button className="secondary" disabled={busy} onClick={() => void act({
+            type: "goal.delegate", goalId: goal.id,
+          }, "已重新交给管家，正在联系")}>交给管家</button>}
+        {!ended && goal.dispatch?.status === "failed" &&
           <button className="secondary" disabled={busy} onClick={() => void retry()}>
-            {goal.mode === "manual" ? "交给管家" : "重试联系管家"}
+            重试联系管家
           </button>}
         {(goal.herdr || goal.mode === "concierge") && (
           <button className="secondary" disabled={busy} onClick={openHerdr}>
@@ -1563,50 +1606,46 @@ function GoalModal({
           </>
         ) : (
           !ended && needsDecision && (
-            <button
-              className="primary"
-              disabled={busy || !note.trim()}
-              onClick={() =>
-                void act(
-                  {
-                    ...(needsDecision
-                      ? {
-                          type: "goal.resolve" as const,
-                          goalId: goal.id,
-                          note,
-                          actor: "你",
-                        }
-                      : {
-                          type: "goal.progress" as const,
-                          goalId: goal.id,
-                          summary: note,
-                          next: note,
-                          actor: "你",
-                        }),
-                  },
-                  "已记录，下一步已更新",
-                )
-              }
-            >
-              记录决定
-              <ArrowRight size={14} />
-            </button>
+            <>
+              {kind === "decision" && <button
+                className="secondary danger-action"
+                disabled={busy || !note.trim()}
+                onClick={() => void act({
+                  type: "goal.resolve", goalId: goal.id, note, actor: "你",
+                  outcome: "rejected", source: "desktop",
+                }, "已记入拒绝账本，管家会按你的决定继续")}
+              >
+                拒绝这个决定
+              </button>}
+              <button
+                className="primary"
+                disabled={busy || !note.trim()}
+                onClick={() => void act({
+                  type: "goal.resolve", goalId: goal.id, note, actor: "你",
+                  ...(kind === "decision" ? { outcome: "approved" as const, source: "desktop" as const } : {}),
+                }, kind === "decision" ? "已记入批准账本，下一步已更新" : "已记录，下一步已更新")}
+              >
+                {kind === "decision" ? "批准这个决定" : "记录决定"}
+                <ArrowRight size={14} />
+              </button>
+            </>
           )
         )}
       </div>
       {!ended && <details className="manual-tools">
         <summary>手动处理</summary>
-        <p>日常进展由管家维护。需要自行接管或纠正时，再使用这里。</p>
-        {!needsDecision && goal.status !== "review" && <label className="decision-input">
-          处理说明<textarea aria-label="手动处理说明" value={note} onChange={event => setNote(event.target.value)}
-            placeholder="记录实际进展，或说明为什么放弃。" />
+        <p>仅在你自己接管或纠正目标时使用；让管家继续工作请用上方操作。</p>
+        <p><strong>补充进展</strong>记录已经发生的事，目标仍会继续；<strong>编辑目标</strong>修改安排；<strong>提交成果</strong>附实际检查并进入待验收。</p>
+        {!needsDecision && goal.status !== "review" && (goal.status !== "waiting" || kind !== "follow_up") && <label className="decision-input">
+          实际发生了什么？<textarea aria-label="补充进展" value={note} onChange={event => setNote(event.target.value)}
+            placeholder="例如：已完成第一轮开发，接下来准备自测。" />
         </label>}
         <div className="modal-actions">
-          <button className="secondary" onClick={edit}>更新下一步</button>
+          <button className="secondary" onClick={edit}>编辑目标</button>
           {goal.status !== "review" && <>
             <button className="secondary" disabled={busy} onClick={submit}>提交成果</button>
-            {!needsDecision && <button className="secondary" disabled={busy || !note.trim()}
-              onClick={() => void act({ type: "goal.progress", goalId: goal.id, summary: note, next: note, actor: "你" }, "已记录实际进展")}>记录进展</button>}
+            {!needsDecision && (goal.status !== "waiting" || kind !== "follow_up") && <button className="secondary" disabled={busy || !note.trim()}
+              onClick={() => void act({ type: "goal.progress", goalId: goal.id, summary: note, actor: "你" }, "进展已补充，原来的下一步不变")}>补充进展</button>}
           </>}
           <button className="secondary danger-action" disabled={busy || !note.trim()}
             onClick={() => void act({ type: "goal.drop", goalId: goal.id, note }, "已放弃，记录仍可查看")}>放弃目标</button>
@@ -1628,6 +1667,7 @@ function Settings({
   openHerdr,
   agentOptions,
   saveAgents,
+  savePolicy,
 }: any) {
   return (
     <div className="content settings">
@@ -1640,13 +1680,14 @@ function Settings({
       </section>
       <AgentPreferencesEditor key={workspace} preferences={state.agents ?? { concierge: "codex" }} options={agentOptions}
         busy={busy} onSave={saveAgents} />
+      <GovernanceEditor projects={state.projects} decisions={state.decisions ?? []} busy={busy} onSave={savePolicy} />
       <section className="setting">
         <div>
           <SquareTerminal />
           <span>
             <h3>Herdr 与全局管家</h3>
             <p>会话由 Herdr 托管，关闭 Crewvane 窗口也不会终止。</p>
-            <p>启动时自动检查最新版并准备，无需安装 Homebrew。</p>
+            <p>启动时自动检查最新版，并安装 Crewvane 注意力面板插件，无需 Homebrew。</p>
             {herdr?.executable && <code className="tool-location">{herdr.executable}</code>}
           </span>
         </div>
@@ -1655,8 +1696,10 @@ function Settings({
             <span className="ready">
               <i />
               已安装 {herdr.version}
+              {herdr.plugin?.phase === "ready" ? " · 注意力面板已接入" : ""}
             </span>
           ) : <span className="setting-progress">{herdr?.detail || "正在检测…"}</span>}
+          {herdr?.plugin?.phase === "error" && <span className="setting-progress">{herdr.plugin.detail}</span>}
           <button className="secondary" disabled={busy || herdr?.phase === "checking" || herdr?.phase === "downloading"}
             onClick={() => void onAction("herdr")}>
             {herdr?.phase === "downloading" ? "正在自动安装…" : herdr?.phase === "checking" ? "正在检查…" : herdr?.installed ? "检查更新" : "重试准备"}
@@ -1678,7 +1721,7 @@ function Settings({
           <Zap />
           <span>
             <h3>Crewvane 命令行</h3>
-            <p>管家通过它写回进展。应用内置，无需另外安装 Node。</p>
+            <p>管家通过它读写当前案卷，不能列出或修改其他目标。应用内置，无需另外安装 Node。</p>
             <code>{cli?.path}</code>
           </span>
         </div>
@@ -1741,6 +1784,75 @@ function Settings({
     </div>
   );
 }
+const shipPolicyLabels: Record<ShipPolicy, string> = {
+  "external-approval": "外部审批（默认）",
+  auto: "检查通过后自动合并与上线",
+  "auto-merge-manual-deploy": "自动合并，上线前审批",
+};
+function GovernanceEditor({
+  projects,
+  decisions,
+  busy,
+  onSave,
+}: {
+  projects: Project[];
+  decisions: WorkspaceState["decisions"];
+  busy: boolean;
+  onSave: (projectId: string, policy: { shipPolicy: ShipPolicy; approvers: string[] }) => Promise<void>;
+}) {
+  const [editing, setEditing] = useState<string>();
+  return <section className="governance-editor" aria-label="上线策略与决定账本">
+    <div className="section-heading">
+      <h2>上线策略与决定账本</h2>
+      <small>{decisions.length} 条已记住的决定</small>
+    </div>
+    <p>默认要求外部审批。自动策略只跳过审批，不跳过检查；删数据、停服、花钱、外部发消息、改产品方向、新建或轮换密钥、改权限始终会进入注意力。</p>
+    <div className="policy-list">
+      {projects.map(project => {
+        const open = editing === project.id;
+        return <div className="policy-row" key={project.id}>
+          <div>
+            <strong>{project.name}</strong>
+            <span>{shipPolicyLabels[project.policy.shipPolicy]}</span>
+            {project.policy.approvers.length > 0 && <small>审批人：{project.policy.approvers.join("、")}</small>}
+          </div>
+          {!open ? <button className="secondary" disabled={busy} onClick={() => setEditing(project.id)}>配置</button> :
+            <form key={`${project.id}-${project.policy.revision}`} onSubmit={async event => {
+              event.preventDefault();
+              const data = new FormData(event.currentTarget);
+              try {
+                await onSave(project.id, {
+                  shipPolicy: String(data.get("shipPolicy")) as ShipPolicy,
+                  approvers: String(data.get("approvers"))
+                    .split(/[\n,，、]/).map(value => value.trim()).filter(Boolean),
+                });
+                setEditing(undefined);
+              } catch {
+                /* The parent shows the server error. */
+              }
+            }}>
+              <label>
+                上线策略
+                <select name="shipPolicy" defaultValue={project.policy.shipPolicy} disabled={busy}>
+                  {Object.entries(shipPolicyLabels).map(([value, label]) =>
+                    <option value={value} key={value}>{label}</option>)}
+                </select>
+              </label>
+              <label>
+                外部审批人（可选）
+                <input name="approvers" defaultValue={project.policy.approvers.join("、")}
+                  placeholder="例如：YR、平台组" disabled={busy} />
+              </label>
+              <div className="policy-actions">
+                <button type="button" className="secondary" disabled={busy} onClick={() => setEditing(undefined)}>取消</button>
+                <button className="primary" disabled={busy}>保存策略</button>
+              </div>
+            </form>}
+        </div>;
+      })}
+    </div>
+  </section>;
+}
 function AgentPreferencesEditor({ preferences, options, busy, onSave }: {
   preferences: AgentPreferences;
   options: { kind: string; installed: boolean }[];
@@ -1752,7 +1864,7 @@ function AgentPreferencesEditor({ preferences, options, busy, onSave }: {
   const installed = options.filter(option => option.installed);
   return <section className="agent-preferences" aria-label="Agent 偏好">
     <div className="section-heading"><h2>Agent 启动命令</h2><small>CLI + 原生参数</small></div>
-    <p>填写每个角色的启动命令，可附带模型等原生参数。已有会话继续工作，新会话使用保存后的命令。</p>
+    <p>填写每个角色的启动命令，可附带模型等原生参数。Crewvane 不替换 CLI，也不借用 Codex 等运行时专属的沙箱参数；已有会话继续工作，新会话使用保存后的命令。</p>
     <form onSubmit={async event => {
       event.preventDefault();
       const data = new FormData(event.currentTarget);
@@ -1770,7 +1882,7 @@ function AgentPreferencesEditor({ preferences, options, busy, onSave }: {
         </label>)}
       </div>
       <datalist id="installed-agent-commands">{installed.map(option => <option key={option.kind} value={option.kind} />)}</datalist>
-      <div className="agent-preference-footer"><small>填写本机任意交互式 CLI 和参数，例如 codex --model gpt-5、npx --yes my-agent。支持绝对路径与 ~/ 路径；自定义 CLI 直接在终端启动，无需 Herdr 类型适配。环境变量和 shell 表达式请放入自己的启动脚本。</small><button className="secondary" disabled={busy}>保存偏好</button></div>
+      <div className="agent-preference-footer"><small>填写本机任意交互式 CLI 和参数，例如 codex --model gpt-5、npx --yes my-agent。支持绝对路径与 ~/ 路径；自定义 CLI 直接在终端启动，无需 Herdr 类型适配。管家案卷边界由 Crewvane CLI 约束，不是操作系统文件沙箱。环境变量和 shell 表达式请放入自己的启动脚本。</small><button className="secondary" disabled={busy}>保存偏好</button></div>
     </form>
   </section>;
 }

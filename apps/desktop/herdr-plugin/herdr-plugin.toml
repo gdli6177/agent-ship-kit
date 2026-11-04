@@ -1,0 +1,60 @@
+id = "dev.crewvane"
+name = "Crewvane"
+version = "0.4.3"
+min_herdr_version = "0.9.5"
+description = "Bring Crewvane attention, one-line goal intake, and concierge focus into Herdr."
+platforms = ["macos"]
+
+[[actions]]
+id = "attention"
+title = "打开 Crewvane 注意力"
+contexts = ["workspace"]
+command = ["/bin/sh", "open-pane.sh", "attention"]
+
+[[actions]]
+id = "new-goal"
+title = "给 Crewvane 新建目标"
+contexts = ["workspace"]
+command = ["/bin/sh", "open-pane.sh", "new-goal"]
+
+[[actions]]
+id = "concierge"
+title = "回到 Crewvane 管家"
+contexts = ["workspace"]
+command = ["/bin/sh", "focus-concierge.sh"]
+
+[[panes]]
+id = "attention"
+title = "Crewvane 注意力"
+placement = "overlay"
+command = ["/bin/sh", "run-cli.sh", "board"]
+
+[[panes]]
+id = "new-goal"
+title = "Crewvane 新目标"
+placement = "overlay"
+command = ["/bin/sh", "new-goal.sh"]
+
+[[events]]
+on = "pane.agent_status_changed"
+command = ["/bin/sh", "sync-live.sh"]
+
+[[events]]
+on = "pane.exited"
+command = ["/bin/sh", "sync-live.sh"]
+
+[[events]]
+on = "pane.closed"
+command = ["/bin/sh", "sync-live.sh"]
+
+[[events]]
+on = "pane.moved"
+command = ["/bin/sh", "sync-live.sh"]
+
+[[events]]
+on = "tab.closed"
+command = ["/bin/sh", "sync-live.sh"]
+
+[[events]]
+on = "workspace.closed"
+command = ["/bin/sh", "sync-live.sh"]

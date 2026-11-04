@@ -49,13 +49,12 @@ try {
   await page.getByRole("button", { name: "隐藏终端", exact: true }).click();
   assert.equal(await page.locator(".terminal-panel").isVisible(), false);
   await page.locator(".top-actions").getByRole("button", { name: "新目标", exact: true }).click();
-  await page.getByLabel("要处理什么？").fill("不能被终端抢走的草稿");
+  await page.getByLabel("要交给管家的事情").fill("不能被终端抢走的草稿");
   // An arriving connection/open event must not dismiss a form or steal its focus.
-  await page.getByLabel("背景与完成标准").fill("保留正在填写的内容");
   await page.evaluate((id) => window.crewvane.openHerdr(id), goal.id);
   assert.equal(await page.locator(".terminal-panel").isVisible(), false);
-  assert.equal(await page.getByLabel("要处理什么？").inputValue(), "不能被终端抢走的草稿");
-  await page.getByLabel("背景与完成标准").type("，可以继续输入");
+  assert.equal(await page.getByLabel("要交给管家的事情").inputValue(), "不能被终端抢走的草稿");
+  await page.getByLabel("要交给管家的事情").type("，可以继续输入");
   await page.getByRole("button", { name: "关闭", exact: true }).click();
   await page.getByRole("region", { name: "Herdr 工作现场" }).waitFor();
   await page.getByRole("button", { name: "隐藏终端", exact: true }).click();

@@ -1,10 +1,11 @@
 import type { CrewvaneCommand } from "../../../packages/core/src/index.js";
 import type { HerdrStatus } from "../electron/herdr-install.js";
+import type { HerdrPluginStatus } from "../electron/herdr-plugin.js";
 export interface DesktopApi {
   command(command: CrewvaneCommand): Promise<any>;
   selectWorkspace(): Promise<string | null>; selectProject(): Promise<string | null>;
   environment(): Promise<{ workspace?: string; version: string }>;
-  herdrStatus(): Promise<HerdrStatus & { session: string }>;
+  herdrStatus(): Promise<HerdrStatus & { session: string; plugin: HerdrPluginStatus }>;
   agentChoices(): Promise<{ kind: string; installed: boolean }[]>;
   installHerdr(): Promise<unknown>; cliStatus(): Promise<{ installed: boolean; path: string; directory: string }>;
   installCli(): Promise<{ output: string }>; prepareConcierge(): Promise<unknown>;
