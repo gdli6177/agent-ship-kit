@@ -985,14 +985,14 @@ function App() {
             </label>
             <div className="form-grid">
               <label>
-                归属项目
+                关联项目（可选）
                 <select
                   name="projectId"
                   defaultValue={projectId || state.projects[0]?.id}
                 >
                   {state.projects.map((item) => (
                     <option value={item.id} key={item.id}>
-                      {item.name}
+                      {item.id === "personal" ? "不关联项目" : item.name}
                     </option>
                   ))}
                 </select>
@@ -1432,7 +1432,11 @@ function GoalModal({
       <p className="goal-description">{goal.description}</p>
       {goal.dispatch && <p className={`dispatch-note ${goal.dispatch.status}`} role="status">
         {goal.dispatch.status === "pending" ? "正在准备管家并发送目标，你可以先处理其他事情。" :
-          goal.dispatch.status === "failed" ? goal.dispatch.detail : `已送达管家 · ${time(goal.dispatch.at)}`}
+          goal.dispatch.status === "failed" ? goal.dispatch.detail :
+            goal.status === "active" && !goal.herdr ? "已通知管家，等待分配独立负责人；尚未确认执行现场。" :
+            goal.status === "active" && goal.live?.reachable === false ? "负责人现场暂时不可达，管家将先核查。" :
+            goal.status === "active" && goal.herdr ? (goal.live?.reachable === true ? "负责人现场已连接。" : "已登记负责人现场，正在核实连接。") :
+            `已通知管家 · ${time(goal.dispatch.at)}`}
       </p>}
       {goal.watchdog && !goal.attention && <p className="dispatch-note">
         {goal.watchdog.contactedAt ? "巡检已请管家核查现场，常规问题会先由管家处理。" : "巡检正在核查这个目标的下一步。"}

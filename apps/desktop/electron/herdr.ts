@@ -288,6 +288,9 @@ export class HerdrClient {
       `${conciergeRole}\n目标有更新 ${goalId}：${title}。请用 crewvane goal show ${goalId} --json 读取最新状态，并用 crewvane status --json 查看当前 Agent 默认偏好。待执行的目标交给独立负责人；退回修改转交原负责人；交付齐备则向人交接。若人已经验收或放弃，请通知负责人停止该目标的工作，不再派发。`,
     );
   }
+  async refreshConcierge(reference: HerdrReference, root: string, preferences?: AgentPreferences) {
+    await this.prompt(reference, conciergeInstructions(root, preferences, this.session));
+  }
   async open(reference: HerdrReference) {
     if (reference.tabId)
       await this.runner.run(["tab", "focus", reference.tabId]);
@@ -296,7 +299,7 @@ export class HerdrClient {
   }
   async notifyWatchdog(reference: HerdrReference, issues: { goalId: string; reason: string }[]) {
     if (!reference.agent && reference.transport !== "pane") throw new Error("管家尚未准备好，请先连接管家");
-    const reasons: Record<string, string> = { blocked: "负责人正在等待输入或批准", missing: "负责人会话暂时不可达", stale: "目标 30 分钟没有写回实质进展" };
+    const reasons: Record<string, string> = { blocked: "负责人正在等待输入或批准", missing: "负责人会话暂时不可达", stale: "目标 30 分钟没有写回实质进展", unassigned: "目标尚未登记独立负责人现场，请先创建并启动负责人，保存真实现场再发送任务" };
     await this.prompt(reference,
       `${conciergeRole}\n这是 Crewvane 后台巡检，不是用户新增任务：${issues.map(issue => `${issue.goalId}（${reasons[issue.reason] ?? issue.reason}）`).join("；")}。请先用 crewvane goal show 读取实际记录，检查真实负责人现场并主动联系负责人，通过澄清要求、调整分工或联系其他负责人协调恢复，不能自己接手执行。写回实际协调进展，不把终端安静或 idle 当作失败或完成。确实必须由人决定时才用 goal decide 提出具体问题；不要让人填写进度表。已等待他人、已交付或已结束的目标不要重新启动。`);
   }

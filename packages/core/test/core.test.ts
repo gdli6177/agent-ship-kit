@@ -58,6 +58,22 @@ test("late dispatch never reopens a dropped goal", async () => {
   await assert.rejects(service.execute({ type: "goal.dispatch", goalId: item.id, status: "sent" }));
   assert.equal((await service.read()).goals[0]?.status, "dropped");
 });
+test("goal owners cannot register the concierge or another live goal's execution pane", async () => {
+  const {service}=await fixture(), first=await create(service), second=await create(service);
+  await service.execute({type:"concierge.status",status:"ready",
+    reference:{session:"test",agent:"concierge",paneId:"w1:p1",tabId:"w1:t1"}});
+  await assert.rejects(service.execute({type:"session.set",goalId:first.id,
+    reference:{session:"test",agent:"concierge",paneId:"w1:p1",tabId:"w1:t1"}}),/独立负责人/);
+  await service.execute({type:"session.set",goalId:first.id,
+    reference:{session:"test",agent:"owner-a",paneId:"w1:p2",tabId:"w1:t2"}});
+  await assert.rejects(service.execute({type:"session.set",goalId:second.id,
+    reference:{session:"test",agent:"owner-a",paneId:"w1:p2",tabId:"w1:t2"}}),/其他目标/);
+  await service.execute({type:"session.set",goalId:second.id,
+    reference:{session:"test",agent:"owner-b",paneId:"w1:p3",tabId:"w1:t3"}});
+  const state=await service.read();
+  assert.equal(state.goals[0]?.owner,"owner-a");
+  assert.equal(state.goals[1]?.owner,"owner-b");
+});
 test("Agent role preferences persist without changing running concierge references", async () => {
   const { service } = await fixture();
   await service.execute({ type: "concierge.status", status: "ready",

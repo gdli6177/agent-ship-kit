@@ -16,6 +16,8 @@ function record(goal: Goal, at: string, text: string) {
 }
 function reasonFor(goal: Goal, now: number): WatchdogReason | undefined {
   const age = now - Date.parse(progressAt(goal));
+  if (!goal.herdr?.paneId && !goal.herdr?.agent && goal.dispatch?.status !== "pending" &&
+    now - Date.parse(goal.dispatch?.at ?? goal.createdAt) >= OWNER_START_GRACE) return "unassigned";
   if (goal.live?.state === "blocked") return "blocked";
   if (goal.live?.reachable === false && age >= OWNER_START_GRACE) return "missing";
   if (age >= STALE_AFTER) return "stale";
@@ -40,7 +42,8 @@ export function inspectWatchdog(goals: Goal[], at: string): WatchdogRequest[] {
       watch.escalatedAt = at;
       if (!goal.attention) goal.attention = {
         kind: "intervention", source: "watchdog", since: at,
-        summary: "巡检已请管家处理，但 10 分钟仍未收到恢复进展，请查看现场。",
+        summary: reason === "unassigned" ? "巡检已请管家分配负责人，但 10 分钟仍没有独立执行现场，请查看管家。" :
+          "巡检已请管家处理，但 10 分钟仍未收到恢复进展，请查看现场。",
       };
       record(goal, at, "已联系管家，但仍未收到恢复进展，现请你查看现场。");
     }

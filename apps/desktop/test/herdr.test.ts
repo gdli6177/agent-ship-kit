@@ -59,6 +59,16 @@ test("watchdog keeps recovery with owners instead of asking the concierge to exe
   assert.match(message, /不能自己接手执行/);
   assert.doesNotMatch(message, /能处理的由你处理/);
 });
+test("resumed concierge receives current role instructions without starting another agent", async () => {
+  const mock=fake({"agent prompt":"{}"});
+  await new HerdrClient(mock.runner,"test").refreshConcierge(
+    {session:"test",agent:"concierge",paneId:"w1:p1"},"/workspace",{concierge:"codex",owner:"custom-cli"},
+  );
+  assert.equal(mock.calls.length,1);
+  assert.deepEqual(mock.calls[0]!.slice(0,3),["agent","prompt","concierge"]);
+  assert.match(mock.calls[0]![3]!,/不亲自执行目标/);
+  assert.match(mock.calls[0]![3]!,/custom-cli/);
+});
 
 test("surfaces a stopped server without inventing a session", async () => {
   const mock = fake({ "agent list": '!Herdr agent list：{"error":"server_not_running"}' });

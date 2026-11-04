@@ -8,7 +8,7 @@ export interface AgentPreferences { concierge: string; owner?: string; worker?: 
 export interface Attention { kind: AttentionKind; summary: string; since: string; notifiedAt?: string; source?: "live" | "dispatch" | "watchdog" }
 export interface HerdrReference { session: string; workspaceId?: string; tabId?: string; paneId?: string; agent?: string; transport?: "pane"; processId?: number }
 export interface LivePresence { state: LiveState; checkedAt: string; reachable?: boolean }
-export type WatchdogReason = "blocked" | "missing" | "stale";
+export type WatchdogReason = "blocked" | "missing" | "stale" | "unassigned";
 export interface WatchdogState {
   reason: WatchdogReason; basis: string; detectedAt: string;
   attemptedAt?: string; contactedAt?: string; escalatedAt?: string; lastError?: string;

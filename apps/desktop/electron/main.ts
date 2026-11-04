@@ -74,6 +74,10 @@ function client(path: string, workspace = root) {
   });
 }
 const preparations = new Map<string, Promise<import("../../../packages/core/src/index.js").HerdrReference>>();
+const refreshedConcierges = new Map<string, string>();
+function conciergeIdentity(reference: import("../../../packages/core/src/index.js").HerdrReference) {
+  return JSON.stringify([reference.session, reference.paneId, reference.agent, reference.processId]);
+}
 const handoffs = new Map<string, Promise<void>>();
 async function dispatchGoal(target: WorkspaceService, goalId: string): Promise<void> {
   const key = `${target.root}:${goalId}`;
@@ -119,6 +123,11 @@ async function doPrepareConcierge(target: WorkspaceService) {
   try {
     const existing = await client(status.executable, target.root).findConcierge(state.concierge);
     if (existing) {
+      const identity = conciergeIdentity(existing);
+      if (refreshedConcierges.get(target.root) !== identity) {
+        await client(status.executable, target.root).refreshConcierge(existing, target.root, state.agents);
+        refreshedConcierges.set(target.root, identity);
+      }
       await target.execute({ type: "concierge.status", status: "ready", reference: existing });
       return existing;
     }
@@ -142,6 +151,7 @@ async function doPrepareConcierge(target: WorkspaceService) {
       command.args,
       agentExecutable,
     );
+    refreshedConcierges.set(target.root, conciergeIdentity(reference));
     await target.execute({ type: "concierge.status", status: "ready", reference });
     return reference;
   } catch (error) {
@@ -174,7 +184,7 @@ async function synchronize() {
   const target = service, workspace = root;
   try {
     let state = await target.read(), status = await herdrStatus();
-    const tracked = state.goals.filter(goal => goal.status === "active" && goal.herdr?.agent);
+    const tracked = state.goals.filter(goal => goal.status === "active" && (goal.herdr?.agent || goal.herdr?.transport === "pane"));
     if (status.executable && tracked.length) {
       try {
         const all = await client(status.executable, workspace).presences(tracked);

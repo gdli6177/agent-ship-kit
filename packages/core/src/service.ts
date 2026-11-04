@@ -169,7 +169,7 @@ export class WorkspaceService {
                 : "补充下一步和跟进时间，或交给管家继续处理。"),
             owner:
               input.mode === "concierge"
-                ? "管家"
+                ? "待分配负责人"
                 : text(input.waitingFor || "你", "等待对象", 120),
             ...(input.waitingFor
               ? { waitingFor: text(input.waitingFor, "等待对象", 120) }
@@ -418,7 +418,19 @@ export class WorkspaceService {
             throw new Error("自定义 CLI 现场需要真实 Pane 与前台进程 ID");
           if (command.goalId) {
             const item = goal(command.goalId);
+            const sameSite = (other: typeof reference) => other.session === reference.session &&
+              (!!reference.paneId && reference.paneId === other.paneId ||
+               !!reference.tabId && reference.tabId === other.tabId ||
+               !!reference.agent && reference.agent === other.agent);
+            if (reference.agent === "concierge" || sameSite(state.concierge))
+              throw new Error("目标需要独立负责人，不能把全局管家登记为执行现场");
+            if (state.goals.some(other => other.id !== item.id &&
+              !["completed","dropped"].includes(other.status) && other.herdr && sameSite(other.herdr)))
+              throw new Error("该现场属于其他目标，请为当前目标创建独立负责人 Tab");
             item.herdr = structuredClone(reference);
+            delete item.live;
+            if (item.mode === "concierge" && item.status === "active")
+              item.owner = reference.agent || "独立负责人";
             activity(item, "session", "已关联 Herdr 现场。", "系统");
             return item;
           }

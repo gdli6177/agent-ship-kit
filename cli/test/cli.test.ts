@@ -49,6 +49,13 @@ test("CLI records a custom terminal transport and rejects missing process identi
   const invalid = await call(root, ["session", "set", created.json.id, "--pane", "w1:p1", "--transport", "shell", "--process-id", "123"]);
   assert.equal(invalid.code, 1);
 });
+test("CLI creates a goal without requiring a project", async () => {
+  const root=await fixture("crewvane-cli-no-project-");
+  const result=await call(root,["goal","create","--title","直接交代一件事"]);
+  assert.equal(result.code,0);
+  assert.equal(result.json.projectId,"personal");
+  assert.equal(result.json.owner,"待分配负责人");
+});
 test("spawned CLI updates an item and rejects a late update after cancellation", async () => {
   const root = await fixture("crewvane-cli-process-");
   const cli = (...args: string[]) => promisify(execFile)("pnpm", ["--dir", "cli", "exec", "tsx", "src/main.ts",
