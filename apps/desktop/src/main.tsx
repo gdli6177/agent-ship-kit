@@ -323,14 +323,18 @@ function App() {
         </div>
         <button
           className="workspace-switch"
-          aria-label="选择工作区"
-          title={workspace ?? "设置存放所有项目和个人事项的工作区"}
-          onClick={() => setModal("workspace")}
+          aria-label="我的工作台"
+          title="查看所有项目和个人事项"
+          onClick={() => {
+            setPage("home");
+            setProjectId("");
+            setModal("");
+          }}
         >
           <span className="pixel-dot" />
           <span>
             <strong>{state.name}</strong>
-            <small>{workspace ? `工作区 · ${workspace.split("/").filter(Boolean).at(-1)}` : "所有项目与个人事项"}</small>
+            <small>所有项目与个人事项</small>
           </span>
           <ChevronRight size={14} />
         </button>
@@ -492,7 +496,7 @@ function App() {
                 disabled={pickingWorkspace}
                 onClick={() => void pickWorkspace()}
               >
-                {pickingWorkspace ? "正在打开工作区…" : "打开我的工作台"}
+                {pickingWorkspace ? "正在准备工作区…" : "选择存储位置并开始"}
                 <ArrowRight size={17} />
               </button>
             </section>
@@ -942,14 +946,14 @@ function App() {
         </main>
       </div>
       {terminal && <Suspense fallback={null}><HerdrTerminal session={terminal.session} title={terminal.title} theme={theme} visible={terminal.visible && !modal} onClose={() => setTerminal(current => current ? { ...current, visible: false } : current)} /></Suspense>}
-      {modal === "workspace" && <Modal title="我的工作台" description="一个工作区，统筹所有项目和个人事项。这里存放目标与记录，不是某一个项目的代码目录。" error={error} onClose={() => setModal("")}>
+      {modal === "workspace" && <Modal title="工作区存储位置" description="这里只设置所有目标、提醒和管家的保存位置，不是选择项目。" error={error} onClose={() => setModal("")}>
         <div className="workspace-location">
           <Folder size={22} />
           <div><strong>{workspace ? "当前工作区" : "先选择一个工作区文件夹"}</strong><p>{workspace || "建议创建一个专门的文件夹，例如 Documents/Crewvane。"}</p></div>
         </div>
         <p className="workspace-help">要处理某个代码项目，请在左侧「项目」旁点 + 添加。切换工作区后，将显示所选目录自己的目标和管家。</p>
         <div className="form-actions">
-          <button className="secondary" onClick={() => setModal("")}>返回工作台</button>
+          <button className="secondary" onClick={() => setModal("")}>返回设置</button>
           <button className="primary" disabled={pickingWorkspace} onClick={() => void pickWorkspace()}>
             {pickingWorkspace ? "正在打开工作区…" : workspace ? "选择其他工作区文件夹" : "选择工作区文件夹"}
           </button>
@@ -1053,8 +1057,8 @@ function App() {
       {modal === "project" && (
         <Modal
           error={error}
-          title="添加一个空间"
-          description="项目只用于归类与提供工作目录，仍由同一位管家统筹。"
+          title="添加项目"
+          description="在这里创建项目并关联本机目录；目录可留空，仍由同一位管家统筹。"
           onClose={() => setModal("")}
         >
           <form
@@ -1690,7 +1694,7 @@ function Settings({
         <div>
           <Folder />
           <span>
-            <h3>我的工作台</h3>
+            <h3>工作区存储位置</h3>
             <p>
               {workspace}
               <br />

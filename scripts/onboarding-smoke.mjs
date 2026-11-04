@@ -50,7 +50,7 @@ try {
   });
   const page = await app.firstWindow();
   page.on("pageerror", error => errors.push(String(error)));
-  await page.getByRole("button", { name: "打开我的工作台" }).waitFor();
+  await page.getByRole("button", { name: "选择存储位置并开始" }).waitFor();
   // The app must install Herdr itself, with no Homebrew and no system Herdr.
   await expect.poll(async () => {
     const status = await page.evaluate(() => window.crewvane.herdrStatus());
@@ -61,29 +61,33 @@ try {
   assert.equal(installed.version, installed.latestVersion);
   const { stdout } = await exec(managedHerdr, ["--version"]); assert.ok(stdout.includes(installed.version));
   await picker(rootA);
-  await page.getByRole("button", { name: "打开我的工作台" }).click();
+  await page.getByRole("button", { name: "选择存储位置并开始" }).click();
   await page.getByRole("heading", { name: "现在，可以安心了。" }).waitFor();
   await page.getByText("已打开工作区：所有事项", { exact: true }).waitFor();
   assert.equal((await page.evaluate(() => window.crewvane.environment())).workspace, await realpath(rootA));
-  await page.getByRole("button", { name: "选择工作区", exact: true }).click();
+  await page.getByRole("button", { name: "我的工作台", exact: true }).click();
+  assert.equal(await page.getByRole("dialog").count(), 0, "workspace overview is navigation, not a directory picker");
+  await page.getByRole("button", { name: "设置", exact: true }).click();
+  await page.getByRole("button", { name: "更换工作区", exact: true }).click();
   await page.getByRole("dialog").getByText("当前工作区", { exact: true }).waitFor();
   await page.getByRole("dialog").getByText(await realpath(rootA), { exact: true }).waitFor();
   // Re-selecting the same directory must acknowledge it.
-  await page.getByRole("button", { name: "选择其他工作区文件夹" }).click();
+  await page.getByRole("dialog").getByRole("button", { name: "选择其他工作区文件夹" }).click();
   await page.getByText("你已在这个工作区。", { exact: true }).waitFor();
+  await page.getByRole("button", { name: "设置", exact: true }).click();
   // Cancel preserves the workspace and keeps a meaningful selection surface.
   await picker(rootB, true);
-  await page.getByRole("button", { name: "选择工作区", exact: true }).click();
-  await page.getByRole("button", { name: "选择其他工作区文件夹" }).click();
+  await page.getByRole("button", { name: "更换工作区", exact: true }).click();
+  await page.getByRole("dialog").getByRole("button", { name: "选择其他工作区文件夹" }).click();
   assert.equal((await page.evaluate(() => window.crewvane.environment())).workspace, await realpath(rootA));
   assert.equal(await page.getByRole("dialog").isVisible(), true);
   await picker(legacy);
-  await page.getByRole("button", { name: "选择其他工作区文件夹" }).click();
+  await page.getByRole("dialog").getByRole("button", { name: "选择其他工作区文件夹" }).click();
   await page.getByRole("dialog").getByRole("alert").filter({hasText:"不支持的工作区状态版本"}).waitFor();
   assert.equal((await page.evaluate(() => window.crewvane.environment())).workspace, await realpath(rootA));
   assert.ok(!(await page.getByRole("dialog").getByRole("alert").innerText()).includes("remote method"));
   await picker(rootB);
-  await page.getByRole("button", { name: "选择其他工作区文件夹" }).click();
+  await page.getByRole("dialog").getByRole("button", { name: "选择其他工作区文件夹" }).click();
   await page.getByText("已打开工作区：另一个工作区", { exact: true }).waitFor();
   await page.getByRole("button", { name: "设置", exact: true }).click();
   const command = `"${customCli}" --model "local test model"`;
@@ -122,7 +126,8 @@ try {
   await page.screenshot({ path: join(home, "onboarding-dark.png"), animations:"disabled" });
   await page.getByRole("button", { name: "隐藏终端", exact: true }).click();
   await page.getByRole("button", { name: "浅色模式" }).click();
-  await page.getByRole("button", { name: "选择工作区", exact: true }).click();
+  await page.getByRole("button", { name: "设置", exact: true }).click();
+  await page.getByRole("button", { name: "更换工作区", exact: true }).click();
   await page.screenshot({ path: join(home, "workspace-light.png"), animations:"disabled" });
   await page.getByRole("button", { name: "关闭", exact: true }).click();
   const beforeRestart = (await stat(managedHerdr)).mtimeMs;
