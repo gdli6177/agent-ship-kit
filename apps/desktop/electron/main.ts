@@ -1,5 +1,6 @@
 import { app, BrowserWindow, dialog, ipcMain, Menu, nativeImage, Notification, shell, Tray } from "electron";
-import { access, chmod, lstat, mkdir, readFile, realpath, stat, symlink, unlink, writeFile } from "node:fs/promises";
+import { watch, type FSWatcher } from "node:fs";
+import { access, chmod, lstat, mkdir, readFile, readlink, realpath, rm, stat, symlink, unlink, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { execFile } from "node:child_process";
@@ -10,26 +11,44 @@ import { HerdrClient, herdrRunner, quoteShell } from "./herdr.js";
 import { TerminalHost } from "./terminal-host.js";
 import { parseAgentCommand } from "./agent-command.js";
 import { Executables } from "./executables.js";
-import { HerdrInstallation } from "./herdr-install.js";
+import { HerdrInstallation, type HerdrStatus } from "./herdr-install.js";
+import { HerdrPlugin } from "./herdr-plugin.js";
 import { deliverGoalUpdate } from "./goal-delivery.js";
+import { CoordinatorQueue } from "./coordinator-queue.js";
 const exec = promisify(execFile);
 let window: BrowserWindow, tray: Tray, root: string | undefined, service: WorkspaceService | undefined, syncing = false, quitting = false;
+let stateWatcher: FSWatcher | undefined, stateRefreshTimer: ReturnType<typeof setTimeout> | undefined;
 const selections = new Set<string>();
 const here = __dirname;
 const terminals = new TerminalHost((event) => {
   if (window && !window.isDestroyed()) window.webContents.send("crewvane:event", event);
 });
 const rendererURL = pathToFileURL(join(here, "renderer/index.html")).href;
-let tools: Executables, herdrInstallation: HerdrInstallation;
+let tools: Executables, herdrInstallation: HerdrInstallation, herdrPlugin: HerdrPlugin;
 function sessionName(path = root) { return process.env.CREWVANE_HERDR_SESSION ?? `crewvane-${createHash("sha256").update(path ?? "").digest("hex").slice(0, 10)}`; }
 function sender(event: Electron.IpcMainInvokeEvent) { if (event.sender !== window.webContents || event.senderFrame?.url !== rendererURL) throw new Error("不受信任的界面请求"); }
 function activeService() { if (!service) throw new Error("请先打开工作区"); return service; }
 async function snapshot() { return activeService().read(); }
+function broadcastHerdrStatus(status: HerdrStatus) {
+  if (!window || window.isDestroyed()) return;
+  window.webContents.send("crewvane:event", {
+    type: "herdr-status",
+    status: {
+      ...status,
+      session: sessionName(),
+      plugin: herdrPlugin?.status() ?? { phase: "idle", installed: false },
+    },
+  });
+}
 async function executable(command: string, cwd?: string) {
   return tools.find(command, cwd);
 }
 async function herdrStatus() {
-  return { ...await herdrInstallation.status(), session: sessionName() };
+  return {
+    ...await herdrInstallation.status(),
+    session: sessionName(),
+    plugin: herdrPlugin?.status() ?? { phase: "idle", installed: false },
+  };
 }
 async function agentChoices() {
   const status = await herdrStatus();
@@ -40,21 +59,61 @@ async function agentChoices() {
     kind, installed: Boolean(await executable(kind)),
   })));
 }
+let companionPreparation: Promise<Awaited<ReturnType<typeof prepareHerdrCompanionsNow>>> | undefined;
+function prepareHerdrCompanions(workspace = root) {
+  companionPreparation ??= prepareHerdrCompanionsNow(workspace).finally(() => {
+    companionPreparation = undefined;
+  });
+  return companionPreparation;
+}
+async function prepareHerdrCompanionsNow(workspace = root) {
+  const status = await herdrInstallation.ensure();
+  if (!status.executable) return status;
+  try {
+    await installCli(workspace);
+  } catch (error) {
+    herdrPlugin.fail(`Crewvane CLI 准备失败：${error instanceof Error ? error.message : String(error)}`);
+    throw error;
+  }
+  const plugin = await herdrPlugin.ensure(status.executable);
+  broadcastHerdrStatus(status);
+  if (plugin.phase === "error") throw new Error(plugin.detail);
+  return status;
+}
 async function installHerdr() {
-  return herdrInstallation.ensure(true);
+  const status = await herdrInstallation.ensure(true);
+  if (!status.executable) return status;
+  try {
+    await installCli();
+  } catch (error) {
+    herdrPlugin.fail(`Crewvane CLI 准备失败：${error instanceof Error ? error.message : String(error)}`);
+    throw error;
+  }
+  await herdrPlugin.ensure(status.executable);
+  broadcastHerdrStatus(status);
+  return status;
 }
 async function cliStatus() {
   const bundled = join(here, "cli/crewvane.cjs"), path = join(app.getPath("home"), ".local/bin/crewvane"), directory = join(app.getPath("userData"), "bin");
   return { bundled: Boolean(await access(bundled).then(() => true).catch(() => false)), installed: Boolean(await lstat(path).then(() => true).catch(() => false)), path, directory };
 }
-async function installCli(workspace = root) {
+let cliInstallQueue: Promise<{ output: string }> = Promise.resolve({ output: "" });
+function installCli(workspace = root) {
+  const installing = cliInstallQueue.catch(() => undefined).then(() => installCliNow(workspace));
+  cliInstallQueue = installing;
+  return installing;
+}
+async function installCliNow(workspace = root) {
   const status = await cliStatus(); if (!status.bundled) throw new Error("安装包缺少内置 CLI");
   await mkdir(status.directory, { recursive: true });
   await mkdir(join(app.getPath("home"), ".local/bin"), { recursive: true });
   if (status.installed) {
     const existing = await readFile(status.path, "utf8").catch(() => "");
     const linked = await realpath(status.path).catch(() => "");
-    if (!existing.startsWith("#!/bin/sh\n# Crewvane embedded CLI\n") && linked !== join(status.directory, "crewvane")) throw new Error(`${status.path} 已存在，且不是 Crewvane 安装的 CLI。请手动处理后重试。`);
+    const target = await readlink(status.path).catch(() => "");
+    if (!existing.startsWith("#!/bin/sh\n# Crewvane embedded CLI\n") &&
+      linked !== join(status.directory, "crewvane") && target !== join(status.directory, "crewvane"))
+      throw new Error(`${status.path} 已存在，且不是 Crewvane 安装的 CLI。请手动处理后重试。`);
   }
   const cliRuntime = app.isPackaged ? join(process.resourcesPath, "cli-node") : process.execPath;
   const cliBundle = app.isPackaged ? join(process.resourcesPath, "app.asar.unpacked/dist/cli/crewvane.cjs") : join(here, "cli/crewvane.cjs");
@@ -62,10 +121,16 @@ async function installCli(workspace = root) {
   const defaultRoot = workspace ? quoteShell(workspace) : '""';
   await writeFile(launcher, `#!/bin/sh\n# Crewvane embedded CLI\n[ -n "\${CREWVANE_WORKSPACE:-}" ] || CREWVANE_WORKSPACE=${defaultRoot}\nexport CREWVANE_WORKSPACE\nELECTRON_RUN_AS_NODE=1 exec ${quoteShell(cliRuntime)} ${quoteShell(cliBundle)} "$@"\n`, { mode: 0o700 });
   await chmod(launcher, 0o700);
-  if (status.installed) await unlink(status.path);
+  if (status.installed) await unlink(status.path).catch((error: NodeJS.ErrnoException) => {
+    if (error.code !== "ENOENT") throw error;
+  });
   await symlink(launcher, status.path);
   const checked = await exec(status.path, ["status", ...(workspace ? ["--root", workspace] : [])], { timeout: 15_000 });
-  return { ...(await cliStatus()), output: checked.stdout.trim() };
+  const installed = await cliStatus();
+  if (window && !window.isDestroyed()) {
+    window.webContents.send("crewvane:event", { type: "cli-status", status: installed });
+  }
+  return { ...installed, output: checked.stdout.trim() };
 }
 function client(path: string, workspace = root) {
   const session = sessionName(workspace);
@@ -80,10 +145,22 @@ function conciergeIdentity(reference: import("../../../packages/core/src/index.j
   return JSON.stringify([reference.session, reference.paneId, reference.agent, reference.processId]);
 }
 const handoffs = new Map<string, Promise<void>>();
+const coordinatorQueue = new CoordinatorQueue();
+function coordinate<T>(target: WorkspaceService, task: () => Promise<T>): Promise<T> {
+  return coordinatorQueue.run(target.root, task);
+}
+function coordinatorScope(target: WorkspaceService) {
+  return join(target.root, ".crewvane", "coordinator-scope.json");
+}
+async function setCoordinatorScope(target: WorkspaceService, goalId: string, requestId?: string) {
+  await writeFile(coordinatorScope(target), `${JSON.stringify({
+    goalId, requestId, setAt: new Date().toISOString(),
+  }, null, 2)}\n`, { mode: 0o600 });
+}
 async function dispatchGoal(target: WorkspaceService, goalId: string): Promise<void> {
   const key = `${target.root}:${goalId}`;
   const pending = handoffs.get(key); if (pending) return pending;
-  const work = (async () => {
+  const work = coordinate(target, async () => {
     try {
       await deliverGoalUpdate(target, goalId, async item => {
         const reference = await prepareConcierge(target);
@@ -92,9 +169,11 @@ async function dispatchGoal(target: WorkspaceService, goalId: string): Promise<v
           latest.dispatch?.id !== item.dispatch?.id) return;
         const status = await herdrStatus();
         if (!status.executable) throw new Error("Herdr 尚未准备好");
-        const messenger = client(status.executable, target.root);
+        const herdrExecutable = status.executable;
+        const messenger = client(herdrExecutable, target.root);
+        await setCoordinatorScope(target, item.id, item.dispatch?.id);
         if (item.dispatch?.kind === "follow_up")
-          await messenger.notifyFollowUp(reference, item.id, item.dispatch.note || "");
+          await messenger.notifyFollowUp(reference, item.id, item.dispatch.note || "", item);
         else await messenger.notifyGoal(reference, item.id, item.title, item);
       });
     } finally {
@@ -102,7 +181,7 @@ async function dispatchGoal(target: WorkspaceService, goalId: string): Promise<v
         type: "snapshot", state: await target.read(), workspace: target.root,
       });
     }
-  })();
+  });
   handoffs.set(key, work);
   try { await work; } finally { handoffs.delete(key); }
 }
@@ -117,6 +196,10 @@ async function doPrepareConcierge(target: WorkspaceService) {
   const status = await herdrInstallation.ensure();
   if (!status.executable) throw new Error(status.detail ?? "Herdr 尚未准备好，请在设置中重试");
   await installCli(target.root);
+  const plugin = await herdrPlugin.ensure(status.executable);
+  broadcastHerdrStatus(status);
+  if (plugin.phase === "error") throw new Error(plugin.detail);
+  await rm(coordinatorScope(target), { force: true });
   const state = await target.read();
   await target.execute({ type: "concierge.status", status: "not_ready", reference: state.concierge, detail: "正在准备全局管家…" });
   try {
@@ -142,7 +225,6 @@ async function doPrepareConcierge(target: WorkspaceService) {
       join(home, ".local/bin"),
       `${dirname(status.executable)}:${join(home, ".local/bin")}`,
       dirname(agentExecutable),
-      state.projects.flatMap((project) => project.path ? [project.path] : []),
       async (reference) => {
         await target.execute({ type: "concierge.status", status: "not_ready", reference, detail: "正在启动管家…" });
       },
@@ -170,12 +252,41 @@ async function openHerdr(reference?: import("../../../packages/core/src/index.js
     type: "terminal-open", session, title: reference?.agent === "concierge" ? "全局管家" : "工作现场",
   });
 }
+function watchWorkspaceState(target: WorkspaceService) {
+  stateWatcher?.close();
+  if (stateRefreshTimer) clearTimeout(stateRefreshTimer);
+  stateWatcher = watch(join(target.root, ".crewvane"), { persistent: false }, (_event, filename) => {
+    const name = filename?.toString();
+    if (name && name !== "state.json" && name !== "events.jsonl") return;
+    if (stateRefreshTimer) clearTimeout(stateRefreshTimer);
+    stateRefreshTimer = setTimeout(async () => {
+      if (root !== target.root || service !== target) return;
+      try {
+        const state = await target.read();
+        if (!window.isDestroyed())
+          window.webContents.send("crewvane:event", { type: "snapshot", state, workspace: target.root });
+      } catch (error) {
+        if (!window.isDestroyed()) window.webContents.send("crewvane:event", {
+          type: "diagnostic",
+          message: `工作区更新暂未同步：${error instanceof Error ? error.message : String(error)}`,
+        });
+      }
+    }, 80);
+  });
+}
 async function openWorkspace(path: string) {
   const canonical = await realpath(path); if (!(await stat(canonical)).isDirectory()) throw new Error("工作区必须是目录");
   const opened = new WorkspaceService(canonical); await opened.read();
   root = canonical; service = opened;
+  watchWorkspaceState(opened);
   await mkdir(app.getPath("userData"), { recursive: true }); await writeFile(join(app.getPath("userData"), "workspaces.json"), JSON.stringify({ selected: root }), { mode: 0o600 });
   window.webContents.send("crewvane:event", { type: "refresh", workspace: root });
+  if (process.env.CREWVANE_TEST_SKIP_HERDR_SETUP !== "1")
+    void prepareHerdrCompanions(canonical).catch(error => {
+      if (!window.isDestroyed()) window.webContents.send("crewvane:event", {
+        type: "diagnostic", message: error instanceof Error ? error.message : String(error),
+      });
+    });
 }
 async function synchronize() {
   if (syncing || !service || !root) return;
@@ -217,7 +328,13 @@ async function synchronize() {
       let failure: string | undefined;
       try {
         if (!status.executable || state.concierge.status !== "ready") throw new Error("管家尚未连接，请点击「找管家」恢复");
-        await client(status.executable, workspace).notifyWatchdog(state.concierge, requests);
+        const coordinator = client(status.executable, workspace);
+        await coordinate(target, async () => {
+          for (const request of requests) {
+            await setCoordinatorScope(target, request.goalId, `watchdog-${Date.parse(request.basis)}`);
+            await coordinator.notifyWatchdog(state.concierge, [request]);
+          }
+        });
       } catch (error) { failure = error instanceof Error ? error.message : String(error); }
       for (const request of requests) await target.execute({
         type: "watchdog.report", goalId: request.goalId, at: new Date().toISOString(), basis: request.basis,
@@ -239,9 +356,19 @@ app.whenReady().then(async () => {
   const managedBin = join(app.getPath("userData"), "runtime");
   tools = new Executables(app.getPath("home"), managedBin, process.env,
     !!process.env.CREWVANE_TEST_HOME && process.env.CREWVANE_TEST_ISOLATE_TOOLS === "1");
-  herdrInstallation = new HerdrInstallation(tools, join(managedBin, "herdr"), status => {
-    if (window && !window.isDestroyed()) window.webContents.send("crewvane:event", { type: "herdr-status", status });
-  });
+  herdrInstallation = new HerdrInstallation(tools, join(managedBin, "herdr"), broadcastHerdrStatus);
+  const integrationEnvironment = process.env.CREWVANE_TEST_HOME ? {
+    ...process.env,
+    HOME: app.getPath("home"),
+    XDG_CONFIG_HOME: join(app.getPath("home"), ".config"),
+    XDG_STATE_HOME: join(app.getPath("home"), ".local/state"),
+  } : process.env;
+  herdrPlugin = new HerdrPlugin(
+    app.isPackaged ? join(process.resourcesPath, "herdr-plugin") : join(app.getAppPath(), "herdr-plugin"),
+    join(app.getPath("userData"), "herdr-plugin"),
+    app.getVersion(),
+    integrationEnvironment,
+  );
   app.setName("Crewvane");
   // BrowserWindow.icon is ignored by the macOS Dock in development.
   // Packaged builds embed the same artwork as their CFBundleIconFile.
@@ -265,18 +392,23 @@ app.whenReady().then(async () => {
     const target = activeService(), result = await target.execute(command);
     if (command.type === "goal.intake" || (command.type === "goal.create" && command.input.mode === "concierge") ||
       command.type === "goal.followup" || command.type === "goal.delegate" || (command.type === "goal.resume" && command.mode === "concierge") ||
+      command.type === "goal.resolve" ||
       (command.type === "goal.progress" && command.actor === "你" && (result as import("../../../packages/core/src/index.js").Goal).mode === "concierge")) {
       const item = result as import("../../../packages/core/src/index.js").Goal;
-      void dispatchGoal(target, item.id).catch((error) => {
+      if (item.dispatch?.status === "pending") void dispatchGoal(target, item.id).catch((error) => {
         if (root === target.root) window.webContents.send("crewvane:event", { type: "diagnostic", message: String(error) });
       });
     }
     if (["goal.accept", "goal.rework", "goal.resolve", "goal.update", "goal.drop"].includes(command.type)) {
       const item = result as import("../../../packages/core/src/index.js").Goal, current = await target.read();
-      if (item.mode === "concierge" && current.concierge.status === "ready") {
+      if (item.mode === "concierge" && current.concierge.status === "ready" && item.dispatch?.status !== "pending") {
         const status = await herdrStatus();
         if (status.executable) {
-          try { await client(status.executable, target.root).notifyGoal(current.concierge, item.id, item.title, item); }
+          const herdrExecutable = status.executable;
+          try { await coordinate(target, async () => {
+            await setCoordinatorScope(target, item.id, `event-${Date.now()}`);
+            await client(herdrExecutable, target.root).notifyGoal(current.concierge, item.id, item.title, item);
+          }); }
           catch (error) { window.webContents.send("crewvane:event", { type: "diagnostic", message: error instanceof Error ? error.message : String(error) }); }
         }
       }
@@ -317,7 +449,7 @@ app.whenReady().then(async () => {
   Menu.setApplicationMenu(Menu.buildFromTemplate([{ label: "Crewvane", submenu: [{ role: "about" }, { type: "separator" }, { role: "hide" }, { role: "quit" }] }, { role: "editMenu" }, { role: "viewMenu" }]));
   await window.loadURL(rendererURL);
   if (process.env.CREWVANE_TEST_SKIP_HERDR_SETUP !== "1")
-    void herdrInstallation.ensure().catch(() => { /* persistent readiness error is shown by the renderer */ });
+    void prepareHerdrCompanions().catch(() => { /* persistent readiness error is shown by the renderer */ });
   const saved = await readFile(join(app.getPath("userData"), "workspaces.json"), "utf8").then(JSON.parse).catch(() => null), workspace = process.env.CREWVANE_TEST_WORKSPACE ?? saved?.selected;
   if (workspace) await openWorkspace(workspace).catch((error) => window.webContents.send("crewvane:event", { type: "diagnostic", message: String(error) }));
   if (process.env.CREWVANE_TEST_PREPARE_CONCIERGE === "1") {
@@ -326,4 +458,9 @@ app.whenReady().then(async () => {
   setInterval(() => void synchronize(), 10_000); void synchronize();
 });
 app.on("activate", () => window?.show());
-app.on("before-quit", () => { quitting = true; terminals.dispose(); });
+app.on("before-quit", () => {
+  quitting = true;
+  stateWatcher?.close();
+  if (stateRefreshTimer) clearTimeout(stateRefreshTimer);
+  terminals.dispose();
+});

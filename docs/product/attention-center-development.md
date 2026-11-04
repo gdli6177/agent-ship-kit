@@ -21,7 +21,8 @@ Crewvane 0.4 是一个**全局管家与注意力中心**。用户把事项告诉
 - 注意力面板聚合需要决定、需要验收、到点需要跟进和 Agent 需要介入的事项。正常执行不打扰。
 - 工序只是一组可复用的步骤说明书。每一步只有名称和提示词，不配置运行时、模型或复杂依赖。
 - 验收以实际成果、检查记录和可访问的 Herdr 现场为依据。Agent 自称完成、Herdr `done` 或终端空闲均不等于验收通过。
-- 不自动合并、发布、部署或向外部联系人发送消息。
+- 项目可选择 `external-approval`、`auto-merge-manual-deploy` 或 `auto`；默认外部审批。Crewvane 只判定项目策略是否放行，不会替 Agent 执行 Git、部署或外发。
+- 删除数据、停服、花钱、外部发消息、改变产品方向、新建或轮换密钥、修改权限、修改上线策略，九类动作在任何策略下都必须先问人。
 - 旧版未投入实际使用。0.4 不读取旧状态、不提供迁移、不保留旧命令或兼容层。
 
 ## 2. 产品结构
@@ -41,8 +42,11 @@ Crewvane 工作区
 └── 设置
     ├── 工作区与项目目录
     ├── Herdr 检测、安装和打开
+    ├── Crewvane Herdr 插件自动部署与状态
     ├── 全局管家准备、恢复与故障反馈
     ├── Agent 偏好：管家 / 负责人 / 工人的启动命令，可跟随上一级
+    ├── 项目上线策略：外部审批 / 自动合并后手发布 / 自动上线
+    ├── 决定账本与高风险动作入口
     ├── 内置 Crewvane CLI 安装与 PATH 说明
     └── 通知和浅色 / 深色外观
 
@@ -64,12 +68,14 @@ Crewvane 工作区
 6. 可编辑的简单工序模板，创建目标时复制步骤快照。
 7. 与桌面共用目标库的 CLI；安装后不依赖源码目录、pnpm 或用户另装 Node。
 8. 到期跟进与需要介入的系统通知；应用重启后保持目标和提醒。
-9. 完整测试、真实 Herdr 试用、DMG / ZIP 安装验收和签名验证。
+9. 随应用打包并自动注册的 Herdr 注意力插件：在 Herdr 内打开注意力控制台、单框新建目标、回到全局管家、补充决定、聚焦负责人现场，并通过 Herdr 原生 Agent 状态和 Pane 生命周期事件即时同步现场。
+10. 完整测试、真实 Herdr 试用、DMG / ZIP 安装验收和签名验证。
 
 ### 明确不做
 
 - 不扫描运行时，不配置模型，不接 ACP 或 Codex App Server。
 - 不另做独立管家聊天协议；应用内终端仅使用 xterm.js 和 node-pty 呈现 Herdr TUI，不接管 Herdr 的会话或 Agent 通信职责。
+- Herdr 插件只做终端表现和快捷动作，不保存第二份目标状态，不承担权限边界或操作系统沙箱。
 - 不做旧版授权、合同、泳道、知识库、密码本、自动分支 / worktree 或调度器。
 - 不自动解析全部终端日志来推断目标状态。
 - 不做多用户、云同步、移动端、Windows / Linux 安装包。
@@ -83,7 +89,9 @@ Crewvane 工作区
 
 核心记录：
 
-- `Project`：`id`、`name`、可选 `path`。项目用于归类与给 Agent 提供工作目录，不承担授权或运行时职责。
+- `Project`：`id`、`name`、可选 `path`、`policy`。项目用于归类与提供目录上下文；项目策略只决定上线审批，不承担 Agent 运行时职责。
+- `ProjectPolicy`：`shipPolicy`、`approvers[]`、修订号与更新时间。默认 `external-approval`，设置只能由人通过桌面执行。
+- `DecisionRecord`：项目、稳定动作键、批准/拒绝、人的原话、来源、目标与时间；派生为 `.crewvane/decisions.md` 和 `.crewvane/rejected.md`。
 - `Workflow`：`id`、`name`、`steps[]`；每步为 `id`、`name`、`prompt`。模板编辑不篡改已创建目标的步骤快照。
 - `Goal`：标题、背景、归属项目、模式（`concierge` / `manual`）、阶段快照与当前步骤、生命周期、等待信息、提醒、注意力原因、下一步、当前负责人、交付记录、Herdr 引用及时间戳。
 - `Activity`：目标时间线，记录人 / 管家 / 负责人 / 系统的明确动作，保存摘要而非终端全文。
@@ -105,7 +113,8 @@ Crewvane 工作区
 
 | 条件 | 是否展示 | 是否系统通知 |
 | --- | --- | --- |
-| 管家 / 负责人明确请求人决定 | 是，`decision` | 是 |
+| 管家 / 负责人明确请求人决定；上线策略要求审批 | 是，`decision` | 是，决定账本命中时除外 |
+| 删除数据、停服、花钱、外部发消息、改产品方向、新建或轮换密钥、改权限、改上线策略 | 是，`decision` | 是，任何 ship policy 都相同；决定账本命中时直接沿用 |
 | 提交了真实交付记录 | 是，`review` | 是 |
 | `waiting.remindAt <= now` | 是，`follow_up` | 每个提醒时间最多一次 |
 | Herdr 对应 Agent 为 `blocked` / 不可达 | 先由巡检联系管家 | 管家不可达或联系后 10 分钟无恢复进展时通知 |
@@ -120,6 +129,16 @@ Crewvane 工作区
 ## 5. Herdr 与管家契约
 
 桌面通过固定可执行文件和 argv 调用 Herdr，不经 shell 拼接命令。Session 按工作区路径派生为 `crewvane-<路径摘要>`，可由显式环境配置固定。应用启动时检测本地 CLI 并查询官方最新版：已有最新版则复用，缺失或较旧时自动下载官方当前平台二进制，校验 SHA-256 和可执行版本后安装到应用自己的 runtime 目录，不依赖 Homebrew、不修改用户已有安装。检测包含登录 shell 的 PATH 与常见目录。网络或安装失败持续显示具体原因及重试入口；已有可用 CLI 时继续使用，否则记录、筛选、提醒和人工验收仍可使用。设置页显示实际路径、版本和检查更新入口。
+
+Crewvane 插件随 `.app` 打包，Herdr 就绪且 CLI 可用后自动部署到 `userData/herdr-plugin` 并注册为 `dev.crewvane`。升级时按全部打包源码摘要原子替换，固定插件 ID 重新登记，不依赖 GitHub 再下载。插件提供“打开 Crewvane 注意力”“给 Crewvane 新建目标”和“回到 Crewvane 管家”三个动作：注意力 Pane 运行 `crewvane board`，新建 Pane 使用稳定的一行输入并调用 `crewvane ask`，回到管家动作按真实 Agent 身份聚焦 `concierge`。三者使用与桌面相同的 core 状态；注意力 Pane 可显示项目上线策略、审查轮次、高风险动作、决定、验收、跟进和介入，补充意见、提交批准或拒绝、请求跟进、等待事项交给管家或人工接管、验收通过、退回修改、聚焦真实负责人现场或按 `g` 回到管家；不自行执行目标。
+
+插件清单同时订阅 `pane.agent_status_changed`、`pane.exited`、`pane.closed`、`pane.moved`、`tab.closed` 和 `workspace.closed`。事件脚本读取 Herdr 原生的 `{ event, data }` 环境变量并调用内部 `crewvane event herdr`；CLI 校验 Pane、Tab 或 Workspace 身份后只写回已经登记该现场的目标，陌生现场不产生写入。`pane.moved` 使用新返回的 Pane、Tab、Workspace 与 Agent 身份原子替换旧引用，后续状态和关闭事件只命中新 ID。桌面每 10 秒的 `agent list` 轮询仍保留，覆盖 Herdr 服务暂停、事件钩子故障和旧版插件。
+
+Herdr 插件不是可靠性的捷径或安全边界。插件 v1 是无 SDK、无沙箱的普通 argv 进程，继承用户环境并可调用完整 Herdr CLI；原生非终端 UI 也不受支持。因此插件只作为可选表现层，Crewvane 的案卷限制、状态锁和权限校验仍由 CLI、core 和受约束 Electron IPC 承担。Herdr 不可用或插件安装失败不阻止桌面记录目标；设置页显示独立状态，修复后自动重试。
+
+管家身份初始化与案卷处理始终是两个回合。初始化只记住职责并回复 `CREWVANE_CONCIERGE_READY`，不读取目标；案卷通知一次只带一个 `case_id`，同一工作区由上一条消息的 settled 状态串行解锁。每个案卷回合在分发、写回或交接后立即结束，禁止启动后台任务、循环轮询或等待负责人完工，避免下一条目标继承上一条的 scope。
+
+Herdr 0.9.5 的插件 v1 事件没有用户 prompt 提交事件。直接终端聊天必须先由管家执行 `crewvane direct --current "<原话>"` 或 `crewvane direct --new "<原话>"` 写回共享状态，再继续处理；桌面监听状态文件并即时刷新。CLI 对已存在的当前案卷只追加用户消息，不建立重复 handoff；对终端中新建立的目标记录为已经送达管家，避免桌面回放同一原文，并原子推进管家的案卷 scope，使同一回合可以继续处理新目标。协议无法捕获不经过 CLI 写回的普通终端对话，UI 与文档必须明确这个边界。
 
 应用打开工作区时读取状态，不控制用户其他 Session。准备管家时：
 
@@ -158,7 +177,8 @@ herdr agent prompt <负责人名称> "<任务>" --wait
 - 先读项目规则；一个目标按需对应一个 Herdr Tab，保存实际 ID。
 - 负责人创建后先保存真实 Herdr 现场，再发任务；发消息确认接收后即可继续统筹其他目标，不因一件长任务阻塞整个工作区。
 - 负责人遇到问题时先自行解决；需要上级时先找管家，管家能解决则继续，只有管家不能解决才向人请求决定。
-- 不催促人确认常规执行选择，不自动执行合并、发布、部署和外部通信。
+- 不催促人确认常规执行选择；合并或部署前调用 `goal ship`，任何九类高风险动作先调用 `goal risk`。
+- 请求人决定前依赖决定账本去重；同一 PR 最多三轮审查，第四轮升级。
 - 每次阶段变化通过 CLI 写回；提供下一步、实际进展、等待对象和提醒。
 - 验收前写入真实成果和检查结果；不将 `herdr agent ... done` 当作目标完成。
 - 不伪造 CLI 成功，不声称未运行的检查已通过。
@@ -170,8 +190,11 @@ herdr agent prompt <负责人名称> "<任务>" --wait
 ```text
 crewvane status [--json]
 crewvane attention [--json]
+crewvane board [--new] [--once]
+crewvane ask TEXT [--project ID]
 crewvane goal list [--all] [--json]
 crewvane goal show ID [--json]
+crewvane goal comment ID --text TEXT
 crewvane goal create --title TEXT --project ID [--description TEXT]
                      [--workflow ID] [--mode concierge|manual]
 crewvane goal update ID [--title TEXT] [--description TEXT] [--next TEXT]
@@ -179,18 +202,30 @@ crewvane goal update ID [--title TEXT] [--description TEXT] [--next TEXT]
 crewvane goal progress ID --summary TEXT [--next TEXT] [--stage ID] [--owner NAME]
 crewvane goal wait ID --reason TEXT [--owner TEXT] [--remind-at ISO]
 crewvane goal decide ID --question TEXT [--next TEXT]
+crewvane goal risk ID --category CATEGORY --summary TEXT [--key KEY]
+crewvane goal ship ID --operation merge|deploy --checks passed|failed
 crewvane goal review ID --summary TEXT [--location TEXT] [--url URL]
                         [--check NAME::COMMAND::passed|failed::NOTE]
 crewvane goal accept ID [--note TEXT]
 crewvane goal rework ID --note TEXT
 crewvane goal drop ID --reason TEXT
 crewvane goal remind ID --at ISO [--note TEXT]
-crewvane goal resolve ID --note TEXT
+crewvane goal resolve ID --note TEXT [--outcome approved|rejected]
 crewvane session set ID [--workspace ID] [--tab ID] [--pane ID] [--agent NAME]
 crewvane workflow list [--json]
 ```
 
-`--json` 输出可供 Agent 读取的结构化记录；默认输出简洁中文。写操作输出更新后的目标。所有时间使用 ISO 8601；ID 和路径按服务端验证。`goal accept` 只结束 Crewvane 目标，不产生 Git 或部署副作用。`rework` 将目标退回 `active` 并清除待验收注意力；`resolve` 只解决决定 / 跟进，不代替成果验收。
+`--json` 输出可供 Agent 读取的结构化记录；默认输出简洁中文。写操作输出更新后的目标。所有时间使用 ISO 8601；ID 和路径按服务端验证。`goal accept` 只结束 Crewvane 目标，不产生 Git 或部署副作用。`rework` 将目标退回 `active` 并清除待验收注意力；`resolve` 只解决决定 / 跟进，不代替成果验收。`goal ship` 只返回策略判断，不自行执行外部动作。
+
+上线策略默认 `external-approval`。`goal ship` 先要求本地检查通过：默认档的合并和部署都等待人，`auto-merge-manual-deploy` 的部署等待人，`auto` 在检查通过后放行。人可在桌面修改项目策略；受管管家 CLI 没有策略修改入口。
+
+人通过桌面或 Herdr 注意力面板批准/拒绝后，`goal.resolve` 保存原始回复、时间、来源、项目、目标和稳定动作键，并派生 `.crewvane/decisions.md` / `.crewvane/rejected.md`。`goal decide` 和 `goal risk` 先查账本，命中时不产生新的注意力。
+
+`goal risk` 覆盖 `delete-data`、`stop-service`、`spend-money`、`external-message`、`product-direction`、`create-secret`、`rotate-secret`、`change-permissions`、`change-ship-policy`。这些动作即使处于 `auto` 项目也会先问人。同一目标默认最多三轮审查；第四轮返回 `intervention`，人在注意力面板允许后才增加一轮。
+
+`ask` 与桌面单框新建共用 `goal.intake`，立即保存完整原文、待管家梳理步骤和持久派发请求；桌面未运行或用户稍后启动时会补发。`goal comment` 追加人的补充意见并生成新的派发请求，不覆盖原下一步。`board` 是 Herdr 插件使用的同源终端 Pane：交互模式支持选择、补充/决定、等待跟进、继续推进、人工接管、验收、退回和聚焦负责人现场，`--once` 输出静态文本供测试和诊断。
+
+管理人 CLI 时，每次通知由唯一案卷 scope 限定。受管 CLI 只可读取当前目标和工序、查看精简 status，写入当前目标的 update、progress、wait、decide、risk、ship、session；不得 list、attention、ask 或跨目标访问。这个应用层闸门不冒充操作系统文件沙箱。
 
 等待目标的桌面操作使用 `goal.resume`（继续推进）、`goal.followup`（请管家跟进）和 `goal.remind`（稍后提醒），不要求人重填整张表单。`goal.resume` 清除等待和旧提醒，保留原负责人现场；`goal.followup` 保留等待和提醒。待发送消息持久化为带 ID 的 `dispatch` 请求，只有已送达才能标记 `sent`；失败可以重试，旧回执不能覆盖新请求。人工接管会取消派发，已结束的目标不能恢复。
 
@@ -201,9 +236,12 @@ crewvane workflow list [--json]
 - `packages/core`：类型、默认值、校验、注意力派生、原子持久化与事件。
 - `packages/orchestrator` 退役；不留下名为适配器但无调用方的旧代码。
 - `apps/desktop/electron/main.ts`：可信文件选择器、Herdr / CLI 进程、通知和受约束 IPC。
+- `apps/desktop/electron/herdr-plugin.ts`：随包插件部署、版本/源码校验、Herdr 注册与状态。
+- `apps/desktop/herdr-plugin`：固定动作、Pane 清单和无 shell 拼接的启动脚本。
 - `apps/desktop/electron/terminal-worker.ts`：独立 utility process 中连接 Herdr 的 PTY；主进程限制可执行文件、工作区和 IPC 输入。
 - `apps/desktop/src`：React 界面；复用 Radix Dialog 与 Lucide，不自行实现另一套 Agent 协议。
 - `cli`：用户 / Agent 共用的薄命令层，必须调用 core 服务而不是另写状态副本。
+- `cli/src/board.ts`：Herdr 内注意力 Pane；只调用 core 和显式 Herdr CLI，不保存状态副本。
 
 Electron 保持 `contextIsolation: true`、`nodeIntegration: false`、`sandbox: true`。渲染进程不能获得凭据、任意命令执行或任意本地文件读取。外部 URL 只允许明确的 `https:` 链接。CLI 安装通过应用内打包的独立可执行文件或自包含脚本实现，安装位置默认 `~/.local/bin/crewvane`，不覆盖非 Crewvane 文件。
 
@@ -225,10 +263,11 @@ Electron 保持 `contextIsolation: true`、`nodeIntegration: false`、`sandbox: 
 
 ### 自动化
 
-- core：新工作区默认值；并发写；锁恢复；非法状态；人工字段保留；四类注意力；通知去重；模板快照；完整验收 / 退回 / 放弃闭环。
+- core：新工作区默认值；并发写；锁恢复；非法状态；人工字段保留；四类注意力；通知去重；模板快照；完整验收 / 退回 / 放弃闭环；三档上线策略；决定账本去重；九类高风险升级；第四轮审查拦截。
 - CLI：真实进程调用目标创建、进展、等待、决定、验收、完成；参数校验；JSON；工作区选择；桌面与 CLI 读写一致。
 - Herdr adapter：使用测试替身验证固定 argv、真实 ID 解析、唯一管家、失效引用和错误传播；测试不得依赖当前用户的 Herdr 现场。
-- 桌面 E2E：空状态、创建项目、单输入框交给管家、人工接管与迟到回执保护、侧边栏、项目筛选、四类注意力、更新等待、编辑工序、验收卡、打开现场、设置、深浅主题与窄屏。
+- Herdr 插件：验证清单版本与安装包一致、全部源码摘要、原子部署、幂等注册和错误状态；真实试用在隔离 Herdr 中打开 `dev.crewvane` Pane，验证注意力、一句话新目标、回到管家、现场关闭事件，并读取 `CREWVANE` 与注意力内容。
+- 桌面 E2E：空状态、创建项目、单输入框交给管家、人工接管与迟到回执保护、侧边栏、项目筛选、四类注意力、上线策略、高风险决定、更新等待、编辑工序、验收卡、打开现场、设置、深浅主题与窄屏。
 - 构建：typecheck、单元测试、renderer / Electron 构建均成功，无未处理运行时错误。
 
 ### 真实试用
@@ -242,6 +281,7 @@ Electron 保持 `contextIsolation: true`、`nodeIntegration: false`、`sandbox: 
 5. 重启桌面，目标、引用和提醒保持；回到管家和目标现场可用。
 6. 安装应用内 CLI 到临时 HOME，脱离源码目录运行读写命令，验证与桌面共享目标。
 7. Herdr 缺失 / 启动失败 / 会话失效分别显示可行动的错误，不伪造成功。
+8. 安装应用后不执行额外插件安装命令；Herdr 就绪时自动注册插件，并从隔离 Session 的真实 Pane 打开注意力控制台。
 
 ### 安装包
 

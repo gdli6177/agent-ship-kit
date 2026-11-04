@@ -65,7 +65,7 @@ try {
     arch: "arm64",
     icon: join(here, "assets/brand/crewvane-icon.icns"),
     asar: { unpack: "{**/dist/cli/**,**/node_modules/node-pty/**}" },
-    extraResource: [cliNode],
+    extraResource: [cliNode, join(here, "herdr-plugin")],
     ignore: [/^\/cli-node$/, /^\/dist\/.*\.map$/],
     overwrite: true,
     prune: true,

@@ -31,6 +31,11 @@ async function verifyDownloadedApp(appPath, label) {
     `${label}: shipped application must use the current Dock icon`,
   );
   await exec("codesign", ["--verify", "--deep", "--strict", "--verbose=2", appPath]);
+  assert.match(
+    await readFile(join(appPath, "Contents/Resources/herdr-plugin/herdr-plugin.toml"), "utf8"),
+    /id = "dev\.crewvane"/,
+    `${label}: downloaded app must contain the bundled Herdr plugin`,
+  );
   // A browser-downloaded app carries the quarantine marker when extracted.
   // Gatekeeper evaluates nested code through the sealed bundle signature.
   await exec("xattr", ["-w", "com.apple.quarantine",
@@ -71,8 +76,10 @@ async function launchInstalled(appPath, label) {
     await page.getByRole("heading", { name: "现在，可以安心了。" }).waitFor();
     assert.equal(await app.evaluate(({ app }) => app.getVersion()), version);
     assert.equal(await page.evaluate(() => typeof window.require), "undefined");
+    await page.waitForFunction(() => window.crewvane.cliStatus().then(status => status.installed), null, {
+      timeout: 30_000,
+    });
     await page.getByRole("button", { name: "设置", exact: true }).click();
-    await page.getByRole("button", { name: "安装到 ~/.local/bin" }).click();
     await page.getByRole("button", { name: "重新安装", exact: true }).waitFor();
     const cli = join(home, ".local/bin/crewvane");
     assert.ok((await exec(cli, ["status", "--root", workspace, "--json"])).stdout.includes('"version": 2'));

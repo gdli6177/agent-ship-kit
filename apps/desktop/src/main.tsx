@@ -32,6 +32,8 @@ import type {
   CrewvaneCommand,
   AgentPreferences,
   Goal,
+  Project,
+  ShipPolicy,
   Workflow,
   WorkspaceState,
 } from "../../../packages/core/src/types.js";
@@ -201,6 +203,7 @@ function App() {
       }
       if (event.type === "diagnostic") setError(event.message);
       if (event.type === "herdr-status") setHerdr(event.status);
+      if (event.type === "cli-status") setCli(event.status);
       if (event.type === "open-goal") openGoal(event.goalId);
       if (event.type === "terminal-available") {
         setTerminal(current => current?.session === event.session ? current : { session: event.session, title: event.title, visible: false });
@@ -897,6 +900,10 @@ function App() {
                 await execute({ type: "agents.configure", preferences });
                 notify("Agent 偏好已保存，将用于新启动的会话。");
               }}
+              savePolicy={async (projectId: string, policy: { shipPolicy: ShipPolicy; approvers: string[] }) => {
+                await execute({ type: "project.policy.set", projectId, policy, actor: "你" });
+                notify("项目上线策略已更新。");
+              }}
               theme={theme}
               setTheme={(value: string) => setTheme(value)}
               onAction={async (action: string) => {
@@ -1315,7 +1322,8 @@ function WaitingActions({ goal, busy, act }: {
   const [action, setAction] = useState<"resume" | "remind" | "">(""),
     [update, setUpdate] = useState(""),
     [reminder, setReminder] = useState(""),
-    [validation, setValidation] = useState("");
+    [validation, setValidation] = useState(""),
+    decision = goal.attention?.kind === "decision";
   async function remind(at: string) {
     const timestamp = Date.parse(at);
     if (!Number.isFinite(timestamp) || timestamp <= Date.now()) {
@@ -1330,7 +1338,7 @@ function WaitingActions({ goal, busy, act }: {
       <h3>这件事，接下来怎么走？</h3>
       <span>正在等 {goal.waitingFor || goal.owner}</span>
     </div>
-    {goal.attention?.kind === "decision" && <p>{goal.attention.summary}</p>}
+    {decision && <p>{goal.attention?.summary}</p>}
     <div className="waiting-choices">
       <button className="primary" disabled={busy} aria-expanded={action === "resume"}
         onClick={() => { setAction("resume"); setValidation(""); }}>有结果了，继续推进<ArrowRight size={14} /></button>
@@ -1341,19 +1349,27 @@ function WaitingActions({ goal, busy, act }: {
     </div>
     {action === "resume" && <form className="form waiting-form" onSubmit={async event => {
       event.preventDefault();
-      if (await act({ type: "goal.resume", goalId: goal.id, note: update, mode: "concierge" }, "等待已结束，正在通知管家继续推进")) setUpdate("");
+      const saved = decision
+        ? await act({ type: "goal.resolve", goalId: goal.id, note: update, actor: "你", outcome: "approved", source: "desktop" },
+          "决定已记入批准账本，正在通知管家继续推进")
+        : await act({ type: "goal.resume", goalId: goal.id, note: update, mode: "concierge" },
+          "等待已结束，正在通知管家继续推进");
+      if (saved) setUpdate("");
     }}>
-      <label>最新结果与下一步
+      <label>{decision ? "你的决定原话" : "最新结果与下一步"}
         <textarea autoFocus required maxLength={2000} value={update} onChange={event => setUpdate(event.target.value)}
           placeholder="例如：YR 已批准，按原方案继续开发。" />
       </label>
-      <p className="quiet-copy">管家会把这条更新交给原负责人；没有可用现场时再安排独立负责人。</p>
+      <p className="quiet-copy">决定会写入共享账本；管家把更新交给原负责人，没有可用现场时再安排独立负责人。</p>
       <div className="modal-actions">
         <button className="secondary" type="button" disabled={busy} onClick={() => setAction("")}>取消</button>
-        <button className="secondary" type="button" disabled={busy || !update.trim()} onClick={() => void act({
-          type: "goal.resume", goalId: goal.id, note: update, mode: "manual",
-        }, "已恢复推进，由你处理")}>我来处理</button>
-        <button className="primary" disabled={busy || !update.trim()}>交给管家继续</button>
+        {decision ? <button className="secondary danger-action" type="button" disabled={busy || !update.trim()} onClick={() => void act({
+          type: "goal.resolve", goalId: goal.id, note: update, actor: "你", outcome: "rejected", source: "desktop",
+        }, "决定已记入拒绝账本，管家会按你的决定继续")}>拒绝</button> :
+          <button className="secondary" type="button" disabled={busy || !update.trim()} onClick={() => void act({
+            type: "goal.resume", goalId: goal.id, note: update, mode: "manual",
+          }, "已恢复推进，由你处理")}>我来处理</button>}
+        <button className="primary" disabled={busy || !update.trim()}>{decision ? "批准并继续" : "交给管家继续"}</button>
       </div>
     </form>}
     {action === "remind" && <form className="form waiting-form" onSubmit={event => { event.preventDefault(); void remind(reminder); }}>
@@ -1427,6 +1443,7 @@ function GoalModal({
         <span>
           {goal.owner}
           {goal.remindAt ? ` · ${time(goal.remindAt)} 跟进` : ""}
+          {goal.reviewRounds ? ` · 审查 ${goal.reviewRounds}/${goal.reviewLimit ?? 3}` : ""}
         </span>
       </div>
       {goal.status === "waiting" && <WaitingActions key={goal.id} goal={goal} busy={busy} act={act} />}
@@ -1589,34 +1606,29 @@ function GoalModal({
           </>
         ) : (
           !ended && needsDecision && (
-            <button
-              className="primary"
-              disabled={busy || !note.trim()}
-              onClick={() =>
-                void act(
-                  {
-                    ...(needsDecision
-                      ? {
-                          type: "goal.resolve" as const,
-                          goalId: goal.id,
-                          note,
-                          actor: "你",
-                        }
-                      : {
-                          type: "goal.progress" as const,
-                          goalId: goal.id,
-                          summary: note,
-                          next: note,
-                          actor: "你",
-                        }),
-                  },
-                  "已记录，下一步已更新",
-                )
-              }
-            >
-              记录决定
-              <ArrowRight size={14} />
-            </button>
+            <>
+              {kind === "decision" && <button
+                className="secondary danger-action"
+                disabled={busy || !note.trim()}
+                onClick={() => void act({
+                  type: "goal.resolve", goalId: goal.id, note, actor: "你",
+                  outcome: "rejected", source: "desktop",
+                }, "已记入拒绝账本，管家会按你的决定继续")}
+              >
+                拒绝这个决定
+              </button>}
+              <button
+                className="primary"
+                disabled={busy || !note.trim()}
+                onClick={() => void act({
+                  type: "goal.resolve", goalId: goal.id, note, actor: "你",
+                  ...(kind === "decision" ? { outcome: "approved" as const, source: "desktop" as const } : {}),
+                }, kind === "decision" ? "已记入批准账本，下一步已更新" : "已记录，下一步已更新")}
+              >
+                {kind === "decision" ? "批准这个决定" : "记录决定"}
+                <ArrowRight size={14} />
+              </button>
+            </>
           )
         )}
       </div>
@@ -1655,6 +1667,7 @@ function Settings({
   openHerdr,
   agentOptions,
   saveAgents,
+  savePolicy,
 }: any) {
   return (
     <div className="content settings">
@@ -1667,13 +1680,14 @@ function Settings({
       </section>
       <AgentPreferencesEditor key={workspace} preferences={state.agents ?? { concierge: "codex" }} options={agentOptions}
         busy={busy} onSave={saveAgents} />
+      <GovernanceEditor projects={state.projects} decisions={state.decisions ?? []} busy={busy} onSave={savePolicy} />
       <section className="setting">
         <div>
           <SquareTerminal />
           <span>
             <h3>Herdr 与全局管家</h3>
             <p>会话由 Herdr 托管，关闭 Crewvane 窗口也不会终止。</p>
-            <p>启动时自动检查最新版并准备，无需安装 Homebrew。</p>
+            <p>启动时自动检查最新版，并安装 Crewvane 注意力面板插件，无需 Homebrew。</p>
             {herdr?.executable && <code className="tool-location">{herdr.executable}</code>}
           </span>
         </div>
@@ -1682,8 +1696,10 @@ function Settings({
             <span className="ready">
               <i />
               已安装 {herdr.version}
+              {herdr.plugin?.phase === "ready" ? " · 注意力面板已接入" : ""}
             </span>
           ) : <span className="setting-progress">{herdr?.detail || "正在检测…"}</span>}
+          {herdr?.plugin?.phase === "error" && <span className="setting-progress">{herdr.plugin.detail}</span>}
           <button className="secondary" disabled={busy || herdr?.phase === "checking" || herdr?.phase === "downloading"}
             onClick={() => void onAction("herdr")}>
             {herdr?.phase === "downloading" ? "正在自动安装…" : herdr?.phase === "checking" ? "正在检查…" : herdr?.installed ? "检查更新" : "重试准备"}
@@ -1705,7 +1721,7 @@ function Settings({
           <Zap />
           <span>
             <h3>Crewvane 命令行</h3>
-            <p>管家通过它写回进展。应用内置，无需另外安装 Node。</p>
+            <p>管家通过它读写当前案卷，不能列出或修改其他目标。应用内置，无需另外安装 Node。</p>
             <code>{cli?.path}</code>
           </span>
         </div>
@@ -1768,6 +1784,75 @@ function Settings({
     </div>
   );
 }
+const shipPolicyLabels: Record<ShipPolicy, string> = {
+  "external-approval": "外部审批（默认）",
+  auto: "检查通过后自动合并与上线",
+  "auto-merge-manual-deploy": "自动合并，上线前审批",
+};
+function GovernanceEditor({
+  projects,
+  decisions,
+  busy,
+  onSave,
+}: {
+  projects: Project[];
+  decisions: WorkspaceState["decisions"];
+  busy: boolean;
+  onSave: (projectId: string, policy: { shipPolicy: ShipPolicy; approvers: string[] }) => Promise<void>;
+}) {
+  const [editing, setEditing] = useState<string>();
+  return <section className="governance-editor" aria-label="上线策略与决定账本">
+    <div className="section-heading">
+      <h2>上线策略与决定账本</h2>
+      <small>{decisions.length} 条已记住的决定</small>
+    </div>
+    <p>默认要求外部审批。自动策略只跳过审批，不跳过检查；删数据、停服、花钱、外部发消息、改产品方向、新建或轮换密钥、改权限始终会进入注意力。</p>
+    <div className="policy-list">
+      {projects.map(project => {
+        const open = editing === project.id;
+        return <div className="policy-row" key={project.id}>
+          <div>
+            <strong>{project.name}</strong>
+            <span>{shipPolicyLabels[project.policy.shipPolicy]}</span>
+            {project.policy.approvers.length > 0 && <small>审批人：{project.policy.approvers.join("、")}</small>}
+          </div>
+          {!open ? <button className="secondary" disabled={busy} onClick={() => setEditing(project.id)}>配置</button> :
+            <form key={`${project.id}-${project.policy.revision}`} onSubmit={async event => {
+              event.preventDefault();
+              const data = new FormData(event.currentTarget);
+              try {
+                await onSave(project.id, {
+                  shipPolicy: String(data.get("shipPolicy")) as ShipPolicy,
+                  approvers: String(data.get("approvers"))
+                    .split(/[\n,，、]/).map(value => value.trim()).filter(Boolean),
+                });
+                setEditing(undefined);
+              } catch {
+                /* The parent shows the server error. */
+              }
+            }}>
+              <label>
+                上线策略
+                <select name="shipPolicy" defaultValue={project.policy.shipPolicy} disabled={busy}>
+                  {Object.entries(shipPolicyLabels).map(([value, label]) =>
+                    <option value={value} key={value}>{label}</option>)}
+                </select>
+              </label>
+              <label>
+                外部审批人（可选）
+                <input name="approvers" defaultValue={project.policy.approvers.join("、")}
+                  placeholder="例如：YR、平台组" disabled={busy} />
+              </label>
+              <div className="policy-actions">
+                <button type="button" className="secondary" disabled={busy} onClick={() => setEditing(undefined)}>取消</button>
+                <button className="primary" disabled={busy}>保存策略</button>
+              </div>
+            </form>}
+        </div>;
+      })}
+    </div>
+  </section>;
+}
 function AgentPreferencesEditor({ preferences, options, busy, onSave }: {
   preferences: AgentPreferences;
   options: { kind: string; installed: boolean }[];
@@ -1779,7 +1864,7 @@ function AgentPreferencesEditor({ preferences, options, busy, onSave }: {
   const installed = options.filter(option => option.installed);
   return <section className="agent-preferences" aria-label="Agent 偏好">
     <div className="section-heading"><h2>Agent 启动命令</h2><small>CLI + 原生参数</small></div>
-    <p>填写每个角色的启动命令，可附带模型等原生参数。已有会话继续工作，新会话使用保存后的命令。</p>
+    <p>填写每个角色的启动命令，可附带模型等原生参数。Crewvane 不替换 CLI，也不借用 Codex 等运行时专属的沙箱参数；已有会话继续工作，新会话使用保存后的命令。</p>
     <form onSubmit={async event => {
       event.preventDefault();
       const data = new FormData(event.currentTarget);
@@ -1797,7 +1882,7 @@ function AgentPreferencesEditor({ preferences, options, busy, onSave }: {
         </label>)}
       </div>
       <datalist id="installed-agent-commands">{installed.map(option => <option key={option.kind} value={option.kind} />)}</datalist>
-      <div className="agent-preference-footer"><small>填写本机任意交互式 CLI 和参数，例如 codex --model gpt-5、npx --yes my-agent。支持绝对路径与 ~/ 路径；自定义 CLI 直接在终端启动，无需 Herdr 类型适配。环境变量和 shell 表达式请放入自己的启动脚本。</small><button className="secondary" disabled={busy}>保存偏好</button></div>
+      <div className="agent-preference-footer"><small>填写本机任意交互式 CLI 和参数，例如 codex --model gpt-5、npx --yes my-agent。支持绝对路径与 ~/ 路径；自定义 CLI 直接在终端启动，无需 Herdr 类型适配。管家案卷边界由 Crewvane CLI 约束，不是操作系统文件沙箱。环境变量和 shell 表达式请放入自己的启动脚本。</small><button className="secondary" disabled={busy}>保存偏好</button></div>
     </form>
   </section>;
 }

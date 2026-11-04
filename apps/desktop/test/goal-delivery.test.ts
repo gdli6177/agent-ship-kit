@@ -31,7 +31,7 @@ test("offline handoff is saved, restart retries the actual follow-up message wit
   const calls: string[][] = [];
   const messenger = new HerdrClient({ async run(args) { calls.push(args); return "{}"; } }, "trial");
   await deliverGoalUpdate(new WorkspaceService(service.root), id, async item => {
-    await messenger.notifyFollowUp({ session: "trial", agent: "concierge" }, item.id, item.dispatch!.note!);
+    await messenger.notifyFollowUp({ session: "trial", agent: "concierge" }, item.id, item.dispatch!.note!, item);
   });
   goal = (await service.read()).goals[0]!;
   assert.equal(goal.dispatch?.status, "sent");
@@ -39,6 +39,8 @@ test("offline handoff is saved, restart retries the actual follow-up message wit
   assert.equal(goal.status, "waiting");
   assert.match(calls[0]![3]!, /核查审批进展/);
   assert.match(calls[0]![3]!, /保持等待状态和跟进提醒/);
+  assert.match(calls[0]![3]!, /\[CREWVANE_CASE_BEGIN\]/);
+  assert.match(calls[0]![3]!, /\[CREWVANE_CASE_END\]/);
 });
 
 test("a newer resume request is not acknowledged by an older in-flight follow-up", async () => {

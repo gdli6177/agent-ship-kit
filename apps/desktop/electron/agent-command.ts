@@ -20,17 +20,3 @@ export function parseAgentCommand(command: string, kinds: string[]) {
   const kind = kinds.includes(name) ? name : undefined;
   return { executable, kind, args };
 }
-
-export function codexArguments(args: string[], cliRoot: string, projects: string[], cliPath: string) {
-  const has = (...options: string[]) => args.some(arg => options.some(option => arg === option || arg.startsWith(`${option}=`)));
-  return [
-    ...(!has("-a", "--ask-for-approval") ? ["--ask-for-approval", "never"] : []),
-    ...(!has("--full-auto", "--yolo", "--dangerously-bypass-approvals-and-sandbox", "-s", "--sandbox")
-      ? ["--sandbox", "workspace-write"] : []),
-    "-c", "sandbox_workspace_write.network_access=true",
-    "--add-dir", cliRoot,
-    ...projects.flatMap(directory => ["--add-dir", directory]),
-    "-c", `shell_environment_policy.set.PATH=${JSON.stringify(cliPath)}`,
-    ...args,
-  ];
-}

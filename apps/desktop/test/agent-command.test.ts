@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { parseAgentCommand, codexArguments } from "../electron/agent-command.ts";
+import { parseAgentCommand } from "../electron/agent-command.ts";
 
 test("parses CLI commands, quoted arguments and absolute paths without a shell", () => {
   assert.deepEqual(parseAgentCommand('"/opt/Agent Tools/codex" --model "model name" -c reasoning_effort=high', ["codex", "omp"]), {
@@ -17,16 +17,4 @@ test("parses CLI commands, quoted arguments and absolute paths without a shell",
   assert.deepEqual(parseAgentCommand('npx --yes custom-agent --model local', ["codex"]), {
     executable: "npx", kind: undefined, args: ["--yes", "custom-agent", "--model", "local"],
   });
-});
-
-test("preserves native model and explicit policy arguments", () => {
-  const args = codexArguments(["--model", "my-model", "--sandbox=read-only", "-a", "on-request"], "/cli", ["/project"], "/bin");
-  assert.ok(!args.includes("never"));
-  assert.ok(!args.includes("workspace-write"));
-  assert.deepEqual(args.slice(-5), ["--model", "my-model", "--sandbox=read-only", "-a", "on-request"]);
-  assert.ok(codexArguments([], "/cli", [], "/bin").includes("workspace-write"));
-  const automatic = codexArguments(["--full-auto"], "/cli", [], "/bin");
-  assert.ok(automatic.includes("--full-auto"));
-  // A native policy flag prevents a second, conflicting Crewvane default.
-  assert.ok(!automatic.includes("workspace-write"));
 });

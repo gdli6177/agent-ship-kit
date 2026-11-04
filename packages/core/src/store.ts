@@ -3,13 +3,21 @@ import { join } from "node:path";
 import { randomUUID } from "node:crypto";
 import { nextSequence, withLock } from "./storage.js";
 import type { WorkspaceState } from "./types.js";
-import { initialState, newId } from "./model.js";
+import { defaultProjectPolicy, initialState, newId } from "./model.js";
+import { decisionMarkdown } from "./governance.js";
 export { initialState, newId } from "./model.js";
 export function validateState(value: unknown): WorkspaceState {
   const state = value as WorkspaceState;
   if (!state || state.version !== 2 || !Array.isArray(state.goals) || !Array.isArray(state.projects) || !Array.isArray(state.workflows) || !state.concierge)
     throw new Error("不支持的工作区状态版本。请打开一个新的 Crewvane 0.4 工作区。");
+  state.decisions ??= [];
+  for (const project of state.projects) project.policy ??= defaultProjectPolicy();
   return state;
+}
+async function writeAtomic(path: string, body: string) {
+  const temporary = `${path}.${process.pid}-${randomUUID()}.tmp`;
+  await writeFile(temporary, body, { mode: 0o600 });
+  await rename(temporary, path);
 }
 export class WorkspaceStore {
   constructor(readonly root: string) {}
@@ -36,6 +44,10 @@ export class WorkspaceStore {
       const temporary = join(directory, `.state-${process.pid}-${randomUUID()}.tmp`);
       await writeFile(temporary, `${JSON.stringify(state, null, 2)}\n`, { mode: 0o600 });
       await rename(temporary, join(directory, "state.json"));
+      await Promise.all([
+        writeAtomic(join(directory, "decisions.md"), decisionMarkdown(state.decisions, "approved")),
+        writeAtomic(join(directory, "rejected.md"), decisionMarkdown(state.decisions, "rejected")),
+      ]);
       await appendFile(join(directory, "events.jsonl"), `${JSON.stringify({ id: newId("evt"), type: "workspace_changed", sequence: await nextSequence(this.root), created_at: new Date().toISOString(), title: reason, source_task_id: "workspace", state })}\n`, { mode: 0o600 });
       return result;
     });

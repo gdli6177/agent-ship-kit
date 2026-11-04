@@ -1,5 +1,16 @@
 import { WorkspaceStore, newId } from "./store.js";
 import type { CrewvaneCommand, Goal, WorkflowStep } from "./types.js";
+import {
+  isHighRiskCategory,
+  isShipPolicy,
+  latestDecision,
+  normalizeDecisionKey,
+  outcomeLabel,
+  projectPolicy,
+  riskCategoryForText,
+  riskSummary,
+} from "./governance.js";
+import { defaultProjectPolicy } from "./model.js";
 import { inspectWatchdog, reportWatchdog } from "./watchdog.js";
 export const nowIso = () => new Date().toISOString();
 function text(value: unknown, label: string, limit = 20_000): string {
@@ -103,6 +114,7 @@ export class WorkspaceService {
           const project = {
             id: newId("project"),
             name,
+            policy: defaultProjectPolicy(),
             ...(command.path
               ? { path: text(command.path, "项目路径", 1000) }
               : {}),
@@ -120,6 +132,25 @@ export class WorkspaceService {
             (p) => p.id !== id(command.projectId),
           );
           return true;
+        }
+        case "project.policy.set": {
+          if (command.actor !== "你")
+            throw new Error("上线策略只能由人在 Crewvane 设置中修改");
+          const project = state.projects.find(item => item.id === id(command.projectId));
+          if (!project) throw new Error("找不到项目");
+          if (!isShipPolicy(command.policy?.shipPolicy))
+            throw new Error("无效的上线策略");
+          if (!Array.isArray(command.policy.approvers) || command.policy.approvers.length > 20)
+            throw new Error("审批人列表无效");
+          const approvers = [...new Set(command.policy.approvers.map(value =>
+            text(value, "审批人", 120)))];
+          project.policy = {
+            shipPolicy: command.policy.shipPolicy,
+            approvers,
+            revision: (project.policy?.revision ?? 0) + 1,
+            updatedAt: nowIso(),
+          };
+          return project;
         }
         case "workflow.save": {
           const workflow = {
@@ -176,6 +207,9 @@ export class WorkspaceService {
               : {}),
             ...(input.remindAt ? { remindAt: iso(input.remindAt) } : {}),
             attention: null,
+            ...(input.mode === "concierge"
+              ? { dispatch: { id: newId("handoff"), kind: "feedback" as const, status: "pending" as const, at } }
+              : {}),
             activities: [
               {
                 id: newId("act"),
@@ -207,7 +241,39 @@ export class WorkspaceService {
             steps: [{ id: "intake", name: "待管家梳理", prompt: "读取用户原文，整理目标、完成标准、合适工序和下一步。没有充分依据时不要猜测项目或执行范围；需要用户决定时再询问。" }],
             stageId: "intake", next: "管家正在理解原文并整理目标。", owner: "待分配负责人",
             attention: null,
+            dispatch: { id: newId("handoff"), kind: "feedback", status: "pending", at },
             activities: [{ id: newId("act"), at, actor: "你", kind: "created", text: request }],
+            createdAt: at, updatedAt: at,
+          };
+          state.goals.push(item);
+          return item;
+        }
+        case "goal.direct": {
+          const request = text(command.text, "Herdr 终端消息", 20_000);
+          if (command.goalId) {
+            const item = goal(command.goalId);
+            if (["completed", "dropped"].includes(item.status))
+              throw new Error("目标已结束，不能再追加终端消息");
+            if (command.next) item.next = text(command.next, "下一步", 2000);
+            activity(item, "progress", request, "你 · Herdr 直聊");
+            return item;
+          }
+
+          const projectId = command.projectId && command.projectId !== "personal" ? command.projectId : "personal";
+          const project = state.projects.find(item => item.id === id(projectId));
+          if (!project) throw new Error("请选择有效项目");
+          const at = nowIso(), firstLine = request.split("\n")[0]!.trim();
+          const item: Goal = {
+            id: newId("goal"), projectId: project.id,
+            title: text(firstLine || "新目标", "目标", 160).slice(0, 80), description: request,
+            mode: "concierge", status: "active",
+            steps: [{ id: "intake", name: "待管家梳理", prompt: "读取用户原文，整理目标、完成标准、合适工序和下一步。没有充分依据时不要猜测项目或执行范围；需要用户决定时再询问。" }],
+            stageId: "intake", next: "管家正在理解 Herdr 终端中的原文并整理目标。", owner: "待分配负责人",
+            attention: null,
+            // The concierge already received this message in its terminal turn.
+            // Mark it as delivered so desktop dispatch does not replay the same text.
+            dispatch: { id: newId("handoff"), kind: "feedback", status: "sent", at, detail: "已从 Herdr 终端直接送达管家" },
+            activities: [{ id: newId("act"), at, actor: "你 · Herdr 直聊", kind: "created", text: request }],
             createdAt: at, updatedAt: at,
           };
           state.goals.push(item);
@@ -370,14 +436,114 @@ export class WorkspaceService {
         case "goal.decide": {
           const item = goal(command.goalId);
           ongoing(item);
+          const question = text(command.question, "问题", 2000);
+          const key = normalizeDecisionKey(command.key ? text(command.key, "决定键", 300) : question);
+          const known = latestDecision(state, item.projectId, key);
+          item.status = "active";
+          item.waitingFor = undefined;
+          item.remindAt = undefined;
+          if (known) {
+            if (item.attention?.source === "governance") item.attention = null;
+            item.next = command.next
+              ? text(command.next, "下一步", 2000)
+              : `沿用你此前${outcomeLabel(known.outcome)}的决定：${known.quote}`;
+            activity(item, "decision", `决定账本命中：此前已${outcomeLabel(known.outcome)}「${known.quote}」，不再重复询问。`, known.source);
+            return item;
+          }
+          const riskCategory = riskCategoryForText(question);
           item.attention = {
             kind: "decision",
-            summary: text(command.question, "问题", 2000),
+            summary: riskCategory ? riskSummary(riskCategory, question) : question,
             since: nowIso(),
+            ...(riskCategory ? { source: "governance" as const } : {}),
+            decisionKey: riskCategory ? `risk:${riskCategory}:${key}` : key,
           };
           if (command.next) item.next = text(command.next, "下一步", 2000);
-          activity(item, "decision", command.question, command.actor || "管家");
+          activity(item, "decision", item.attention.summary, command.actor || "管家");
           return item;
+        }
+        case "goal.risk": {
+          const item = goal(command.goalId);
+          ongoing(item);
+          if (!isHighRiskCategory(command.category))
+            throw new Error("无效的高风险动作类型");
+          const summary = text(command.summary, "高风险动作", 2000);
+          const actionKey = `risk:${command.category}:${normalizeDecisionKey(
+            command.actionKey ? text(command.actionKey, "动作键", 300) : summary,
+          )}`;
+          const at = nowIso(), known = latestDecision(state, item.projectId, actionKey);
+          item.risk = { category: command.category, summary, actionKey, at };
+          item.status = "active";
+          item.waitingFor = undefined;
+          item.remindAt = undefined;
+          if (known) {
+            item.attention = null;
+            item.next = `沿用你此前${outcomeLabel(known.outcome)}的决定：${known.quote}`;
+            activity(item, "decision", `决定账本命中高风险动作「${summary}」：${outcomeLabel(known.outcome)}。`, known.source);
+            return item;
+          }
+          item.attention = {
+            kind: "decision",
+            summary: riskSummary(command.category, summary),
+            since: at,
+            source: "governance",
+            decisionKey: actionKey,
+          };
+          item.next = `执行高风险动作前等待你确认：${summary}`;
+          activity(item, "decision", item.attention.summary, command.actor || "管家");
+          return item;
+        }
+        case "goal.ship": {
+          const item = goal(command.goalId);
+          ongoing(item);
+          if (!["merge", "deploy"].includes(command.operation))
+            throw new Error("无效的上线动作");
+          if (typeof command.checksPassed !== "boolean")
+            throw new Error("上线前必须提供真实检查结果");
+          const project = state.projects.find(value => value.id === item.projectId);
+          if (!project) throw new Error("找不到目标所属项目");
+          const policy = projectPolicy(state, item.projectId);
+          const actionKey = `ship:${item.projectId}:${command.operation}`;
+          if (!command.checksPassed) {
+            item.next = `上线检查未通过，先修复 ${command.operation === "merge" ? "合并" : "部署"}前的问题。`;
+            activity(item, "ship", `${command.operation} 检查未通过，未执行上线动作。`, command.actor || "管家");
+            return { allowed: false, requiresHuman: false, reason: "checks_failed", policy };
+          }
+          const known = latestDecision(state, item.projectId, actionKey);
+          if (known?.outcome === "rejected") {
+            item.attention = null;
+            item.next = `你此前已拒绝该上线动作：${known.quote}`;
+            activity(item, "ship", item.next, known.source);
+            return { allowed: false, requiresHuman: false, reason: "rejected", policy, decision: known };
+          }
+          const requiresHuman = !known && (
+            policy.shipPolicy === "external-approval" ||
+            (policy.shipPolicy === "auto-merge-manual-deploy" && command.operation === "deploy"));
+          if (requiresHuman) {
+            item.attention = {
+              kind: "decision",
+              summary: [
+                `上线策略 ${policy.shipPolicy} 要求你确认${command.operation === "merge" ? "合并" : "部署"}。`,
+                policy.approvers.length ? `审批人：${policy.approvers.join("、")}。` : "",
+              ].join(""),
+              since: nowIso(),
+              source: "governance",
+              decisionKey: actionKey,
+            };
+            item.next = `等待你按上线策略确认${command.operation}。`;
+            activity(item, "ship", item.attention.summary, command.actor || "管家");
+            return { allowed: false, requiresHuman: true, reason: policy.shipPolicy, policy, decisionKey: actionKey };
+          }
+          item.attention = null;
+          item.next = `${command.operation} 已通过项目上线策略，可继续执行并核实结果。`;
+          activity(item, "ship", `${command.operation} 已获上线策略放行。`, command.actor || "管家");
+          return {
+            allowed: true,
+            requiresHuman: false,
+            reason: known ? "ledger" : policy.shipPolicy,
+            policy,
+            ...(known ? { decision: known } : {}),
+          };
         }
         case "goal.review": {
           const item = goal(command.goalId),
@@ -405,6 +571,20 @@ export class WorkspaceService {
           if (checks.some((check) => check.result !== "passed"))
             throw new Error("仍有检查未通过，请修复后再提交验收");
           const at = nowIso();
+          const reviewRounds = item.reviewRounds ?? 0,
+            reviewLimit = item.reviewLimit ?? 3;
+          if (reviewRounds >= reviewLimit) {
+            item.attention = {
+              kind: "intervention",
+              summary: `审查已达到 ${reviewLimit} 轮上限，需要你决定是否增加一轮。`,
+              since: at,
+              source: "governance",
+              decisionKey: `review:${item.id}:round-${reviewLimit + 1}`,
+            };
+            item.next = "审查轮次达到上限，新的提交已被拦截并升级。";
+            activity(item, "decision", item.attention.summary, "系统");
+            return item;
+          }
           item.delivery = {
             summary: text(delivery.summary, "成果摘要", 12_000),
             ...(delivery.location
@@ -416,6 +596,8 @@ export class WorkspaceService {
             submittedBy: command.actor || "管家",
           };
           item.status = "review";
+          item.reviewRounds = reviewRounds + 1;
+          item.reviewLimit = reviewLimit;
           item.attention = {
             kind: "review",
             summary: "成果已提交，等待你的验收。",
@@ -474,12 +656,49 @@ export class WorkspaceService {
             throw new Error("成果请使用验收通过或退回修改");
           if (!item.attention && !(item.status === "waiting" && item.remindAt))
             throw new Error("当前没有需要解决的注意力事项");
+          const at = nowIso(), note = command.note?.trim() ? text(command.note, "决定", 4000) : "";
+          const decisionAttention = item.attention?.kind === "decision" ? item.attention : undefined;
+          const isDecision = Boolean(decisionAttention);
+          if (isDecision) {
+            if (!note) throw new Error("决定账本需要记录你的原话");
+            const outcome = command.outcome ?? "approved";
+            if (!["approved", "rejected"].includes(outcome))
+              throw new Error("无效的决定结果");
+            state.decisions.push({
+              id: newId("decision"),
+              projectId: item.projectId,
+              actionKey: text(decisionAttention!.decisionKey || decisionAttention!.summary, "决定键", 4000),
+              outcome,
+              quote: note,
+              source: command.source === "herdr"
+                ? "Herdr 注意力面板"
+                : command.source === "cli" ? "Crewvane CLI" : "Crewvane 桌面",
+              goalId: item.id,
+              decidedAt: at,
+            });
+            item.next = `你已${outcome === "approved" ? "批准" : "拒绝"}：${note}`;
+            item.status = "active";
+            item.waitingFor = undefined;
+            item.remindAt = undefined;
+            if (item.mode === "concierge")
+              item.dispatch = {
+                id: newId("handoff"),
+                kind: "feedback",
+                note: item.next,
+                status: "pending",
+                at,
+              };
+          }
+          if (item.attention?.kind === "intervention" &&
+            item.attention.source === "governance" &&
+            item.attention.summary.includes("审查已达到")) {
+            item.reviewLimit = (item.reviewLimit ?? 3) + 1;
+          }
           item.attention = null;
           item.remindAt = undefined;
-          if (command.note) {
-            item.next = text(command.note, "下一步", 2000);
-            activity(item, "resolved", command.note, command.actor || "你");
-          } else stamp(item);
+          if (note && !isDecision) item.next = note;
+          if (note) activity(item, "resolved", note, command.actor || "你");
+          else stamp(item);
           return item;
         }
         case "goal.remind": {
@@ -566,6 +785,50 @@ export class WorkspaceService {
               item.attention = null;
           }
           return true;
+        }
+        case "live.event": {
+          const target = command.target;
+          const idPattern = /^[A-Za-z0-9_-]{1,64}(?::[A-Za-z0-9_-]{1,64})?$/;
+          const targets = [
+            ["paneId", target?.paneId],
+            ["tabId", target?.tabId],
+            ["workspaceId", target?.workspaceId],
+          ] as const;
+          if (!targets.some(([, value]) => typeof value === "string" && value.length > 0))
+            throw new Error("Herdr 插件事件缺少现场身份");
+          for (const [name, value] of targets) {
+            if (value !== undefined && (typeof value !== "string" || !idPattern.test(value)))
+              throw new Error(`无效的 Herdr ${name}`);
+          }
+          for (const [name, value] of Object.entries(command.reference ?? {})) {
+            if (name === "agent" && value !== undefined &&
+              (typeof value !== "string" || !/^[a-z][a-z0-9_-]{0,31}$/.test(value)))
+              throw new Error("无效的 Herdr Agent 名称");
+            if (name !== "agent" && value !== undefined &&
+              (typeof value !== "string" || !idPattern.test(value)))
+              throw new Error(`无效的 Herdr ${name}`);
+          }
+          if (!["working", "idle", "done", "blocked", "unknown"].includes(command.presence.state))
+            throw new Error("无效的 Herdr 状态");
+          let matched = 0;
+          for (const item of state.goals) {
+            const reference = item.herdr;
+            if (["completed", "dropped"].includes(item.status) || !reference ||
+              (target.paneId !== undefined && reference.paneId !== target.paneId) ||
+              (target.tabId !== undefined && reference.tabId !== target.tabId) ||
+              (target.workspaceId !== undefined && reference.workspaceId !== target.workspaceId)) continue;
+            item.live = {
+              state: command.presence.state,
+              checkedAt: iso(command.presence.checkedAt),
+              ...(command.presence.reachable === undefined ? {} : { reachable: Boolean(command.presence.reachable) }),
+            };
+            if (command.reference)
+              item.herdr = { ...reference, ...structuredClone(command.reference) };
+            if (command.presence.state !== "blocked" && item.attention?.source === "live")
+              item.attention = null;
+            matched += 1;
+          }
+          return { matched };
         }
         case "watchdog.inspect":
           return inspectWatchdog(state.goals, iso(command.at));

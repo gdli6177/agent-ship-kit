@@ -9,6 +9,8 @@ import assert from "node:assert/strict";
 const trial = await realpath(await mkdtemp("/tmp/cv-delegate-"));
 const workspace = join(trial, "workspace"), home = join(trial, "home");
 const session = `crewvane-trial-${randomUUID().slice(0, 8)}`;
+const trialAgent = process.env.CREWVANE_TRIAL_AGENT ??
+  "omp --tools=read,bash,edit,write --approval-mode=yolo";
 await mkdir(workspace); await mkdir(home);
 await writeFile(join(workspace, "AGENTS.md"), `# 隔离产品验收
 只处理本工作区目标，不访问其他项目或用户文件，不提交、发布或发送外部消息。
@@ -47,6 +49,9 @@ try {
   page = await app.firstWindow();
   page.on("pageerror", error => errors.push(String(error)));
   await expect.poll(async () => (await page.evaluate(() => window.crewvane.environment())).workspace).toBe(workspace);
+  await page.evaluate(preferences => window.crewvane.command({type:"agents.configure",preferences}), {
+    concierge:trialAgent, owner:trialAgent, worker:trialAgent,
+  });
   const ids = [];
   for (const marker of ["ALPHA_READY","BETA_READY"]) {
     const goal = await page.evaluate(({marker,workspace}) => window.crewvane.command({type:"goal.create",input:{
@@ -55,7 +60,7 @@ try {
     }}),{marker,workspace});
     ids.push(goal.id);
   }
-  console.log(JSON.stringify({step:"two-goals-created",trial,session,ids}));
+  console.log(JSON.stringify({step:"two-goals-created",trial,session,ids,trialAgent}));
   const start = Date.now();
   let inspected = 0, current;
   while (Date.now() - start < 600_000) {
@@ -93,6 +98,56 @@ try {
   assert.equal(agents.length,3,"two goals have exactly two owners and one concierge, without duplicate starts");
   assert.equal(agents.filter(agent=>agent.name==="concierge").length,1);
   assert.ok(goals.every(goal=>agents.some(agent=>agent.pane_id===goal.herdr.paneId)));
+  const directGoal = goals.at(-1), dispatchBeforeDirect = directGoal.dispatch?.id,
+    directMarker = `DIRECT_TERMINAL_${randomUUID().slice(0, 8)}`;
+  const directPrompt = await app.evaluate(async (_electron, {session,directMarker}) => {
+    const { execFile } = process.getBuiltinModule("node:child_process");
+    return await new Promise(resolve => execFile("herdr", [
+      "--session", session, "agent", "prompt", "concierge",
+      `这是用户直接发给你的 Herdr 终端消息。按你的身份协议，只把原话同步回 Crewvane 当前目标，不要开始新的执行或创建负责人。原话：追加下一步 ${directMarker}`,
+      "--wait", "--timeout", "180000",
+    ], {timeout:190_000,maxBuffer:512_000}, (error, stdout, stderr) =>
+      resolve({error:error?.message,stdout,stderr})));
+  }, {session,directMarker});
+  assert.equal(directPrompt.error, undefined, directPrompt.stderr || directPrompt.error);
+  await expect.poll(async () => {
+    const state = await snapshot();
+    return state.goals.find(goal => goal.id === directGoal.id)?.activities
+      .some(activity => activity.text.includes(directMarker));
+  }, {timeout:180_000}).toBe(true);
+  const directState = await snapshot();
+  const syncedDirect = directState.goals.find(goal => goal.id === directGoal.id);
+  assert.equal(syncedDirect.dispatch?.id, dispatchBeforeDirect,
+    "a terminal direct message must not create a duplicate handoff");
+  assert.equal(syncedDirect.activities.at(-1).actor, "你 · Herdr 直聊");
+  console.log(JSON.stringify({step:"direct-terminal-synced",goalId:directGoal.id,directMarker}));
+  const newTaskMarker = `DIRECT_NEW_${randomUUID().slice(0, 8)}`;
+  const newTaskPrompt = await app.evaluate(async (_electron, {session,newTaskMarker}) => {
+    const { execFile } = process.getBuiltinModule("node:child_process");
+    return await new Promise(resolve => execFile("herdr", [
+      "--session", session, "agent", "prompt", "concierge",
+      `这是用户通过 Herdr 终端直接发来的独立新任务。严格只执行下面两步，不创建负责人，不做其他任务：
+1. 运行 crewvane direct --new "直接终端新任务 ${newTaskMarker}" --json
+2. 从返回 JSON 读取 id，运行 crewvane goal progress <id> --summary "已直接受理终端新任务" --next "整理完成标准并创建负责人" --json
+完成后简短回复。`,
+      "--wait", "--timeout", "180000",
+    ], {timeout:190_000,maxBuffer:512_000}, (error, stdout, stderr) =>
+      resolve({error:error?.message,stdout,stderr})));
+  }, {session,newTaskMarker});
+  assert.equal(newTaskPrompt.error, undefined, newTaskPrompt.stderr || newTaskPrompt.error);
+  let directNew;
+  await expect.poll(async () => {
+    const state = await snapshot();
+    directNew = state.goals.find(goal => goal.title.includes(newTaskMarker));
+    return directNew?.activities.some(activity =>
+      activity.text.includes("已直接受理终端新任务")) ?? false;
+  }, {timeout:180_000}).toBe(true);
+  assert.equal(directNew.dispatch?.status, "sent",
+    "a directly received new task must not be replayed to the concierge");
+  assert.ok(directNew.activities.some(activity => activity.actor === "你 · Herdr 直聊"));
+  assert.equal(directNew.next, "整理完成标准并创建负责人",
+    "the concierge must be able to keep working on the direct-created goal");
+  console.log(JSON.stringify({step:"direct-terminal-new-goal-synced",goalId:directNew.id,newTaskMarker}));
   await app.close();
   app = await electron.launch({
     executablePath:resolve(process.env.CREWVANE_APP_PATH || "apps/desktop/release/Crewvane-darwin-arm64/Crewvane.app/Contents/MacOS/Crewvane"),
@@ -112,7 +167,10 @@ try {
   assert.deepEqual(errors,[]);
   console.log(JSON.stringify({ok:true,trial,session,checks:[
     "two desktop goals create two independent real owners","one global concierge",
-    "actual outputs identify each owner pane","real checks and delivery","restart refreshes concierge role and preserves both owner references",
+    "actual outputs identify each owner pane","real checks and delivery",
+    "direct Herdr terminal message writes back without duplicate dispatch",
+    "direct Herdr new task writes back and advances the concierge case scope",
+    "restart refreshes concierge role and preserves both owner references",
   ]}));
 } catch (error) {
   if (app && page) await capture("failure").catch(()=>{});

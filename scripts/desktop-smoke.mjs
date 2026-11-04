@@ -2,8 +2,11 @@ import { _electron as electron } from "@playwright/test";
 import { mkdir, mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
 import assert from "node:assert/strict";
 import { WorkspaceService } from "../packages/core/src/index.ts";
+const run = promisify(execFile);
 const home = await mkdtemp(join(tmpdir(), "crewvane-desktop-v04-")),
   workspace = join(home, "workspace");
 await mkdir(workspace);
@@ -71,6 +74,16 @@ try {
       window.crewvane.command({ type: "snapshot" }),
     ),
     goalId = state.goals[0].id;
+  const dispatchBeforeDirect = state.goals[0].dispatch?.id;
+  await run("pnpm", [
+    "--dir", "cli", "exec", "tsx", "src/main.ts", "direct",
+    "外部 Herdr 终端追加下一步", "--goal", goalId, "--root", workspace, "--json",
+  ], { cwd: resolve("."), timeout: 30_000 });
+  await page.getByText("外部 Herdr 终端追加下一步", { exact: true }).waitFor();
+  state = await page.evaluate(() => window.crewvane.command({ type: "snapshot" }));
+  assert.equal(state.goals[0].dispatch?.id, dispatchBeforeDirect,
+    "external terminal feedback must not create a duplicate handoff");
+  assert.match(state.goals[0].activities.at(-1).text, /外部 Herdr 终端追加下一步/);
   await page.getByRole("button", { name: "我来处理", exact: true }).click();
   assert.equal((await page.evaluate(() => window.crewvane.command({type:"snapshot"}))).goals[0].mode, "manual");
   await page.screenshot({ path: join(home, "intake-dark.png"), animations: "disabled" });
@@ -130,6 +143,15 @@ try {
   await page.screenshot({ path: join(home, "workflow-dark.png") });
   await page.getByRole("button", { name: "设置", exact: true }).click();
   await page.getByRole("heading", { name: "只设置必要的。" }).waitFor();
+  const personalPolicy = page.locator(".policy-row").filter({ hasText: "个人事项" });
+  await personalPolicy.getByRole("button", { name: "配置", exact: true }).click();
+  await personalPolicy.getByLabel("上线策略").selectOption("auto");
+  await personalPolicy.getByLabel("外部审批人（可选）").fill("YR、平台组");
+  await personalPolicy.getByRole("button", { name: "保存策略", exact: true }).click();
+  await page.getByText("项目上线策略已更新。", { exact: true }).waitFor();
+  const personalProject = (await service.read()).projects.find(project => project.id === "personal");
+  assert.equal(personalProject.policy.shipPolicy, "auto");
+  assert.deepEqual(personalProject.policy.approvers, ["YR", "平台组"]);
   await page.getByLabel("管家启动命令").fill("codex --model my-model");
   await page.getByLabel("负责人启动命令").fill("omp --model another-model");
   await page.getByLabel("工人启动命令").fill("");
@@ -155,6 +177,22 @@ try {
   await page.getByText(/Crewvane 0\.4 · 一位管家/).waitFor();
   await page.getByRole("button", { name: "浅色模式" }).click();
   await page.getByRole("button", { name: "注意力", exact: true }).click();
+  const riskGoal = await page.evaluate(() => window.crewvane.command({
+    type: "goal.create",
+    input: { title: "权限变更试用", projectId: "personal", mode: "manual" },
+  }));
+  await page.evaluate((goalId) => window.crewvane.command({
+    type: "goal.risk", goalId, category: "change-permissions",
+    summary: "给生产环境增加一名管理员", actor: "管家",
+  }), riskGoal.id);
+  await page.getByText("权限变更试用", { exact: true }).click();
+  await page.getByLabel("你的决定").fill("只允许只读权限，不增加管理员。");
+  await page.getByRole("button", { name: "批准这个决定", exact: true }).click();
+  await page.getByText("已记入批准账本，下一步已更新", { exact: true }).waitFor();
+  const ledger = await readFile(join(workspace, ".crewvane", "decisions.md"), "utf8");
+  assert.match(ledger, /只允许只读权限/);
+  assert.match(ledger, /change-permissions/);
+  await page.getByRole("button", { name: "关闭", exact: true }).click();
   await page.screenshot({ path: join(home, "home-light.png") });
   // A personal item must be manageable without asking an Agent or using CLI.
   await page.locator(".top-actions").getByRole("button", { name: "新目标" }).click();
@@ -242,6 +280,8 @@ try {
         "accept",
         "workflow save",
         "settings",
+        "per-project ship policy from the desktop UI",
+        "high-risk decision from the desktop UI and persisted ledger",
         "save Agent role preferences",
         "shared state",
         "renderer isolation",
@@ -251,6 +291,7 @@ try {
         "single natural-language goal intake",
         "keyboard submission for goal intake",
         "visible goal feedback preserves the next step",
+        "external terminal feedback refreshes the app without replaying a handoff",
         "waiting snooze and resume directly without the manual editor",
       ],
       errors,
