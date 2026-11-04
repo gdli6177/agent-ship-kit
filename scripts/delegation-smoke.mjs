@@ -4,8 +4,11 @@ import { _electron as electron, expect } from "@playwright/test";
 import { mkdtemp, mkdir, readFile, writeFile, realpath, rm } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { randomUUID } from "node:crypto";
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
 import assert from "node:assert/strict";
 
+const exec = promisify(execFile);
 const trial = await realpath(await mkdtemp("/tmp/cv-delegate-"));
 const workspace = join(trial, "workspace"), home = join(trial, "home");
 const session = `crewvane-trial-${randomUUID().slice(0, 8)}`;
@@ -56,10 +59,15 @@ try {
   for (const marker of ["ALPHA_READY","BETA_READY"]) {
     const goal = await page.evaluate(({marker,workspace}) => window.crewvane.command({type:"goal.create",input:{
       title:`交付 ${marker}`,projectId:"personal",mode:"concierge",
-      description:`在 ${workspace}/${marker}.json 写入 JSON，包含 marker="${marker}" 和 executorPane（执行者进程环境中的真实 HERDR_PANE_ID）。实际运行一个读取此文件并断言 marker 与非空 executorPane 的命令，再提交成果位置和真实检查记录供我验收。不要只回复文字。只操作此隔离工作区，无需提交或发布。`,
+      description:`在 ${workspace}/${marker}.json 写入 JSON，包含 marker="${marker}" 和 executorPane（执行者进程环境中的真实 HERDR_PANE_ID）。${marker === "ALPHA_READY" ? "这个目标附带一张测试图片，实际读取案卷中 attachment 指定的原图，确认是 PNG，并在成果中附上它的 SHA-256；不得声称看过却没有读取。" : ""}实际运行一个读取此文件并断言 marker 与非空 executorPane 的命令，再提交成果位置和真实检查记录供我验收。不要只回复文字。只操作此隔离工作区，无需提交或发布。`,
     }}),{marker,workspace});
     ids.push(goal.id);
   }
+  const png = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==", "base64"),
+    picture = join(trial, "owner-evidence.png");
+  await writeFile(picture, png);
+  await exec("pnpm", ["--dir", "cli", "exec", "tsx", "src/main.ts", "direct",
+    "请按案卷附带的图片验证真实附件传递", "--goal", ids[0], "--attachment", picture, "--root", workspace, "--json"]);
   console.log(JSON.stringify({step:"two-goals-created",trial,session,ids,trialAgent}));
   const start = Date.now();
   let inspected = 0, current;
@@ -90,6 +98,12 @@ try {
     assert.equal(delivered.marker,marker);
     assert.equal(delivered.executorPane,goal.herdr.paneId,"the actual executor is the registered owner, not concierge");
     assert.ok(goal.delivery.checks.length && goal.delivery.checks.every(check=>check.result==="passed"));
+    if (marker === "ALPHA_READY") {
+      assert.equal(goal.attachments.length, 1);
+      const evidence = await readFile(join(workspace, goal.attachments[0].path));
+      assert.ok(evidence.equals(png), "the owner received the actual image stored in the goal");
+      assert.match(JSON.stringify(goal.delivery), /[a-f0-9]{64}/);
+    }
   }
   await page.evaluate(()=>window.crewvane.openTerminal());
   await page.getByRole("region",{name:"Herdr 工作现场"}).waitFor();
@@ -164,6 +178,29 @@ try {
   const resumed=await capture("resumed-roles");
   const resumedData=JSON.parse(resumed.listed.stdout);
   assert.equal((resumedData.result?.agents ?? resumedData.agents).length,3);
+  await page.evaluate(goalId => window.crewvane.command({
+    type:"goal.accept",goalId,actor:"你",
+  }),goals[0].id);
+  await expect.poll(async()=> (await snapshot()).goals.find(goal=>goal.id===goals[0].id)?.herdr)
+    .toBe(undefined);
+  const afterClose = await capture("first-owner-closed"),
+    remaining = JSON.parse(afterClose.listed.stdout).result?.agents ?? [];
+  assert.equal(remaining.length,2,"acceptance closes one owner, preserving the concierge and the other goal");
+  assert.ok(remaining.some(agent=>agent.name==="concierge"));
+  assert.ok(remaining.some(agent=>agent.pane_id===goals[1].herdr.paneId));
+  await page.evaluate(goalId => window.crewvane.command({
+    type:"goal.accept",goalId,actor:"你",
+  }),goals[1].id);
+  await expect.poll(async()=> (await snapshot()).goals.find(goal=>goal.id===goals[1].id)?.herdr)
+    .toBe(undefined);
+  await page.evaluate(goalId => window.crewvane.command({
+    type:"goal.delete",goalId,actor:"你",
+  }),goals[1].id);
+  const afterDelete = await capture("second-owner-closed");
+  assert.equal((JSON.parse(afterDelete.listed.stdout).result?.agents ?? []).length,1,
+    "permanent deletion closes its owner and preserves only the global concierge");
+  assert.equal((await snapshot()).goals.some(goal=>goal.id===goals[1].id),false);
+  assert.equal((await snapshot()).concierge.paneId,current.concierge.paneId);
   assert.deepEqual(errors,[]);
   console.log(JSON.stringify({ok:true,trial,session,checks:[
     "two desktop goals create two independent real owners","one global concierge",
@@ -171,6 +208,8 @@ try {
     "direct Herdr terminal message writes back without duplicate dispatch",
     "direct Herdr new task writes back and advances the concierge case scope",
     "restart refreshes concierge role and preserves both owner references",
+    "real image attachment reaches an owner and is included in delivery evidence",
+    "acceptance closes only each corresponding owner tab; permanent deletion removes the ended goal",
   ]}));
 } catch (error) {
   if (app && page) await capture("failure").catch(()=>{});

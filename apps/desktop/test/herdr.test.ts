@@ -73,9 +73,16 @@ test("new goals notify the same concierge without creating an owner or another s
     description: "完整原文\n保留全部约束", mode: "concierge", status: "active",
     steps: [{ id: "intake", name: "待管家梳理", prompt: "先整理，再分发" }], stageId: "intake",
     next: "管家正在整理", owner: "待分配负责人", attention: null,
+    attachments: [{
+      id: "att_0123456789abcdef", name: "现场截图.png",
+      path: ".crewvane/attachments/att_0123456789abcdef.png",
+      mime: "image/png", size: 128,
+      sha256: "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+      addedAt: new Date().toISOString(),
+    }],
     activities: [{ id: "activity", at: new Date().toISOString(), actor: "你", kind: "created", text: "完整原文\n保留全部约束" }],
     createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
-  });
+  }, "/workspace");
   assert.equal(mock.calls.length, 3);
   assert.ok(mock.calls.every(args => args.slice(0, 3).join(" ") === "agent prompt concierge"));
   assert.match(mock.calls[0]![3]!, /goal_one/);
@@ -90,6 +97,8 @@ test("new goals notify the same concierge without creating an owner or another s
   }
   assert.match(mock.calls[2]![3]!, /完整原文\\n保留全部约束/);
   assert.match(mock.calls[2]![3]!, /待管家梳理/);
+  assert.match(mock.calls[2]![3]!, /\/workspace\/\.crewvane\/attachments\/att_0123456789abcdef\.png/);
+  assert.match(mock.calls[2]![3]!, /实际查看图片/);
   assert.ok(mock.calls.every(args => args.includes("--wait") && args.includes("--timeout")));
 });
 
@@ -197,6 +206,28 @@ test("custom command exit or a replaced foreground process never receives task t
     await assert.rejects(client.notifyGoal({ session: "crewvane", paneId: "w1:p1", transport: "pane", processId: 42 }, "g1", "任务"), /已退出或现场已更换/);
     assert.ok(!mock.calls.some(args => args[1] === "run"), "never send instructions to an idle shell or replacement program");
   }
+});
+test("completed goal scenes close their dedicated Herdr tab and recover a moved tab by live identity", async () => {
+  const direct = fake({ "tab close": "{}" });
+  await new HerdrClient(direct.runner, "crewvane-test").closeGoal({
+    session: "crewvane-test", workspaceId: "w1", tabId: "w1:t2", paneId: "w1:p2", agent: "owner-a",
+  });
+  assert.deepEqual(direct.calls, [["tab", "close", "w1:t2"]]);
+
+  const moved = fake({
+    "tab close": '!Herdr tab close：{"error":"tab_not_found"}',
+    "agent list": JSON.stringify({ result: { agents: [{
+      name: "owner-a", agent: "owner-a", workspace_id: "w1", tab_id: "w1:t9", pane_id: "w1:p9",
+    }] } }),
+  });
+  await new HerdrClient(moved.runner, "crewvane-test").closeGoal({
+    session: "crewvane-test", workspaceId: "w1", tabId: "w1:t2", paneId: "w1:p2", agent: "owner-a",
+  });
+  assert.deepEqual(moved.calls, [
+    ["tab", "close", "w1:t2"],
+    ["agent", "list"],
+    ["tab", "close", "w1:t9"],
+  ]);
 });
 test("custom CLI prompt fits canonical terminal lines and preserves Unicode content", () => {
   const text = "长提示词✨".repeat(400);

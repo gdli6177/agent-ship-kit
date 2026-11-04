@@ -74,6 +74,23 @@ test("goal owners cannot register the concierge or another live goal's execution
   assert.equal(state.goals[0]?.owner,"owner-a");
   assert.equal(state.goals[1]?.owner,"owner-b");
 });
+test("completed or dropped goals release their ended owner scene", async () => {
+  const { service } = await fixture(), item = await create(service);
+  await service.execute({
+    type: "session.set",
+    goalId: item.id,
+    reference: { session: "test", agent: "owner-a", paneId: "w1:p2", tabId: "w1:t2" },
+  });
+  await assert.rejects(
+    service.execute({ type: "session.release", goalId: item.id }),
+    /只有已完成或已放弃/,
+  );
+  await service.execute({ type: "goal.drop", goalId: item.id, note: "结束现场" });
+  const released = await service.execute({ type: "session.release", goalId: item.id }) as Goal;
+  assert.equal(released.herdr, undefined);
+  assert.equal(released.live, undefined);
+  assert.equal(released.activities.at(-1)?.text, "目标已结束，负责人现场已关闭。");
+});
 test("Agent role preferences persist without changing running concierge references", async () => {
   const { service } = await fixture();
   await service.execute({ type: "concierge.status", status: "ready",

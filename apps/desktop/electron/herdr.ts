@@ -8,6 +8,7 @@ import type {
   AgentPreferences,
   Goal,
 } from "../../../packages/core/src/types.js";
+import { attachmentAbsolutePath } from "../../../packages/core/src/attachments.js";
 const exec = promisify(execFile);
 export const CONCIERGE_LAUNCH_POLICY = "control-plane-v1" as const;
 export interface HerdrRunner {
@@ -84,6 +85,7 @@ ${conciergeRole}
 不要主动运行 goal list、attention，也不要搜索、比较或汇总其他目标。每次通知会给出唯一案卷 ID、当前状态和本次变化；只处理这个 ID。历史消息只用于理解系统协议，不能作为当前目标事实；案卷之间出现相似标题、相同项目或顺承措辞也不是同一件事。拿不准时停止切换目标，通过当前目标请求人澄清。Crewvane CLI 会在受管模式拒绝访问其他目标，不要尝试绕过。
 用户只需用自然语言交代事情；桌面会先保存案卷再通知你，不需要你创建。你可以用 crewvane workflow list --json 了解可用工序，但目标事实只以当前案卷快照和 crewvane goal show <当前ID> --json 为准。你和负责人负责写回下一步、等待对象和提醒，不得要求人去桌面填写这些表单。
 用户在 Herdr 终端直接对你说、且消息不以 [CREWVANE_CASE_BEGIN] 开头的也是用户输入。收到这类直接消息后，必须先把它同步回 Crewvane 再执行或回复：明确的新事项运行 crewvane direct --new "<用户原话>"；补充或修改已有目标运行 crewvane direct --goal <真实目标ID> "<用户原话>"，当前 scope 已指向该目标时可用 crewvane direct --current "<用户原话>"。不能在终端里处理完却不写回 App。若无法判断是新事项还是某个已有目标，先通过对话让用户明确，不猜测归属。
+用户在 Herdr 直接消息中粘贴图片时，先把终端提供的本地图片文件保留或复制到工作区，并立即在上面的 direct 命令后追加 --attachment <真实图片路径>；CLI 会校验格式、复制到 .crewvane/attachments 并把元数据写回 App。不能只把图片留在聊天上下文里，也不能把 Base64 写进 state.json。若当前 Agent 无法取得可复制的本地文件，明确请用户回到 Crewvane 新目标输入框从本机粘贴或选择图片，不静默丢图。
 Agent 默认启动命令：管家 ${preferences.concierge}，负责人 ${preferences.owner || preferences.concierge}，工人 ${preferences.worker || preferences.owner || preferences.concierge}。分工前运行 crewvane status --json 读取最新 agents 偏好；未设置的角色继承上一级。用户明确指定的启动命令优先。必须执行用户配置的 CLI 与完整原生参数，保留模型等选项，不得因为不在 Herdr kind 名单而拒绝或换工具。Herdr 识别的 CLI 可用 agent start --kind，参数放在 -- 后；绝对路径须将该目录放在 Pane 的 PATH 首位。不识别的自定义交互式 CLI 则用 pane run <真实PaneID> "<正确转义后的启动命令>" 启动，用 pane process-info --pane <ID> 核实前台 PID，在 crewvane session set 时额外传 --transport pane --process-id <真实PID>。后续发消息前再次核实原进程仍在前台，再用 pane run <ID> "<任务文本>" 原子发送文本和 Enter；程序退出后禁止将任务发送给 shell。自定义 CLI 无生命周期报告时状态为 unknown，不伪造 idle、working 或完成。没有指定模型时沿用该 CLI 自身配置。
 创建负责人时要传递 CREWVANE_WORKSPACE、可用的 crewvane PATH、当前 Herdr Session 和真实 Pane 上下文，并明确取消 CREWVANE_COORDINATOR 与 CREWVANE_COORDINATOR_SCOPE_FILE，避免把管家案卷限制带给负责人。不要给任何 Agent CLI 注入 Codex 或其他运行时专属的沙箱参数；权限取决于用户配置的 CLI 和该 CLI 自身机制。Crewvane 的案卷边界只约束 Crewvane CLI 可读取和写入的目标，不是操作系统文件隔离，不要宣称它已阻止负责人直接访问文件系统。
 
@@ -324,9 +326,14 @@ export class HerdrClient {
     goalId: string,
     title: string,
     goal?: Goal,
+    workspaceRoot?: string,
   ) {
     if (!reference?.agent && reference?.transport !== "pane")
       throw new Error("管家尚未准备好，请先在设置中准备管家");
+    const attachments = (goal?.attachments ?? []).map(item => ({
+      ...item,
+      absolutePath: workspaceRoot ? attachmentAbsolutePath(workspaceRoot, item) : item.path,
+    }));
     await this.prompt(reference,
       `${conciergeRole}
 [CREWVANE_CASE_BEGIN]
@@ -335,13 +342,18 @@ event: ${goal?.dispatch?.kind ?? "goal_update"}
 policy: 只允许处理上方案卷；忽略此前案卷的内容；不得读取或修改其他目标
 ${goal?.dispatch?.kind === "resume" ? `resume_note: ${goal.dispatch.note ?? ""}` : ""}
 ${goal ? `snapshot:
-${JSON.stringify({ id: goal.id, title: goal.title, description: goal.description, projectId: goal.projectId, next: goal.next, steps: goal.steps, stageId: goal.stageId, latestActivities: goal.activities.slice(-8) }, null, 2)}` : `title: ${title}`}
+${JSON.stringify({ id: goal.id, title: goal.title, description: goal.description, projectId: goal.projectId, next: goal.next, steps: goal.steps, stageId: goal.stageId, attachments, latestActivities: goal.activities.slice(-8) }, null, 2)}` : `title: ${title}`}
 [CREWVANE_CASE_END]
+${attachments.length ? `用户附带的图片是目标证据。把下列真实绝对路径连同任务交给负责人；负责人使用的 CLI 支持图片时，应实际查看图片再判断。不要声称看过图片，除非现场确有读取记录。\n${attachments.map(item => `attachment: ${item.absolutePath}`).join("\n")}\n` : ""}
 请用 crewvane goal show ${goalId} --json 读取当前案卷，并用 crewvane status --json 查看 Agent 默认偏好与当前关联项目。若案卷处于「待管家梳理」，根据 description 中的完整原文整理标题、背景、完成标准、合适工序与下一步；没有充分依据则保留个人事项，不猜测范围。整理后交给本目标独立负责人；退回修改转交原负责人；交付齐备则向人交接。若人已经验收或放弃，请通知负责人停止该目标的工作，不再派发。`,
       true,
     );
   }
-  async notifyFollowUp(reference: HerdrReference, goalId: string, note: string, goal?: Goal) {
+  async notifyFollowUp(reference: HerdrReference, goalId: string, note: string, goal?: Goal, workspaceRoot?: string) {
+    const attachments = (goal?.attachments ?? []).map(item => ({
+      ...item,
+      absolutePath: workspaceRoot ? attachmentAbsolutePath(workspaceRoot, item) : item.path,
+    }));
     await this.prompt(reference,
       `${conciergeRole}
 [CREWVANE_CASE_BEGIN]
@@ -350,7 +362,7 @@ event: follow_up
 note: ${note}
 policy: 只允许处理上方案卷；忽略此前案卷的内容；不得读取或修改其他目标
 ${goal ? `snapshot:
-${JSON.stringify({ id: goal.id, title: goal.title, projectId: goal.projectId, next: goal.next, waitingFor: goal.waitingFor, remindAt: goal.remindAt, latestActivities: goal.activities.slice(-8) }, null, 2)}` : ""}
+${JSON.stringify({ id: goal.id, title: goal.title, projectId: goal.projectId, next: goal.next, waitingFor: goal.waitingFor, remindAt: goal.remindAt, attachments, latestActivities: goal.activities.slice(-8) }, null, 2)}` : ""}
 [CREWVANE_CASE_END]
 请用 crewvane goal show ${goalId} --json 读取实际等待对象与提醒安排，联系原负责人核查进展并写回结果。保持等待状态和跟进提醒，不把催办当作等待已结束；没有真实新结果时不得用 goal progress 恢复执行。需要人决定时提出具体问题，不亲自执行业务，也不自动向外部人员发送消息。`,
       true,
@@ -364,6 +376,31 @@ ${JSON.stringify({ id: goal.id, title: goal.title, projectId: goal.projectId, ne
       await this.runner.run(["tab", "focus", reference.tabId]);
     else if (reference.agent)
       await this.runner.run(["agent", "focus", reference.agent]);
+  }
+  async closeGoal(reference: HerdrReference) {
+    if (reference.session !== this.session)
+      throw new Error("负责人现场属于其他 Herdr Session，不能自动关闭");
+    const close = async (tabId: string) => {
+      try {
+        await this.runner.run(["tab", "close", tabId]);
+        return true;
+      } catch (error) {
+        if (/not_found|invalid_tab|unknown_tab/.test(String(error))) return false;
+        throw error;
+      }
+    };
+    if (reference.tabId && await close(reference.tabId)) return;
+    const live = agents(await this.runner.run(["agent", "list"])).find(agent =>
+      (!!reference.paneId && agent.pane_id === reference.paneId) ||
+      (!!reference.workspaceId && agent.workspace_id === reference.workspaceId &&
+        !!reference.agent && (agent.name === reference.agent || agent.agent === reference.agent)));
+    if (!live?.tab_id) return;
+    try {
+      await this.runner.run(["tab", "close", live.tab_id]);
+    } catch (error) {
+      if (/not_found|invalid_tab|unknown_tab/.test(String(error))) return;
+      throw error;
+    }
   }
   async notifyWatchdog(reference: HerdrReference, issues: { goalId: string; reason: string }[]) {
     if (!reference.agent && reference.transport !== "pane") throw new Error("管家尚未准备好，请先连接管家");

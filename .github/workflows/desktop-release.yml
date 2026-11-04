@@ -58,7 +58,14 @@ jobs:
         run: |
           set -euo pipefail
           cat > notes.md <<'NOTES'
-          Crewvane｜协航 0.4.3 · macOS Apple Silicon
+          Crewvane｜协航 0.4.4 · macOS Apple Silicon
+
+          本版为“新目标”加入图片附件：可直接粘贴截图、拖入图片或从本机选择 PNG、JPEG、WebP、GIF。
+          图片由主进程校验格式与大小并保存到工作区的 .crewvane/attachments；状态只记录元数据，不保存 Base64。
+          管家通知和负责人任务包含真实绝对路径，CLI 的 ask / direct 也支持重复 --attachment 参数。
+          Herdr 管家直聊收到可保存的图片文件时，会通过 crewvane direct 写回 App。
+          每张图片可立即删除；已结束目标的原图默认保留 30 天，之后随桌面启动自动清理。
+          已完成或已放弃的目标可永久删除；目标结束或删除时，对应负责人 Tab 会自动关闭。
 
           本版完善 Herdr 内闭环：插件随应用自动安装，可直接打开注意力或一句话新建目标。
           项目可配置三档上线策略，默认 external-approval；批准和拒绝写入共享决定账本，同类问题不再重复打扰。
@@ -78,7 +85,7 @@ jobs:
 
           下载 Assets 中的 .dmg，将 Crewvane.app 拖入 Applications；也可下载 .zip 解压安装。
           SHA256SUMS.txt 可用于校验下载文件。GitHub 自动生成的 Source code 是源码，不是安装包。
-          v0.3.0 的应用包签名不完整，请使用 v0.3.1 或更新版本。
+          v0.3.0 的应用包签名不完整，请改用 v0.4.4；不要继续安装旧包。
           本内测版尚未进行 Apple Developer ID 签名与公证，macOS 可能提示无法验证开发者。
           核对发布来源后，可在系统设置 > 隐私与安全性中按提示选择仍要打开。
           使用说明：https://github.com/gdli6177/crewvane/blob/main/docs/crewvane.md

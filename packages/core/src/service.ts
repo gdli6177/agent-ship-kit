@@ -1,5 +1,10 @@
 import { WorkspaceStore, newId } from "./store.js";
-import type { CrewvaneCommand, Goal, WorkflowStep } from "./types.js";
+import {
+  cleanupOrphanAttachmentFiles,
+  removeAttachmentFiles,
+  validateGoalAttachments,
+} from "./attachments.js";
+import type { CrewvaneCommand, Goal, GoalAttachment, WorkflowStep } from "./types.js";
 import {
   isHighRiskCategory,
   isShipPolicy,
@@ -50,6 +55,10 @@ function ongoing(item: Goal, allowReview = false) {
   if (item.status === "review" && !allowReview)
     throw new Error("目标正在等待验收，请先验收或退回修改");
 }
+function attachmentActivity(text: string, attachments: GoalAttachment[]): string {
+  if (!attachments.length) return text;
+  return `${text}\n\n附带图片：${attachments.map(item => item.name).join("、")}`;
+}
 export { attentionGoals, attentionKind } from "./model.js";
 export class WorkspaceService {
   readonly store: WorkspaceStore;
@@ -59,6 +68,78 @@ export class WorkspaceService {
   async read() {
     return this.store.read();
   }
+  private async removeGoalAttachment(command: Extract<CrewvaneCommand, { type: "goal.attachment.remove" }>) {
+    const attachmentId = id(command.attachmentId),
+      actor = command.actor?.trim() ? text(command.actor, "操作者", 120) : "你",
+      result = await this.store.update(command.type, async state => {
+        const item = state.goals.find(goal => goal.id === id(command.goalId));
+        if (!item) throw new Error("找不到目标");
+        const attachment = item.attachments?.find(candidate => candidate.id === attachmentId);
+        if (!attachment) throw new Error("找不到这个附件");
+        const remaining = (item.attachments ?? []).filter(candidate => candidate.id !== attachmentId);
+        if (remaining.length) item.attachments = remaining;
+        else delete item.attachments;
+        const at = nowIso();
+        item.activities.push({
+          id: newId("act"),
+          at,
+          actor,
+          kind: "progress",
+          text: `已删除图片：${attachment.name}`,
+        });
+        item.updatedAt = at;
+        return { goal: item, attachment };
+      });
+    await removeAttachmentFiles(this.root, [result.attachment]);
+    return result.goal;
+  }
+  private async deleteEndedGoal(command: Extract<CrewvaneCommand, { type: "goal.delete" }>) {
+    const result = await this.store.update(command.type, state => {
+      const goalId = id(command.goalId),
+        index = state.goals.findIndex(goal => goal.id === goalId),
+        item = state.goals[index];
+      if (!item) throw new Error("找不到目标");
+      if (!["completed", "dropped"].includes(item.status))
+        throw new Error("只有已完成或已放弃的目标可以永久删除");
+      if (command.actor && command.actor !== "你")
+        throw new Error("只有人可以永久删除目标");
+      state.goals.splice(index, 1);
+      return item;
+    });
+    await removeAttachmentFiles(this.root, result.attachments ?? []);
+    return { deleted: result.id };
+  }
+  private async cleanupAttachments(command: Extract<CrewvaneCommand, { type: "attachments.cleanup" }>) {
+    const retentionDays = command.retentionDays ?? 30;
+    if (!Number.isInteger(retentionDays) || retentionDays < 1 || retentionDays > 3650)
+      throw new Error("附件保留天数必须是 1 到 3650 的整数");
+    const at = command.at ? iso(command.at) : nowIso(),
+      cutoff = Date.parse(at) - retentionDays * 24 * 60 * 60 * 1000,
+      removed = await this.store.update(command.type, state => {
+        const expired: GoalAttachment[] = [];
+        for (const item of state.goals) {
+          if (!["completed", "dropped"].includes(item.status) || !item.attachments?.length) continue;
+          if (Date.parse(item.updatedAt) > cutoff) continue;
+          const removedHere = item.attachments;
+          expired.push(...removedHere);
+          delete item.attachments;
+          item.activities.push({
+            id: newId("act"),
+            at,
+            actor: "系统",
+            kind: "progress",
+            text: `已清理保留期满的 ${removedHere.length} 张图片。`,
+          });
+          item.updatedAt = at;
+        }
+        return expired;
+      });
+    await removeAttachmentFiles(this.root, removed);
+    const referenced = (await this.store.read()).goals.flatMap(goal =>
+      (goal.attachments ?? []).map(item => item.path));
+    const orphans = await cleanupOrphanAttachmentFiles(this.root, referenced, 24 * 60 * 60 * 1000, Date.parse(at));
+    return { removed: removed.length, orphans };
+  }
   async execute(command: CrewvaneCommand): Promise<unknown> {
     if (
       !command ||
@@ -67,6 +148,9 @@ export class WorkspaceService {
     )
       throw new Error("无效的命令");
     if (command.type === "snapshot") return this.store.read();
+    if (command.type === "goal.attachment.remove") return this.removeGoalAttachment(command);
+    if (command.type === "goal.delete") return this.deleteEndedGoal(command);
+    if (command.type === "attachments.cleanup") return this.cleanupAttachments(command);
     return this.store.update(command.type, async (state) => {
       const goal = (goalId: string) => {
         const found = state.goals.find((item) => item.id === id(goalId));
@@ -230,6 +314,7 @@ export class WorkspaceService {
         }
         case "goal.intake": {
           const request = text(command.text, "事情说明", 20_000);
+          const goalAttachments = await validateGoalAttachments(this.root, command.attachments);
           const projectId = command.projectId && command.projectId !== "personal" ? command.projectId : "personal";
           const project = state.projects.find(item => item.id === id(projectId));
           if (!project) throw new Error("请选择有效项目");
@@ -242,6 +327,7 @@ export class WorkspaceService {
             stageId: "intake", next: "管家正在理解原文并整理目标。", owner: "待分配负责人",
             attention: null,
             dispatch: { id: newId("handoff"), kind: "feedback", status: "pending", at },
+            ...(goalAttachments.length ? { attachments: goalAttachments } : {}),
             activities: [{ id: newId("act"), at, actor: "你", kind: "created", text: request }],
             createdAt: at, updatedAt: at,
           };
@@ -250,12 +336,18 @@ export class WorkspaceService {
         }
         case "goal.direct": {
           const request = text(command.text, "Herdr 终端消息", 20_000);
+          const incomingAttachments = await validateGoalAttachments(this.root, command.attachments);
           if (command.goalId) {
             const item = goal(command.goalId);
             if (["completed", "dropped"].includes(item.status))
               throw new Error("目标已结束，不能再追加终端消息");
             if (command.next) item.next = text(command.next, "下一步", 2000);
-            activity(item, "progress", request, "你 · Herdr 直聊");
+            const combined = await validateGoalAttachments(this.root, [
+              ...(item.attachments ?? []),
+              ...incomingAttachments,
+            ]);
+            if (combined.length) item.attachments = combined;
+            activity(item, "progress", attachmentActivity(request, incomingAttachments), "你 · Herdr 直聊");
             return item;
           }
 
@@ -273,6 +365,7 @@ export class WorkspaceService {
             // The concierge already received this message in its terminal turn.
             // Mark it as delivered so desktop dispatch does not replay the same text.
             dispatch: { id: newId("handoff"), kind: "feedback", status: "sent", at, detail: "已从 Herdr 终端直接送达管家" },
+            ...(incomingAttachments.length ? { attachments: incomingAttachments } : {}),
             activities: [{ id: newId("act"), at, actor: "你 · Herdr 直聊", kind: "created", text: request }],
             createdAt: at, updatedAt: at,
           };
@@ -750,6 +843,16 @@ export class WorkspaceService {
             ...structuredClone(reference),
           };
           return state.concierge;
+        }
+        case "session.release": {
+          const item = goal(command.goalId);
+          if (!["completed", "dropped"].includes(item.status))
+            throw new Error("只有已完成或已放弃的目标可以释放负责人现场");
+          if (!item.herdr) return item;
+          delete item.herdr;
+          delete item.live;
+          activity(item, "session", "目标已结束，负责人现场已关闭。", "系统");
+          return item;
         }
         case "concierge.status": {
           if (!["ready", "error", "not_ready"].includes(command.status))

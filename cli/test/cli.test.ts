@@ -1,6 +1,6 @@
 import test, { afterEach } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { tmpdir } from "node:os";
@@ -9,6 +9,10 @@ import { run } from "../src/cli.js";
 import { renderBoardPlain } from "../src/board.js";
 import { WorkspaceService, type Goal } from "../../packages/core/src/index.js";
 const fixtures: string[] = [];
+const png = Buffer.from(
+  "iVBORw0KGgoAAAANSUhEUgAAACAAAAAYCAYAAACbU/80AAAAVUlEQVR4nGPUMIr6z4AEAqKWInMZNiyLZqClPBPDAAOmEe8Axoqe///pGefo8kwMAwyYRrwDGEfLAYaR7gDG0XKAYaQ7gHG0HGAY6Q5gHC0HGEa6AwC58E1KmpVcaAAAAABJRU5ErkJggg==",
+  "base64",
+);
 afterEach(async () => { await Promise.all(fixtures.splice(0).map(root => rm(root, { recursive: true, force: true }))); });
 async function fixture(prefix: string) { const root = await mkdtemp(join(tmpdir(), prefix)); fixtures.push(root); return root; }
 async function call(root: string, argv: string[]) {
@@ -192,6 +196,47 @@ test("ask creates a persisted concierge handoff and comment appends feedback", a
   assert.equal(commented.json.activities.at(-1).actor, "你");
   assert.match(commented.json.activities.at(-1).text, /增加一份回滚验证/);
   assert.equal((await new WorkspaceService(root).read()).goals[0]?.dispatch?.status, "pending");
+});
+
+test("ask and direct copy repeated image attachments into the shared workspace", async () => {
+  const root = await fixture("crewvane-cli-attachments-"),
+    first = join(root, "第一张截图.png"),
+    second = join(root, "second.png");
+  await writeFile(first, png);
+  await writeFile(second, png);
+  const created = await call(root, [
+    "ask", "结合截图修复布局", "--attachment", first, "--attachment", second,
+  ]);
+  assert.equal(created.code, 0, created.stderr);
+  assert.equal(created.json.attachments.length, 2);
+  assert.deepEqual(created.json.attachments.map((item: { name: string }) => item.name),
+    ["第一张截图.png", "second.png"]);
+  for (const attachment of created.json.attachments) {
+    const path = join(root, attachment.path);
+    assert.equal((await stat(path)).mode & 0o777, 0o600);
+    assert.equal(await readFile(path, "base64"), png.toString("base64"));
+  }
+  const third = join(root, "third.png");
+  await writeFile(third, png);
+  const appended = await call(root, [
+    "direct", "再补一张", "--goal", created.json.id, "--attachment", third,
+  ]);
+  assert.equal(appended.code, 0, appended.stderr);
+  assert.equal(appended.json.attachments.length, 3);
+  assert.equal(appended.json.dispatch.id, created.json.dispatch.id);
+});
+
+test("CLI rejects missing or fake attachments before creating a goal", async () => {
+  const root = await fixture("crewvane-cli-attachment-invalid-"),
+    missing = await call(root, ["ask", "缺失图片", "--attachment", join(root, "missing.png")]);
+  assert.equal(missing.code, 1);
+  assert.match(missing.stderr, /找不到图片/);
+  const fake = join(root, "fake.png");
+  await writeFile(fake, "not an image");
+  const invalid = await call(root, ["ask", "伪图片", "--attachment", fake]);
+  assert.equal(invalid.code, 1);
+  assert.match(invalid.stderr, /不是支持的/);
+  assert.equal((await new WorkspaceService(root).read()).goals.length, 0);
 });
 
 test("direct terminal messages sync once and never create a duplicate handoff", async () => {

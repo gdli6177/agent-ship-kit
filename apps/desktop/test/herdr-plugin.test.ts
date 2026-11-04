@@ -6,10 +6,10 @@ import { join, resolve } from "node:path";
 import { CREWVANE_HERDR_PLUGIN_ID, HerdrPlugin } from "../electron/herdr-plugin.ts";
 
 test("ships a version-matched Herdr plugin manifest", async () => {
-  const source = resolve("herdr-plugin");
-  const manifest = await readFile(join(source, "herdr-plugin.toml"), "utf8");
+  const source = resolve("herdr-plugin"), manifest = await readFile(join(source, "herdr-plugin.toml"), "utf8"),
+    appVersion = JSON.parse(await readFile(resolve("package.json"), "utf8")).version as string;
   assert.match(manifest, new RegExp(`^id = "${CREWVANE_HERDR_PLUGIN_ID.replaceAll(".", "\\.")}"$`, "m"));
-  assert.match(manifest, /^version = "0\.4\.3"$/m);
+  assert.match(manifest, new RegExp(`^version = "${appVersion.replaceAll(".", "\\.")}"$`, "m"));
   assert.match(manifest, /id = "attention"/);
   assert.match(manifest, /id = "new-goal"/);
   assert.match(manifest, /id = "concierge"/);
@@ -27,7 +27,8 @@ test("ships a version-matched Herdr plugin manifest", async () => {
 test("deploys the bundled plugin and links it automatically once", async () => {
   const root = await mkdtemp(join(tmpdir(), "crewvane-herdr-plugin-"));
   const source = resolve("herdr-plugin"), sourceCopy = join(root, "source"),
-    install = join(root, "userData/herdr-plugin");
+    install = join(root, "userData/herdr-plugin"),
+    appVersion = JSON.parse(await readFile(resolve("package.json"), "utf8")).version as string;
   await cp(source, sourceCopy, { recursive: true });
   const calls: string[][] = [];
   let linked = false;
@@ -35,19 +36,19 @@ test("deploys the bundled plugin and links it automatically once", async () => {
     calls.push(args);
     if (args[0] === "plugin" && args[1] === "list") {
       return { stdout: JSON.stringify({ result: { plugins: linked ? [{
-        plugin_id: CREWVANE_HERDR_PLUGIN_ID, version: "0.4.3", enabled: true, plugin_root: install,
+        plugin_id: CREWVANE_HERDR_PLUGIN_ID, version: appVersion, enabled: true, plugin_root: install,
       }] : [] } }), stderr: "" };
     }
     if (args[0] === "plugin" && args[1] === "link") {
       linked = true;
       return { stdout: JSON.stringify({ result: { plugin: {
-        plugin_id: CREWVANE_HERDR_PLUGIN_ID, version: "0.4.3", enabled: true, plugin_root: install,
+        plugin_id: CREWVANE_HERDR_PLUGIN_ID, version: appVersion, enabled: true, plugin_root: install,
       } } }), stderr: "" };
     }
     throw new Error(`unexpected ${args.join(" ")}`);
   };
   try {
-    const plugin = new HerdrPlugin(sourceCopy, install, "0.4.3", {}, runner);
+    const plugin = new HerdrPlugin(sourceCopy, install, appVersion, {}, runner);
     const first = await plugin.ensure("/tmp/herdr");
     assert.equal(first.phase, "ready");
     assert.equal(first.installed, true);

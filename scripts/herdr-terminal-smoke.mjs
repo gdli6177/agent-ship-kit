@@ -3,8 +3,11 @@ import { mkdir, mkdtemp, readFile, rm } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { tmpdir } from "node:os";
 import { randomUUID } from "node:crypto";
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
 import assert from "node:assert/strict";
 
+const exec = promisify(execFile);
 const home = await mkdtemp(join(tmpdir(), "crewvane-embedded-terminal-"));
 const workspace = join(home, "workspace"), session = `crewvane-tty-${randomUUID().slice(0, 8)}`;
 await mkdir(workspace);
@@ -63,6 +66,38 @@ try {
   await page.locator(".xterm-accessibility").filter({ hasText: marker }).waitFor({ state: "attached" });
   const nextPid = await app.evaluate(({ app }) => app.getAppMetrics().filter(item => item.name === "Crewvane Herdr terminal").map(item => item.pid));
   assert.deepEqual(nextPid, firstPid);
+  const herdr = async (args) => JSON.parse((await exec("herdr", ["--session", session, ...args], {
+    timeout: 20_000,
+  })).stdout);
+  const workspaceList = await herdr(["workspace", "list"]),
+    workspaces = workspaceList.result?.workspaces ?? workspaceList.workspaces ?? workspaceList,
+    workspaceId = (Array.isArray(workspaces) ? workspaces[0] : workspaces[0] ?? Object.values(workspaces)[0])
+      ?.workspace_id ?? (Array.isArray(workspaces) ? workspaces[0] : Object.values(workspaces)[0])?.id;
+  assert.ok(workspaceId);
+  const tabCreated = await herdr(["tab", "create", "--workspace", workspaceId, "--cwd", workspace, "--label", "goal-close-trial", "--no-focus"]),
+    tab = tabCreated.result?.tab ?? tabCreated.tab,
+    rootPane = tabCreated.result?.root_pane ?? tabCreated.root_pane,
+    tabId = tab?.tab_id ?? tab?.id,
+    paneId = rootPane?.pane_id ?? rootPane?.id;
+  assert.ok(tabId); assert.ok(paneId);
+  await page.evaluate(({ id, reference }) => window.crewvane.command({
+    type: "session.set", goalId: id, reference,
+  }), {
+    id: goal.id,
+    reference: { session, workspaceId, tabId, paneId, agent: "closure-test-owner" },
+  });
+  await page.evaluate((id) => window.crewvane.command({
+    type: "goal.drop", goalId: id, note: "验证结束目标自动关闭负责人 Tab", actor: "你",
+  }), goal.id);
+  await expect.poll(() => page.evaluate(async (id) => {
+    const state = await window.crewvane.command({ type: "snapshot" });
+    return state.goals.find(item => item.id === id)?.herdr;
+  }, goal.id)).toBe(undefined);
+  const tabs = await herdr(["tab", "list", "--workspace", workspaceId]),
+    tabList = tabs.result?.tabs ?? tabs.tabs ?? tabs,
+    stillOpen = (Array.isArray(tabList) ? tabList : Object.values(tabList)).some(item =>
+      (item?.tab_id ?? item?.id) === tabId);
+  assert.equal(stillOpen, false);
   await page.getByRole("button", { name: "展开现场面板" }).click();
   await page.locator(".terminal-panel.expanded").waitFor();
   await page.screenshot({ path: join(home, "embedded-dark.png") });
@@ -77,6 +112,7 @@ try {
   console.log(JSON.stringify({ ok: true, home, session, checks: [
     "real Herdr TUI in embedded PTY", "real shell input/output", "collapse/reopen reuses PID",
     "expanded panel", "dark/light", "reject unrelated terminal input", "terminal events preserve modal draft and input",
+    "ended goal closes its real Herdr tab",
   ] }));
 } catch (error) {
   if (app) await (await app.firstWindow()).screenshot({ path: join(home, "failure.png") }).catch(() => {});
