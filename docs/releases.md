@@ -14,6 +14,16 @@ GitHub 自动生成的 **Source code** 是源码，不是可安装应用。安�
 
 安装替换应用后，打开设置重新安装 Crewvane CLI，确保 `~/.local/bin/crewvane` 指向当前应用。工作区位于用户选择的目录，不会被覆盖。
 
+## 0.5.2 安装与验收
+
+0.5.2 只提供 Apple Silicon Mac（arm64）安装包，没有旧版工作区兼容层；首次使用请选择新目录。此版本仍未进行 Apple Developer ID 签名与公证，下载和首次打开时按上文的来源、SHA-256 与隐私安全提示处理。
+
+1. 安装 DMG 或 ZIP 后，在设置中重新安装 Crewvane CLI。
+2. 在“让外部 Agent 会使用 Crewvane”中安装或更新 Skills，并确认检测到的目标目录显示为已安装。已有同名且非 Crewvane 管理的 Skill 会被保留。
+3. 打开真实 Herdr 现场，确认终端可拖动、调整大小、全屏、隐藏，并可用系统剪贴板复制粘贴。移动或关闭 Pane 后，Crewvane 应更新现场身份与可达状态。
+4. 在终端里与 Agent 对话后，确认目标语义仍需 Agent 用 Crewvane CLI 显式写回；终端输出不会自动生成消息、进展或验收结果。
+5. 配置企业微信 Webhook，将同一目标进入待验收，确认只收到一条 `attention.required` 消息，不再同时收到 `goal.status_changed`。
+
 ## 本地制作与验收
 
 在 macOS arm64 上执行：
