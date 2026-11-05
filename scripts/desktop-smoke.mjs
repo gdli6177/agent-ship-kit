@@ -273,10 +273,17 @@ try {
     { exact: true },
   ).waitFor();
   assert.equal(await page.locator(".goal-history").getAttribute("open"), "");
-  assert.match(
-    await page.locator(".conversation-entry p").first().innerText(),
-    /负责人过程记录 4/,
-    "message and handoff history must put the newest remaining record first",
+  const historyText = await page.locator(".conversation-entry p").allInnerTexts();
+  assert.ok(
+    historyText.findIndex(text => text === "负责人过程记录 4") <
+      historyText.findIndex(text => text === "负责人过程记录 3"),
+    "message and handoff history must put newer records before older records",
+  );
+  assert.ok(
+    !historyText.includes(
+      "负责人具体答复：旧接口仍可只读调用，但新界面应改用 /v2/items，并保留两轮兼容期。",
+    ),
+    "the latest handoff should appear in the summary instead of repeating in history",
   );
   assert.equal(
     await page.locator(".conversation-feed").getByText("请保留现有验收记录，不要扩大范围。", { exact: true }).count(),

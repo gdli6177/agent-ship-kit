@@ -40,7 +40,7 @@ export class HerdrInstallation {
     let best: { executable: string; version: string } | undefined;
     for (const executable of candidates) {
       try {
-        const text = (await exec(executable, ["--version"], { timeout: 3_000 })).stdout;
+        const text = (await exec(executable, ["--version"], { timeout: 10_000 })).stdout;
         const found = version(text);
         if (found && /^herdr\s/i.test(text.trim()) && (!best || compare(found, best.version) > 0))
           best = { executable, version: found };
@@ -103,7 +103,18 @@ export class HerdrInstallation {
   }
   private async prepare(force: boolean) {
     const local = await this.installed();
-    this.publish({ installed: !!local, ...local, phase: "checking", detail: "正在检查 Herdr 最新版本…" });
+    // A valid bundled or user-installed binary is immediately usable. Keep
+    // update discovery attached to the same ensure() promise, but never make
+    // Finder startup, a workspace, or an offline launch wait for the network.
+    this.publish({
+      installed: !!local,
+      ...local,
+      ...(local ? { latestVersion: local.version } : {}),
+      phase: local ? "ready" : "checking",
+      detail: local
+        ? `Herdr ${local.version} 已可用，正在检查更新…`
+        : "正在检查 Herdr 最新版本…",
+    });
     let temporary: string | undefined;
     try {
       const latest = await this.latest(force);

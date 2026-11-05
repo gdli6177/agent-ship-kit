@@ -43,7 +43,7 @@ Crewvane 不运行模型，不扫描或适配 Agent 协议，不管理模型凭�
 
 ## Herdr 管家
 
-`Executables` 将 Finder 的精简 PATH 与用户登录 shell 的 PATH、常见安装目录合并，保留可执行入口的符号链接名称。安装包在构建时从 Herdr 官方 GitHub Release 获取当前平台二进制，校验 SHA-256 后再连同应用签名；用户首次启动不依赖 Homebrew、网络或系统 PATH。`HerdrInstallation` 启动时通过轻量 GitHub Releases API 检查最新版，优先复用应用内置、userData/runtime 或本机已有版本；发现更新时把官方资产下载到 userData/runtime/herdr，再次校验 SHA-256 与实际版本后原子替换。安装请求去重，不修改用户已有安装。更新检查失败时继续使用内置或本机 CLI，并显示可重试提示；安装失败不丢目标。
+`Executables` 将 Finder 的精简 PATH 与用户登录 shell 的 PATH、常见安装目录合并，保留可执行入口的符号链接名称。安装包在构建时从 Herdr 官方 GitHub Release 获取当前平台二进制，校验 SHA-256 后再连同应用签名；用户首次启动不依赖 Homebrew、网络或系统 PATH。`HerdrInstallation` 启动时先探测应用内置、userData/runtime 或本机已有版本，有效二进制立即可用；随后通过轻量 GitHub Releases API 在后台检查最新版，发现更新时把官方资产下载到 userData/runtime/herdr，再次校验 SHA-256 与实际版本后原子替换。安装请求去重，不修改用户已有安装。更新检查失败时继续使用内置或本机 CLI，并显示可重试提示；安装失败不丢目标。
 
 已识别的 CLI 使用 Herdr Agent 通信；任意自定义交互式 CLI 通过真实 Pane 启动，原样保留可执行文件与参数，用 `transport=pane` 与前台 `processId` 记录并复用。每次发送文本前核对该进程仍在前台，退出或换进程时拒绝发送；没有 Agent 生命周期信息时只报告 unknown。不把任意程序“成功启动”当作理解任务或完成任务。用户复杂 shell 表达式通过自己的启动脚本承载。
 
