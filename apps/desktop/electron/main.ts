@@ -14,9 +14,11 @@ import {
   validateGoalAttachments,
   WorkspaceService,
   type CrewvaneCommand,
+  type GoalStatus,
   type HerdrReference,
   type LivePresence,
   type WatchdogRequest,
+  type WorkspaceState,
 } from "../../../packages/core/src/index.js";
 import { ConciergeBlockedError, HerdrClient, herdrRunner, quoteShell } from "./herdr.js";
 import { openPersistedConcierge, refreshConciergeIfSafe } from "./concierge-lifecycle.js";
@@ -32,6 +34,9 @@ const exec = promisify(execFile);
 let window: BrowserWindow, tray: Tray, root: string | undefined, service: WorkspaceService | undefined, syncing = false, quitting = false;
 let stateWatcher: FSWatcher | undefined, stateRefreshTimer: ReturnType<typeof setTimeout> | undefined;
 const selections = new Set<string>();
+const knownGoalStatuses = new Map<string, GoalStatus>();
+let knownGoalStatusWorkspace: string | undefined;
+let lastSnapshotSignature: string | undefined;
 const here = __dirname;
 // Native window chrome needs a startup color before renderer CSS is available.
 // Keep this synchronized with the dark `--bg` design token and DESIGN.md.
@@ -45,6 +50,13 @@ function sessionName(path = root) { return process.env.CREWVANE_HERDR_SESSION ??
 function sender(event: Electron.IpcMainInvokeEvent) { if (event.sender !== window.webContents || event.senderFrame?.url !== rendererURL) throw new Error("不受信任的界面请求"); }
 function activeService() { if (!service) throw new Error("请先打开工作区"); return service; }
 async function snapshot() { return activeService().read(); }
+function broadcastSnapshot(state: WorkspaceState, workspace: string) {
+  if (root !== workspace || !window || window.isDestroyed()) return;
+  const signature = JSON.stringify(state);
+  if (signature === lastSnapshotSignature) return;
+  lastSnapshotSignature = signature;
+  window.webContents.send("crewvane:event", { type: "snapshot", state, workspace });
+}
 async function validatedAttachment(goalId: string, attachmentId: string) {
   if (typeof goalId !== "string" || typeof attachmentId !== "string")
     throw new Error("附件参数无效");
@@ -212,9 +224,7 @@ async function dispatchGoal(target: WorkspaceService, goalId: string): Promise<v
         else await messenger.notifyGoal(reference, item.id, item.title, item, target.root);
       });
     } finally {
-      if (root === target.root && !window.isDestroyed()) window.webContents.send("crewvane:event", {
-        type: "snapshot", state: await target.read(), workspace: target.root,
-      });
+      if (root === target.root) broadcastSnapshot(await target.read(), target.root);
     }
   });
   handoffs.set(key, work);
@@ -342,10 +352,7 @@ async function openConcierge(target = activeService()) {
       live: latest.live ?? null,
     });
   }
-  if (root === target.root && !window.isDestroyed())
-    window.webContents.send("crewvane:event", {
-      type: "snapshot", state: await target.read(), workspace: target.root,
-    });
+  if (root === target.root) broadcastSnapshot(await target.read(), target.root);
   return reference;
 }
 function watchWorkspaceState(target: WorkspaceService) {
@@ -359,8 +366,8 @@ function watchWorkspaceState(target: WorkspaceService) {
       if (root !== target.root || service !== target) return;
       try {
         const state = await target.read();
-        if (!window.isDestroyed())
-          window.webContents.send("crewvane:event", { type: "snapshot", state, workspace: target.root });
+        deliverGoalStatusChanges(target, state, target.root);
+        broadcastSnapshot(state, target.root);
       } catch (error) {
         if (!window.isDestroyed()) window.webContents.send("crewvane:event", {
           type: "diagnostic",
@@ -369,6 +376,27 @@ function watchWorkspaceState(target: WorkspaceService) {
       }
     }, 80);
   });
+}
+function deliverGoalStatusChanges(target: WorkspaceService, state: WorkspaceState, workspace: string) {
+  if (knownGoalStatusWorkspace !== workspace) {
+    knownGoalStatusWorkspace = workspace;
+    knownGoalStatuses.clear();
+    for (const goal of state.goals) knownGoalStatuses.set(goal.id, goal.status);
+    return;
+  }
+  const current = new Set(state.goals.map(goal => goal.id));
+  for (const id of knownGoalStatuses.keys())
+    if (!current.has(id)) knownGoalStatuses.delete(id);
+  for (const goal of state.goals) {
+    const previousStatus = knownGoalStatuses.get(goal.id);
+    knownGoalStatuses.set(goal.id, goal.status);
+    if (!previousStatus || previousStatus === goal.status) continue;
+    void webhookNotifier.deliverStatusChange({
+      workspace: { name: state.name },
+      goal,
+      previousStatus,
+    }).catch(() => {});
+  }
 }
 async function deliverAttentionNotifications(target: WorkspaceService, state: Awaited<ReturnType<WorkspaceService["read"]>>, workspace: string) {
   for (const goal of attentionGoals(state.goals)) {
@@ -389,8 +417,10 @@ async function deliverAttentionNotifications(target: WorkspaceService, state: Aw
 }
 async function openWorkspace(path: string) {
   const canonical = await realpath(path); if (!(await stat(canonical)).isDirectory()) throw new Error("工作区必须是目录");
-  const opened = new WorkspaceService(canonical); await opened.read();
+  const opened = new WorkspaceService(canonical), initialState = await opened.read();
+  deliverGoalStatusChanges(opened, initialState, canonical);
   root = canonical; service = opened;
+  lastSnapshotSignature = undefined;
   watchWorkspaceState(opened);
   void opened.execute({ type: "attachments.cleanup", retentionDays: 30 }).catch(error => {
     if (!window.isDestroyed()) window.webContents.send("crewvane:event", {
@@ -413,6 +443,7 @@ async function synchronize() {
   const target = service, workspace = root;
   try {
     let state = await target.read();
+    deliverGoalStatusChanges(target, state, workspace);
     await deliverAttentionNotifications(target, state, workspace);
     let status = await herdrStatus();
     if (status.executable) {
@@ -463,7 +494,7 @@ async function synchronize() {
     }
     state = await target.read();
     await deliverAttentionNotifications(target, state, workspace);
-    if (root === workspace && !window.isDestroyed()) window.webContents.send("crewvane:event", { type: "snapshot", state, workspace });
+    broadcastSnapshot(state, workspace);
   } catch (error) {
     if (root === workspace && !window.isDestroyed()) window.webContents.send("crewvane:event", { type: "diagnostic", message: `后台同步暂未成功：${error instanceof Error ? error.message : String(error)}` });
   } finally { syncing = false; }
@@ -582,7 +613,12 @@ app.whenReady().then(async () => {
         }
       }
     }
-    if (root === target.root) window.webContents.send("crewvane:event", { type: "snapshot", state: await target.read(), workspace: target.root }); return result;
+    if (root === target.root) {
+      const state = await target.read();
+      deliverGoalStatusChanges(target, state, target.root);
+      broadcastSnapshot(state, target.root);
+    }
+    return result;
   });
   ipcMain.handle("crewvane:herdr-status", (event) => { sender(event); return herdrStatus(); });
   ipcMain.handle("crewvane:agent-choices", (event) => { sender(event); return agentChoices(); });

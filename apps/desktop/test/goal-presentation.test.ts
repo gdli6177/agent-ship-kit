@@ -68,6 +68,40 @@ test("the latest raw message and its attachments remain visible without changing
   assert.equal(current.status, "waiting");
 });
 
+test("the summary keeps the latest agent reply when newer user context arrives", async () => {
+  const root = await fixture();
+  const service = new WorkspaceService(root);
+  const goal = await service.execute({
+    type: "goal.create",
+    input: {
+      title: "保留执行反馈",
+      projectId: "personal",
+      mode: "concierge",
+      next: "整理验收材料",
+    },
+  }) as Goal;
+  await service.execute({
+    type: "goal.message",
+    goalId: goal.id,
+    actor: "负责人",
+    text: "已核对三份材料，结论都在附件清单中。",
+  });
+  await service.execute({
+    type: "goal.message",
+    goalId: goal.id,
+    text: "补充一句背景，先不要改下一步。",
+  });
+
+  const state = await service.read();
+  const current = state.goals.find((item) => item.id === goal.id)!;
+  const view = presentGoal(current, state);
+  assert.equal(view.latest?.text, "补充一句背景，先不要改下一步。");
+  assert.equal(view.latestAgentReply?.actor, "负责人");
+  assert.equal(view.latestAgentReply?.text, "已核对三份材料，结论都在附件清单中。");
+  assert.match(view.brief, /已核对三份材料/);
+  assert.equal(view.nextLabel, "接下来的安排");
+});
+
 test("a manual active goal is presented as owned by the human", async () => {
   const root = await fixture();
   const service = new WorkspaceService(root);

@@ -1,3 +1,4 @@
+import { useState } from "react";
 import {
   ImagePlus,
   MessageCircle,
@@ -14,16 +15,19 @@ import type { GoalDetailService } from "./goalService.js";
 
 export function GoalActivityFeed({
   goal,
-  excludeId,
+  excludeIds = [],
   service,
 }: {
   goal: Goal;
-  excludeId?: string;
+  excludeIds?: string[];
   service: GoalDetailService;
 }) {
-  const activities = goal.activities.filter((item) => item.id !== excludeId);
+  const excluded = new Set(excludeIds);
+  const activities = goal.activities
+    .filter((item) => !excluded.has(item.id))
+    .reverse();
   return (
-    <section className="conversation" aria-label="当前目标的消息历史">
+    <section className="conversation" aria-label="当前目标的消息与交接记录，最新在上">
       <div className="conversation-feed">
         {activities.length ? (
           activities.map((item) => {
@@ -70,21 +74,27 @@ export function GoalActivityFeed({
 
 export function GoalHistory({
   goal,
-  latestId,
+  latestIds = [],
   service,
 }: {
   goal: Goal;
-  latestId?: string;
+  latestIds?: string[];
   service: GoalDetailService;
 }) {
+  const [open, setOpen] = useState(true);
+  const count = goal.activities.filter(activity => !latestIds.includes(activity.id)).length;
   return (
-    <details className="goal-history">
+    <details
+      className="goal-history"
+      open={open}
+      onToggle={event => setOpen(event.currentTarget.open)}
+    >
       <summary>
         <MessageCircle size={14} />
-        <span>目标消息与交接记录</span>
-        <small>{Math.max(0, goal.activities.length - 1)} 条</small>
+        <span>消息与交接记录</span>
+        <small>{count} 条 · 最新在上</small>
       </summary>
-      <GoalActivityFeed goal={goal} excludeId={latestId} service={service} />
+      <GoalActivityFeed goal={goal} excludeIds={latestIds} service={service} />
     </details>
   );
 }

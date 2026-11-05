@@ -1,13 +1,14 @@
 import { createHash } from "node:crypto";
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
-import type { AttentionKind, Goal } from "../../../packages/core/src/index.js";
+import type { AttentionKind, Goal, GoalStatus } from "../../../packages/core/src/index.js";
 
 export interface WebhookSaveInput {
   enabled: boolean;
   url?: string;
   token?: string;
   clearToken?: boolean;
+  statuses?: GoalStatus[];
 }
 
 export interface WebhookSettings {
@@ -15,6 +16,7 @@ export interface WebhookSettings {
   configured: boolean;
   endpoint?: string;
   tokenConfigured: boolean;
+  statuses: GoalStatus[];
   lastSuccessAt?: string;
   lastError?: string;
   lastErrorAt?: string;
@@ -26,10 +28,17 @@ export interface AttentionNotification {
   kind: AttentionKind;
 }
 
+export interface GoalStatusNotification {
+  workspace: { name: string };
+  goal: Goal;
+  previousStatus: GoalStatus;
+}
+
 interface StoredWebhook {
   enabled: boolean;
   url: string;
   token?: string;
+  statuses?: GoalStatus[];
 }
 
 interface DeliveryRecord {
@@ -50,6 +59,14 @@ interface NotificationFile {
 
 const emptyFile = (): NotificationFile => ({ version: 1, deliveries: {} });
 const localHosts = new Set(["localhost", "127.0.0.1", "::1", "[::1]"]);
+const allGoalStatuses: GoalStatus[] = ["active", "waiting", "review", "completed", "dropped"];
+const statusLabels: Record<GoalStatus, string> = {
+  active: "进行中",
+  waiting: "等待中",
+  review: "待验收",
+  completed: "已完成",
+  dropped: "已放弃",
+};
 
 function normalizeUrl(value: string) {
   const raw = value.trim();
@@ -70,6 +87,64 @@ function displayEndpoint(value?: string) {
 function errorMessage(error: unknown) {
   if (error instanceof Error && error.name === "AbortError") return "Webhook 请求超时";
   return (error instanceof Error ? error.message : String(error)).replace(/\s+/g, " ").slice(0, 500);
+}
+
+function isFeishuWebhook(endpoint: string) {
+  const url = new URL(endpoint);
+  return (url.hostname === "open.feishu.cn" || url.hostname === "open.larksuite.com") &&
+    url.pathname.includes("/open-apis/bot/v2/hook/");
+}
+
+function isWecomWebhook(endpoint: string) {
+  const url = new URL(endpoint);
+  return url.hostname === "qyapi.weixin.qq.com" &&
+    url.pathname === "/cgi-bin/webhook/send";
+}
+
+function humanText(body: Record<string, any>) {
+  if (body.event === "notification.test")
+    return `Crewvane｜Webhook 测试\n工作区：${body.workspace?.name ?? "Crewvane"}\n配置已连通。`;
+  const goal = body.goal ?? {};
+  if (body.event === "goal.status_changed")
+    return [
+      "Crewvane｜目标状态更新",
+      goal.title,
+      `${statusLabels[goal.previousStatus as GoalStatus] ?? goal.previousStatus} → ${statusLabels[goal.status as GoalStatus] ?? goal.status}`,
+      goal.waitingFor ? `正在等待：${goal.waitingFor}` : "",
+      `下一步：${goal.next}`,
+    ].filter(Boolean).join("\n");
+  return [
+    "Crewvane｜需要你处理",
+    goal.title,
+    goal.summary || goal.next,
+    goal.waitingFor ? `正在等待：${goal.waitingFor}` : "",
+  ].filter(Boolean).join("\n");
+}
+
+function webhookPayload(endpoint: string, body: Record<string, any>) {
+  if (isFeishuWebhook(endpoint))
+    return { msg_type: "text", content: { text: humanText(body) } };
+  if (isWecomWebhook(endpoint))
+    return { msgtype: "text", text: { content: humanText(body) } };
+  return body;
+}
+
+async function assertWebhookResponse(response: Response, endpoint: string) {
+  if (!response.ok) throw new Error(`Webhook 返回 HTTP ${response.status}`);
+  const provider = isFeishuWebhook(endpoint) ? "飞书" : isWecomWebhook(endpoint) ? "企业微信" : undefined;
+  if (!provider) return;
+  const payload = await response.json().catch(() => null) as
+    | {
+        code?: number | string; msg?: string;
+        StatusCode?: number | string; StatusMessage?: string;
+        errcode?: number | string; errmsg?: string;
+      }
+    | null;
+  const rawCode = payload?.code ?? payload?.StatusCode ?? payload?.errcode, code = Number(rawCode);
+  if (!payload || rawCode === undefined)
+    throw new Error(`${provider} Webhook 未返回可识别的业务结果`);
+  if (rawCode !== undefined && Number.isFinite(code) && code !== 0)
+    throw new Error(`${provider} Webhook 返回错误 ${rawCode}：${payload?.msg ?? payload?.StatusMessage ?? payload?.errmsg ?? "未知错误"}`);
 }
 
 export class WebhookNotifier {
@@ -94,6 +169,7 @@ export class WebhookNotifier {
         configured: Boolean(data.webhook?.url),
         ...(data.webhook?.url ? { endpoint: displayEndpoint(data.webhook.url) } : {}),
         tokenConfigured: Boolean(data.webhook?.token),
+        statuses: data.webhook?.statuses ?? allGoalStatuses,
         ...(data.lastSuccessAt ? { lastSuccessAt: data.lastSuccessAt } : {}),
         ...(data.lastError ? { lastError: data.lastError.detail, lastErrorAt: data.lastError.at } : {}),
       };
@@ -108,6 +184,14 @@ export class WebhookNotifier {
         ? normalizeUrl(input.url)
         : current?.url;
       if (input.enabled && !candidate) throw new Error("启用前请填写 Webhook 地址");
+      const statuses = input.statuses === undefined
+        ? current?.statuses ?? allGoalStatuses
+        : Array.isArray(input.statuses) &&
+            input.statuses.every(value => allGoalStatuses.includes(value))
+          ? [...new Set(input.statuses)]
+          : (() => {
+              throw new Error("订阅状态无效");
+            })();
       if (candidate) {
         const token = input.clearToken
           ? undefined
@@ -119,6 +203,7 @@ export class WebhookNotifier {
         data.webhook = {
           enabled: input.enabled,
           url: candidate,
+          statuses,
           ...(token ? { token } : {}),
         };
       } else {
@@ -154,9 +239,65 @@ export class WebhookNotifier {
             "x-crewvane-delivery": event.id,
             ...(webhook.token ? { authorization: `Bearer ${webhook.token}` } : {}),
           },
-          body: JSON.stringify(event.body),
+          body: JSON.stringify(webhookPayload(webhook.url, event.body)),
         });
-        if (!response.ok) throw new Error(`Webhook 返回 HTTP ${response.status}`);
+        await assertWebhookResponse(response, webhook.url);
+        data.deliveries[event.id] = {
+          status: "sent",
+          attemptedAt: now.toISOString(),
+          responseStatus: response.status,
+        };
+        data.lastSuccessAt = now.toISOString();
+        delete data.lastError;
+      } catch (error) {
+        const detail = errorMessage(error);
+        data.deliveries[event.id] = {
+          status: "failed",
+          attemptedAt: now.toISOString(),
+          detail,
+          nextRetryAt: new Date(now.getTime() + this.retryDelayMs).toISOString(),
+        };
+        data.lastError = { at: now.toISOString(), detail };
+        await this.write(data);
+        return { sent: false, reason: detail };
+      } finally {
+        clearTimeout(timer);
+      }
+      this.prune(data, now);
+      await this.write(data);
+      return { sent: true };
+    });
+  }
+
+  deliverStatusChange(notification: GoalStatusNotification): Promise<{ sent: boolean; reason?: string }> {
+    return this.serial(async () => {
+      const data = await this.read(), webhook = data.webhook;
+      if (!webhook?.enabled || !webhook.url) return { sent: false, reason: "disabled" };
+      if (!(webhook.statuses ?? allGoalStatuses).includes(notification.goal.status))
+        return { sent: false, reason: "status-not-subscribed" };
+
+      const now = this.now(), event = this.statusEvent(notification, webhook.url),
+        previous = data.deliveries[event.id];
+      if (previous?.status === "sent") return { sent: false, reason: "duplicate" };
+      if (previous?.nextRetryAt && Date.parse(previous.nextRetryAt) > now.getTime())
+        return { sent: false, reason: "backoff" };
+
+      const controller = new AbortController(), timer = setTimeout(() => controller.abort(), 8_000);
+      try {
+        const response = await this.fetcher(webhook.url, {
+          method: "POST",
+          redirect: "error",
+          signal: controller.signal,
+          headers: {
+            "content-type": "application/json",
+            "user-agent": `Crewvane/${this.appVersion}`,
+            "x-crewvane-event": event.body.event,
+            "x-crewvane-delivery": event.id,
+            ...(webhook.token ? { authorization: `Bearer ${webhook.token}` } : {}),
+          },
+          body: JSON.stringify(webhookPayload(webhook.url, event.body)),
+        });
+        await assertWebhookResponse(response, webhook.url);
         data.deliveries[event.id] = {
           status: "sent",
           attemptedAt: now.toISOString(),
@@ -202,16 +343,16 @@ export class WebhookNotifier {
             "x-crewvane-delivery": createHash("sha256").update(`${now.toISOString()}:${webhook.url}`).digest("hex"),
             ...(webhook.token ? { authorization: `Bearer ${webhook.token}` } : {}),
           },
-          body: JSON.stringify({
+          body: JSON.stringify(webhookPayload(webhook.url, {
             schema: "crewvane.notification.v1",
             event: "notification.test",
             occurredAt: now.toISOString(),
             workspace: { name: workspaceName },
             app: { name: "Crewvane", version: this.appVersion },
             message: "这是一条 Crewvane Webhook 测试通知。",
-          }),
+          })),
         });
-        if (!response.ok) throw new Error(`Webhook 返回 HTTP ${response.status}`);
+        await assertWebhookResponse(response, webhook.url);
         data.lastSuccessAt = now.toISOString();
         delete data.lastError;
         await this.write(data);
@@ -261,14 +402,56 @@ export class WebhookNotifier {
     };
   }
 
+  private statusEvent(notification: GoalStatusNotification, endpoint: string) {
+    const { goal, previousStatus, workspace } = notification,
+      latestActivityId = goal.activities.at(-1)?.id ?? "",
+      fingerprint = [
+        workspace.name, goal.id, previousStatus, goal.status,
+        goal.updatedAt, latestActivityId, endpoint,
+      ].join("\u0000"),
+      id = createHash("sha256").update(fingerprint).digest("hex");
+    return {
+      id,
+      body: {
+        schema: "crewvane.notification.v1",
+        event: "goal.status_changed",
+        deliveryId: id,
+        occurredAt: goal.updatedAt,
+        workspace: { name: workspace.name },
+        app: { name: "Crewvane", version: this.appVersion },
+        goal: {
+          id: goal.id,
+          title: goal.title,
+          previousStatus,
+          status: goal.status,
+          next: goal.next,
+          owner: goal.owner,
+          ...(goal.waitingFor ? { waitingFor: goal.waitingFor } : {}),
+          ...(goal.remindAt ? { remindAt: goal.remindAt } : {}),
+        },
+        action: { type: "open-goal", goalId: goal.id },
+      },
+    };
+  }
+
   private async read(): Promise<NotificationFile> {
     try {
       const parsed = JSON.parse(await readFile(this.path, "utf8")) as Partial<NotificationFile>;
       if (parsed.version !== 1 || !parsed.deliveries || typeof parsed.deliveries !== "object")
         return emptyFile();
+      const statuses = Array.isArray(parsed.webhook?.statuses)
+        ? [...new Set(parsed.webhook.statuses)].filter(value => allGoalStatuses.includes(value))
+        : undefined;
       return {
         version: 1,
-        ...(parsed.webhook?.url ? { webhook: parsed.webhook } : {}),
+        ...(parsed.webhook?.url ? {
+          webhook: {
+            enabled: parsed.webhook.enabled,
+            url: parsed.webhook.url,
+            ...(statuses ? { statuses } : {}),
+            ...(parsed.webhook.token ? { token: parsed.webhook.token } : {}),
+          },
+        } : {}),
         deliveries: parsed.deliveries,
         ...(parsed.lastSuccessAt ? { lastSuccessAt: parsed.lastSuccessAt } : {}),
         ...(parsed.lastError?.at && parsed.lastError?.detail ? { lastError: parsed.lastError } : {}),
@@ -300,6 +483,7 @@ export class WebhookNotifier {
       configured: Boolean(data.webhook?.url),
       ...(data.webhook?.url ? { endpoint: displayEndpoint(data.webhook.url) } : {}),
       tokenConfigured: Boolean(data.webhook?.token),
+      statuses: data.webhook?.statuses ?? allGoalStatuses,
       ...(data.lastSuccessAt ? { lastSuccessAt: data.lastSuccessAt } : {}),
       ...(data.lastError ? { lastError: data.lastError.detail, lastErrorAt: data.lastError.at } : {}),
     };

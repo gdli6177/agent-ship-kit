@@ -59,6 +59,7 @@ const statusLabel = {
   completed: "已完成",
   dropped: "已放弃",
 };
+const goalStatusOptions = Object.entries(statusLabel) as [Goal["status"], string][];
 const attentionLabel = {
   decision: "需要你决定",
   review: "等待你验收",
@@ -364,9 +365,27 @@ function App() {
       enabled: false,
       configured: false,
       tokenConfigured: false,
+      statuses: goalStatusOptions.map(([value]) => value),
     });
   const [agentOptions, setAgentOptions] = useState<{ kind: string; installed: boolean }[]>([]);
   const [terminal, setTerminal] = useState<{ session: string; title: string; visible: boolean }>();
+  const pendingState = useRef<{ state: WorkspaceState; signature: string } | undefined>(undefined);
+  const stateFrame = useRef<number | undefined>(undefined);
+  const lastStateSignature = useRef("");
+  const toastTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  function applyState(next: WorkspaceState) {
+    const signature = JSON.stringify(next);
+    if (signature === lastStateSignature.current) return;
+    pendingState.current = { state: next, signature };
+    if (stateFrame.current !== undefined) return;
+    stateFrame.current = requestAnimationFrame(() => {
+      stateFrame.current = undefined;
+      const pending = pendingState.current;
+      if (!pending || pending.signature === lastStateSignature.current) return;
+      lastStateSignature.current = pending.signature;
+      setState(pending.state);
+    });
+  }
   const goal = state.goals.find((item) => item.id === goalId),
     project = state.projects.find((item) => item.id === projectId),
     hasConciergeScene = Boolean(state.concierge.tabId || state.concierge.agent),
@@ -402,15 +421,15 @@ function App() {
         setWorkspace(env.workspace);
         setVersion(env.version);
         if (env.workspace)
-          return api.command({ type: "snapshot" }).then(setState);
+          return api.command({ type: "snapshot" }).then(applyState);
       })
       .catch(showError);
     const unsubscribe = api.subscribe((event) => {
-      if (event.state) setState(event.state);
+      if (event.state) applyState(event.state);
       if (event.workspace) setWorkspace(event.workspace);
       if (event.type === "refresh") {
         setTerminal(undefined);
-        void api.command({ type: "snapshot" }).then(setState).catch(showError);
+        void api.command({ type: "snapshot" }).then(applyState).catch(showError);
       }
       if (event.type === "diagnostic") setError(event.message);
       if (event.type === "herdr-status") setHerdr(event.status);
@@ -424,7 +443,11 @@ function App() {
       }
     });
     void api.herdrStatus().then(setHerdr).catch(showError);
-    return unsubscribe;
+    return () => {
+      unsubscribe();
+      if (stateFrame.current !== undefined) cancelAnimationFrame(stateFrame.current);
+      if (toastTimer.current !== undefined) clearTimeout(toastTimer.current);
+    };
   }, []);
   useEffect(() => {
     if (page === "settings") {
@@ -452,15 +475,16 @@ function App() {
     finally { setBusy(false); }
   }
   function notify(text: string) {
+    if (toastTimer.current !== undefined) clearTimeout(toastTimer.current);
     setToast(text);
-    setTimeout(() => setToast(""), 3500);
+    toastTimer.current = setTimeout(() => setToast(""), 3500);
   }
   async function execute(command: CrewvaneCommand) {
     setBusy(true);
     setError("");
     try {
       const result = await api.command(command);
-      setState(await api.command({ type: "snapshot" }));
+      applyState(await api.command({ type: "snapshot" }));
       return result;
     } catch (reason) {
       showError(reason);
@@ -496,7 +520,7 @@ function App() {
       setError("");
       try {
         await api.dispatchGoal(currentGoalId);
-        setState(await api.command({ type: "snapshot" }));
+        applyState(await api.command({ type: "snapshot" }));
       } catch (reason) {
         showError(reason);
         throw reason;
@@ -517,7 +541,7 @@ function App() {
         setModal("");
         setPage("home");
         setWorkspace(selected);
-        setState(await api.command({ type: "snapshot" }));
+        applyState(await api.command({ type: "snapshot" }));
         notify(selected === workspace ? "你已在这个工作区。" : `已打开工作区：${selected.split("/").filter(Boolean).at(-1)}`);
       }
     } catch (reason) {
@@ -545,7 +569,7 @@ function App() {
         projectId: projectId || undefined,
         ...(attachments.length ? { attachments } : {}),
       }) as Goal;
-      setState(await api.command({ type: "snapshot" }));
+      applyState(await api.command({ type: "snapshot" }));
       setGoalId(created.id);
       setModal("goal");
       notify(attachments.length ? `目标与 ${attachments.length} 张图片已保存，正在联系管家。` : "目标已保存，正在联系管家。");
@@ -991,7 +1015,7 @@ function App() {
                   setHerdr(await api.herdrStatus());
                   setAgentOptions(await api.agentChoices());
                   setCli(await api.cliStatus());
-                  setState(await api.command({ type: "snapshot" }));
+                  applyState(await api.command({ type: "snapshot" }));
                   const ready = await api.herdrStatus();
                   notify(action === "herdr" && ready.phase === "error"
                     ? "本机版本可用，更新检查未完成，可稍后重试。"
@@ -1028,7 +1052,7 @@ function App() {
       {modal === "webhook" && (
         <Modal
           title="Webhook 通知"
-          description="只有首次进入「需要你处理」的事项会发送，去重记录跨重启保留。"
+          description="目标状态变化会发送；首次进入「需要你处理」时会另发注意力通知，去重记录跨重启保留。"
           error={error}
           onClose={() => setModal("")}
         >
@@ -1045,10 +1069,14 @@ function App() {
                   url: String(data.get("url") || ""),
                   token: String(data.get("token") || ""),
                   clearToken: data.get("clearToken") === "on",
+                  statuses: data
+                    .getAll("statuses")
+                    .filter((value): value is string => typeof value === "string") as Goal["status"][],
                 });
-                setWebhook(saved);
+                const verified = saved.enabled ? await api.testWebhook() : saved;
+                setWebhook(verified);
                 setModal("");
-                notify(saved.enabled ? "Webhook 通知已启用。" : "Webhook 通知已暂停。");
+                notify(saved.enabled ? "Webhook 已保存，测试通知已送达。" : "Webhook 通知已暂停。");
               } catch (reason) {
                 showError(reason);
               } finally {
@@ -1059,10 +1087,28 @@ function App() {
             <label className="webhook-switch">
               <input name="enabled" type="checkbox" defaultChecked={webhook.enabled} disabled={busy} />
               <span>
-                <strong>在需要你处理时发送</strong>
-                <small>决定、验收、到期跟进和升级事项。普通进度和聊天不会触发。</small>
+                <strong>状态更新和需要你处理时发送</strong>
+                <small>目标状态变化会通知；决定、验收、到期跟进和升级事项另有注意力通知。普通聊天不会触发。</small>
               </span>
             </label>
+            <fieldset className="webhook-statuses">
+              <legend>订阅这些状态变化</legend>
+              <div>
+                {goalStatusOptions.map(([value, label]) => (
+                  <label className="webhook-status-option" key={value}>
+                    <input
+                      name="statuses"
+                      type="checkbox"
+                      value={value}
+                      defaultChecked={webhook.statuses.includes(value)}
+                      disabled={busy}
+                    />
+                    <span>{label}</span>
+                  </label>
+                ))}
+              </div>
+              <small>全部取消后仍会接收“需要你处理”的注意力通知。</small>
+            </fieldset>
             <label>
               Webhook 地址
               <input
@@ -1092,7 +1138,7 @@ function App() {
               </label>
             )}
             <p className="webhook-payload-note">
-              发送内容仅含工作区名称、目标标题、状态、摘要和 `goalId`；不包含聊天历史、附件或本机路径。远程地址必须使用 HTTPS，本机 localhost 可使用 HTTP。
+              通用 Webhook 收到 JSON；飞书、Lark 和企业微信机器人地址会自动使用文本消息格式。内容仅含工作区名称、目标标题、状态、摘要和 `goalId`，不包含聊天历史、附件或本机路径。远程地址必须使用 HTTPS，本机 localhost 可使用 HTTP。
             </p>
             <div className="modal-actions webhook-actions">
               <button
@@ -1564,12 +1610,19 @@ function Settings({
           <Bell />
           <span>
             <h3>需要你时，主动通知</h3>
-            <p>系统通知默认开启；可接一个 Webhook，把决定、验收、到期跟进和真正需要介入的事项推到你的工作流。</p>
+            <p>系统通知默认开启；可接一个 Webhook，同步目标状态变化，并把决定、验收、到期跟进和真正需要介入的事项推到你的工作流。</p>
             {webhook.configured && (
               <code>
                 {webhook.endpoint} · {webhook.enabled ? "已启用" : "已暂停"}
                 {webhook.tokenConfigured ? " · Bearer 认证" : ""}
+                {" · "}
+                {webhook.statuses.length ? `${webhook.statuses.length} 种状态` : "不订阅状态变化"}
               </code>
+            )}
+            {webhook.lastSuccessAt && (
+              <small className="webhook-last-success">
+                最近送达：{time(webhook.lastSuccessAt)}
+              </small>
             )}
             {webhook.lastError && (
               <small className="webhook-error">

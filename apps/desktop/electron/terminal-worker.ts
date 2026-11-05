@@ -16,13 +16,19 @@ port.on("message", ({ data }) => {
         cols: 120, rows: 32, cwd: data.cwd,
         env: { ...process.env, TERM: "xterm-256color", COLORTERM: "truecolor", HERDR_SESSION: data.session },
       });
-      terminal.onData((text) => port.postMessage({ type: "data", data: text }));
+      let ready = false;
+      terminal.onData((text) => {
+        if (!ready) {
+          ready = true;
+          port.postMessage({ type: "ready" });
+        }
+        port.postMessage({ type: "data", data: text });
+      });
       terminal.onExit(({ exitCode }) => {
         terminal = undefined;
         port.postMessage({ type: "exit", exitCode });
         process.exit(0);
       });
-      port.postMessage({ type: "ready" });
     } else if (data.type === "write") {
       terminal?.write(data.data);
     } else if (data.type === "resize") {
