@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
+import { attentionKind } from "../../../packages/core/src/model.js";
 import type { AttentionKind, Goal, GoalStatus } from "../../../packages/core/src/index.js";
 
 export interface WebhookSaveInput {
@@ -275,6 +276,12 @@ export class WebhookNotifier {
       if (!webhook?.enabled || !webhook.url) return { sent: false, reason: "disabled" };
       if (!(webhook.statuses ?? allGoalStatuses).includes(notification.goal.status))
         return { sent: false, reason: "status-not-subscribed" };
+      const kind = attentionKind(notification.goal);
+      if (
+        (notification.goal.status === "review" && kind === "review") ||
+        (notification.goal.status === "waiting" && kind === "follow_up")
+      )
+        return { sent: false, reason: "covered-by-attention" };
 
       const now = this.now(), event = this.statusEvent(notification, webhook.url),
         previous = data.deliveries[event.id];
