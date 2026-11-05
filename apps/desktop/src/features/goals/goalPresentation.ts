@@ -50,9 +50,13 @@ export interface GoalPresentation {
   tone: GoalTone;
   label: string;
   detail: string;
+  brief: string;
+  nextLabel: string;
   projectName: string;
   latest?: Activity;
   latestAttachments: GoalAttachment[];
+  latestAgentReply?: Activity;
+  latestAgentReplyAttachments: GoalAttachment[];
   ended: boolean;
   needsDecision: boolean;
   needsIntervention: boolean;
@@ -70,55 +74,92 @@ export function presentGoal(goal: Goal, state: WorkspaceState): GoalPresentation
   const latest = [...goal.activities]
     .reverse()
     .find((activity) => contentKinds.has(activity.kind));
-  const latestAttachments = (latest?.attachmentIds ?? [])
+  const attachmentsFor = (activity?: Activity) => (activity?.attachmentIds ?? [])
     .map((id) => goal.attachments?.find((attachment) => attachment.id === id))
     .filter((attachment): attachment is GoalAttachment => Boolean(attachment));
+  const latestAttachments = attachmentsFor(latest);
+  const latestAgentReply = [...goal.activities]
+    .reverse()
+    .find((activity) =>
+      activity.kind !== "created" &&
+      contentKinds.has(activity.kind) &&
+      !activity.actor.startsWith("你") &&
+      !["系统", "巡检"].includes(activity.actor));
+  const latestAgentReplyAttachments = attachmentsFor(latestAgentReply);
 
   let tone: GoalTone = "running";
   let label = "管家处理中";
-  let detail = "有真正需要你的变化时会再出现。";
+  let detail = "负责人正在推进；暂时不需要你处理。";
+  let brief = latestAgentReply?.text || "有真正需要你的变化时，管家会带回这里。";
+  let nextLabel = "接下来的安排";
   if (ended) {
     tone = goal.status === "dropped" ? "blocked" : "done";
     label = statusLabel[goal.status];
     detail = goal.status === "completed" ? "已经验收完成。" : "已经放弃，只保留记录。";
+    brief = goal.delivery?.summary || goal.next || detail;
+    nextLabel = "最后记录";
   } else if (goal.status === "review") {
     tone = "review";
     label = "等你验收";
-    detail = "成果和检查记录已经就绪。";
+    detail = goal.delivery?.checks.length
+      ? `交付与 ${goal.delivery.checks.length} 项检查记录已经就绪。`
+      : "成果已经提交，等待你判断是否通过。";
+    brief = goal.delivery?.summary || goal.attention?.summary || goal.next;
+    nextLabel = "验收后的安排";
   } else if (dispatchFailed) {
     tone = "blocked";
     label = "联系管家失败";
     detail = "目标已保存在本机；恢复连接后重试即可继续。";
+    brief = goal.dispatch?.detail || goal.attention?.summary || detail;
+    nextLabel = "恢复后继续";
   } else if (needsDecision) {
     tone = "reply";
     label = "等你决定";
-    detail = "这里需要你的明确授权或选择。";
+    detail = "负责人停在这里，需要你的明确授权或选择。";
+    brief = goal.attention?.summary || goal.next;
+    nextLabel = "决定后继续";
   } else if (needsIntervention) {
     tone = "blocked";
     label = "需要你排障";
-    detail = "负责人现场需要你完成一次操作。";
+    detail = "负责人无法自行继续，需要你在现场完成一次操作。";
+    brief = goal.attention?.summary || goal.next;
+    nextLabel = "处理后的安排";
   } else if (dueFollowUp) {
     tone = "waiting";
     label = "到点跟进";
-    detail = "到了你设定的跟进时间。";
+    detail = "到了你设定的跟进时间，可以确认等待是否已有结果。";
+    brief = goal.waitingFor
+      ? `正在等待 ${goal.waitingFor}，现在需要确认是否已有结果。`
+      : "等待事项已到跟进时间。";
+    nextLabel = "下一步";
   } else if (goal.status === "waiting") {
     tone = "waiting";
     label = "等待外部";
-    detail = "现在不需要你处理。";
+    detail = goal.waitingFor
+      ? `正在等待 ${goal.waitingFor}；现在不需要你处理。`
+      : "正在等待外部结果；现在不需要你处理。";
+    brief = goal.next;
+    nextLabel = "恢复推进的条件";
   } else if (goal.mode === "manual") {
+    tone = "running";
     label = "由你处理";
-    detail = "补充进展或提交成果；需要协作时可以交回管家。";
+    detail = "这个目标由你推进：补充进展、提交成果，需要协作时可以交回管家。";
+    brief = goal.next;
   }
 
   return {
     tone,
     label,
     detail,
+    brief: brief || "还没有记录下一步。",
+    nextLabel,
     projectName:
       state.projects.find((project) => project.id === goal.projectId)?.name ??
       "个人事项",
     latest,
     latestAttachments,
+    latestAgentReply,
+    latestAgentReplyAttachments,
     ended,
     needsDecision,
     needsIntervention,

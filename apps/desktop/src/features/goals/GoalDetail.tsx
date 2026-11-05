@@ -5,10 +5,13 @@ import {
   Bot,
   Check,
   ChevronDown,
+  Clock3,
+  FileText,
   ImagePlus,
   MessageCircle,
   Sparkles,
   SquareTerminal,
+  UserRound,
   X,
 } from "lucide-react";
 import type {
@@ -20,6 +23,7 @@ import { GoalAttachments } from "./GoalAttachments.js";
 import { GoalHistory } from "./GoalActivity.js";
 import type { GoalReplyMode } from "./GoalReplyComposer.js";
 import {
+  activityKindLabel,
   presentGoal,
   time,
 } from "./goalPresentation.js";
@@ -51,7 +55,16 @@ export function GoalDetail({
   submit: () => void;
 }) {
   const [replyMode, setReplyMode] = useState<GoalReplyMode | null>(null);
+  const [descriptionOpen, setDescriptionOpen] = useState(false);
   const view = presentGoal(goal, state);
+  const summary = view.latestAgentReply ?? view.latest;
+  const summaryIsAgent = Boolean(view.latestAgentReply);
+  const summaryAttachments = view.latestAgentReply
+    ? view.latestAgentReplyAttachments
+    : view.latestAttachments;
+  const summaryIds = summary ? [summary.id] : [];
+  const descriptionChanged = goal.description.trim() !== (summary?.text ?? "").trim();
+  const descriptionCanCollapse = goal.description.trim().length > 260;
 
   return (
     <Dialog.Root
@@ -72,7 +85,7 @@ export function GoalDetail({
                 <Sparkles size={15} />
               </span>
               <p>
-                <small>管家交接</small>
+                <small>{goal.mode === "concierge" ? "管家协同" : "个人推进"}</small>
                 <strong>{view.projectName}</strong>
               </p>
             </div>
@@ -107,9 +120,6 @@ export function GoalDetail({
           <div className="goal-detail-scroll">
             <article className="goal-detail-content">
               <header className="goal-detail-title">
-                <span className={`goal-detail-state-copy ${view.tone}`}>
-                  {view.detail}
-                </span>
                 <h2>{goal.title}</h2>
                 <div className="goal-detail-meta">
                   <span>{goal.owner}</span>
@@ -127,53 +137,53 @@ export function GoalDetail({
                   <time>{time(goal.updatedAt)} 更新</time>
                 </div>
               </header>
-              <section
-                className="goal-latest-message"
-                aria-label="最新消息原文"
-              >
-                <div className="goal-message-meta">
+              <section className={`goal-brief ${view.tone}`} aria-label="当前情况与下一步">
+                <div className="goal-brief-status">
+                  <small>现在发生了什么</small>
+                  <p>{view.brief}</p>
+                  <span>{view.detail}</span>
+                </div>
+                <div className="goal-brief-next">
+                  <small>{view.nextLabel}</small>
+                  <p>{goal.next || "暂无记录，等待管家更新。"}</p>
+                </div>
+                <div className="goal-next-context">
                   <span>
-                    {view.latest?.actor.startsWith("你") ? (
-                      <MessageCircle size={15} />
-                    ) : (
-                      <Bot size={15} />
-                    )}
+                    <UserRound size={13} />
+                    负责人 · {goal.owner}
                   </span>
-                  <strong>{view.latest?.actor ?? "目标原文"}</strong>
-                  <small>
-                    {view.latest ? time(view.latest.at) : "创建目标时"}
-                  </small>
+                  {goal.waitingFor && (
+                    <span>
+                      <Clock3 size={13} />
+                      等待 · {goal.waitingFor}
+                    </span>
+                  )}
+                  {goal.remindAt && (
+                    <span>
+                      <Clock3 size={13} />
+                      {time(goal.remindAt)} 跟进
+                    </span>
+                  )}
                 </div>
-                <div className="goal-raw-message">
-                  {view.latest?.text || goal.description}
-                </div>
-                {!!view.latestAttachments.length && (
-                  <div className="latest-message-attachments">
-                    {view.latestAttachments.map((attachment) => (
+              </section>
+              {descriptionChanged && !!goal.description.trim() && (
+                <section className="goal-original">
+                  <header>
+                    <span>
+                      <FileText size={14} />
+                      目标说明
+                    </span>
+                    {descriptionCanCollapse && (
                       <button
                         type="button"
-                        key={attachment.id}
-                        onClick={() => void service.openAttachment(goal.id, attachment.id)}
+                        onClick={() => setDescriptionOpen((open) => !open)}
                       >
-                        <ImagePlus size={13} />
-                        {attachment.name}
+                        {descriptionOpen ? "收起" : "展开全文"}
                       </button>
-                    ))}
-                  </div>
-                )}
-              </section>
-              <section className="goal-next-record">
-                <span>管家记录的下一步</span>
-                <p>{goal.next}</p>
-                {goal.remindAt && <small>{time(goal.remindAt)} 跟进</small>}
-              </section>
-              {!!goal.attachments?.length && (
-                <GoalAttachments
-                  goalId={goal.id}
-                  attachments={goal.attachments}
-                  service={service}
-                  remove={removeAttachment}
-                />
+                    )}
+                  </header>
+                  <p className={descriptionOpen ? "" : "clamped"}>{goal.description}</p>
+                </section>
               )}
               {goal.delivery && (
                 <section className="delivery goal-delivery">
@@ -209,6 +219,54 @@ export function GoalDetail({
                   </div>
                 </section>
               )}
+              <section
+                className="goal-latest-message"
+                aria-label="最新消息原文"
+              >
+                <div className="goal-message-meta">
+                  <span>
+                    {summary?.actor.startsWith("你") ? (
+                      <MessageCircle size={15} />
+                    ) : (
+                      <Bot size={15} />
+                    )}
+                  </span>
+                  <strong>
+                    {summaryIsAgent ? "最近交接" : "最近记录"}
+                    {summary ? ` · ${summary.actor}` : ""}
+                  </strong>
+                  <small>
+                    {summary
+                      ? `${activityKindLabel[summary.kind]} · ${time(summary.at)}`
+                      : "创建目标时"}
+                  </small>
+                </div>
+                <div className="goal-raw-message">
+                  {summary?.text || goal.description}
+                </div>
+                {!!summaryAttachments.length && (
+                  <div className="latest-message-attachments">
+                    {summaryAttachments.map((attachment) => (
+                      <button
+                        type="button"
+                        key={attachment.id}
+                        onClick={() => void service.openAttachment(goal.id, attachment.id)}
+                      >
+                        <ImagePlus size={13} />
+                        {attachment.name}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </section>
+              {!!goal.attachments?.length && (
+                <GoalAttachments
+                  goalId={goal.id}
+                  attachments={goal.attachments}
+                  service={service}
+                  remove={removeAttachment}
+                />
+              )}
               {goal.dispatch && (
                 <p
                   className={`dispatch-note ${goal.dispatch.status}`}
@@ -230,7 +288,7 @@ export function GoalDetail({
               )}
               <GoalHistory
                 goal={goal}
-                latestId={view.latest?.id}
+                latestIds={summaryIds}
                 service={service}
               />
               <details className="manual-tools goal-detail-advanced">

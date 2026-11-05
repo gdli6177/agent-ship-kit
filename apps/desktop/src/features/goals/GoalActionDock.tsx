@@ -223,7 +223,7 @@ export function GoalActionDock({
         </span>
         <div>
           <strong>负责人现场需要你处理</strong>
-          <small>处理完成后直接告诉管家，不需要回来重新填表。</small>
+          <small>{goal.attention?.summary || goal.next}</small>
         </div>
         <div className="goal-action-buttons">
           <button
@@ -255,7 +255,10 @@ export function GoalActionDock({
         </span>
         <div>
           <strong>到点跟进了</strong>
-          <small>等待事项还没有结束；可以请管家继续核实。</small>
+          <small>
+            {goal.waitingFor ? `正在等待 ${goal.waitingFor}。` : ""}
+            {goal.next ? ` ${goal.next}` : " 请确认等待是否已有结果。"}
+          </small>
         </div>
         <div className="goal-action-buttons">
           <button
@@ -315,7 +318,10 @@ export function GoalActionDock({
         </span>
         <div>
           <strong>现在不用处理</strong>
-          <small>管家会在有新结果时把这件事带回来。</small>
+          <small>
+            {goal.waitingFor ? `正在等待 ${goal.waitingFor}。` : "正在等待外部结果。"}
+            {goal.next ? ` ${goal.next}` : ""}
+          </small>
         </div>
         <div className="goal-action-buttons">
           <button

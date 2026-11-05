@@ -8,6 +8,9 @@ import { promisify } from "node:util";
 import assert from "node:assert/strict";
 import { WorkspaceService } from "../packages/core/src/index.ts";
 const run = promisify(execFile);
+const appVersion = JSON.parse(
+  await readFile(new URL("../apps/desktop/package.json", import.meta.url), "utf8"),
+).version;
 const png = Buffer.from(
   "iVBORw0KGgoAAAANSUhEUgAAACAAAAAYCAYAAACbU/80AAAAVUlEQVR4nGPUMIr6z4AEAqKWInMZNiyLZqClPBPDAAOmEe8Axoqe///pGefo8kwMAwyYRrwDGEfLAYaR7gDG0XKAYaQ7gHG0HGAY6Q5gHC0HGEa6AwC58E1KmpVcaAAAAABJRU5ErkJggg==",
   "base64",
@@ -260,11 +263,21 @@ try {
       actor: "负责人 alpha-owner",
     }), { id: goalId, index });
   }
-  await page.locator(".goal-history").evaluate(element => { element.open = true; });
+  await page.getByText("最近交接 · 负责人 alpha-owner", { exact: true }).waitFor();
   await page.locator(".goal-raw-message").getByText(
     "负责人具体答复：旧接口仍可只读调用，但新界面应改用 /v2/items，并保留两轮兼容期。",
     { exact: true },
   ).waitFor();
+  await page.locator(".goal-original").getByText(
+    "桌面试用交付",
+    { exact: true },
+  ).waitFor();
+  assert.equal(await page.locator(".goal-history").getAttribute("open"), "");
+  assert.match(
+    await page.locator(".conversation-entry p").first().innerText(),
+    /负责人过程记录 4/,
+    "message and handoff history must put the newest remaining record first",
+  );
   assert.equal(
     await page.locator(".conversation-feed").getByText("请保留现有验收记录，不要扩大范围。", { exact: true }).count(),
     1,
@@ -363,12 +376,14 @@ try {
   assert.deepEqual((await service.read()).agents, { concierge: "codex --model my-model", owner: "omp --model another-model" });
   await page.getByRole("button", { name: "配置 Webhook", exact: true }).click();
   await page.getByRole("dialog", { name: "Webhook 通知" }).waitFor();
-  await page.getByLabel(/在需要你处理时发送/).check();
+  await page.getByLabel(/状态更新和需要你处理时发送/).check();
+  await page.getByRole("dialog", { name: "Webhook 通知" }).getByLabel("已完成", { exact: true }).uncheck();
   await page.getByLabel("Webhook 地址").fill(webhookUrl);
   await page.getByLabel(/Bearer 令牌/).fill("desktop-smoke-token");
   await page.getByRole("button", { name: "保存设置", exact: true }).click();
-  await page.getByText("Webhook 通知已启用。", { exact: true }).waitFor();
+  await page.getByText("Webhook 已保存，测试通知已送达。", { exact: true }).waitFor();
   await page.getByRole("button", { name: "管理 Webhook", exact: true }).click();
+  await page.getByText(/4 种状态/).waitFor();
   await page.screenshot({ path: join(home, "webhook-dark.png"), animations: "disabled" });
   await page.getByRole("button", { name: "测试当前配置", exact: true }).click();
   for (let attempt = 0; attempt < 100; attempt += 1) {
@@ -384,6 +399,37 @@ try {
     `the Webhook test button must send a real request; dialog text: ${await page.locator('[role="dialog"]').innerText()}`,
   );
   await page.getByRole("button", { name: "关闭", exact: true }).click();
+  const statusGoal = await service.execute({
+    type: "goal.create",
+    input: {
+      title: "状态通知试用",
+      description: "验证 CLI 侧状态变化会触发 Webhook。",
+      projectId: "personal",
+      mode: "concierge",
+    },
+  });
+  await page.waitForTimeout(250);
+  await service.execute({
+    type: "goal.wait",
+    goalId: statusGoal.id,
+    reason: "等待法务审批合同",
+    owner: "法务",
+    actor: "负责人",
+  });
+  for (let attempt = 0; attempt < 100; attempt += 1) {
+    if (webhookEvents.some(event =>
+      event.body.event === "goal.status_changed" &&
+      event.body.goal?.id === statusGoal.id)) break;
+    await page.waitForTimeout(100);
+  }
+  const statusEvent = webhookEvents.find(event =>
+    event.body.event === "goal.status_changed" &&
+    event.body.goal?.id === statusGoal.id);
+  assert.ok(statusEvent, "a status written by another WorkspaceService must reach the configured webhook");
+  assert.equal(statusEvent.body.goal.previousStatus, "active");
+  assert.equal(statusEvent.body.goal.status, "waiting");
+  assert.equal(statusEvent.body.goal.waitingFor, "法务");
+  assert.equal(statusEvent.headers.authorization, "Bearer desktop-smoke-token");
   await page.screenshot({ path: join(home, "settings-dark.png") });
   await page.evaluate(() => {
     const main = document.querySelector("main");
@@ -400,7 +446,7 @@ try {
   await page.locator("main").evaluate((element) => {
     element.scrollTop = element.scrollHeight;
   });
-  await page.getByText(/Crewvane 0\.5\.0 · 一位管家/).waitFor();
+  await page.getByText(new RegExp(`Crewvane ${appVersion.replaceAll(".", "\\.")} · 一位管家`)).waitFor();
   await page.getByRole("button", { name: "浅色模式" }).click();
   await page.getByRole("button", { name: "注意力", exact: true }).click();
   const riskGoal = await page.evaluate(() => window.crewvane.command({
@@ -573,12 +619,47 @@ try {
   });
   await page.getByRole("button", { name: "全部目标", exact: true }).click();
   await page.getByText("联系管家失败界面", { exact: true }).click();
-  await page.getByText("联系管家失败", { exact: true }).waitFor();
+  await page.locator(".goal-state-pill").getByText("联系管家失败", { exact: true }).waitFor();
   await page.getByRole("button", { name: "重试联系管家", exact: true }).waitFor();
   assert.equal(await page.getByText("负责人现场需要你处理", { exact: true }).count(), 0);
   await page.waitForTimeout(250);
   await page.screenshot({ path: join(home, "dispatch-failure-light.png"), animations: "disabled" });
   await page.getByRole("button", { name: "关闭", exact: true }).click();
+  const parallelPerformance = await page.evaluate(async () => {
+    const longTasks = [];
+    const observer = new PerformanceObserver(list => {
+      for (const entry of list.getEntries()) longTasks.push(entry.duration);
+    });
+    observer.observe({ type: "longtask", buffered: true });
+    const createdAt = performance.now();
+    const goals = await Promise.all([1, 2, 3].map(index =>
+      window.crewvane.command({
+        type: "goal.create",
+        input: {
+          title: `并行性能测试 ${index}`,
+          description: "验证三个目标同时进入共享状态时的响应。",
+          projectId: "personal",
+          mode: "manual",
+        },
+      })));
+    const createMs = performance.now() - createdAt;
+    const frameStartedAt = performance.now();
+    await new Promise(resolve => requestAnimationFrame(() => resolve(undefined)));
+    const frameMs = performance.now() - frameStartedAt;
+    await Promise.all(goals.map(goal =>
+      window.crewvane.command({ type: "goal.drop", goalId: goal.id, note: "性能测试清理" })));
+    await Promise.all(goals.map(goal =>
+      window.crewvane.command({ type: "goal.delete", goalId: goal.id })));
+    await new Promise(resolve => setTimeout(resolve, 50));
+    observer.disconnect();
+    return { createMs, frameMs, maxLongTaskMs: Math.max(0, ...longTasks) };
+  });
+  assert.ok(parallelPerformance.createMs < 5_000,
+    `three concurrent goals must remain responsive: ${JSON.stringify(parallelPerformance)}`);
+  assert.ok(parallelPerformance.frameMs < 1_000,
+    `the UI must paint after a three-goal burst: ${JSON.stringify(parallelPerformance)}`);
+  assert.ok(parallelPerformance.maxLongTaskMs < 2_000,
+    `a three-goal burst must not stall the renderer: ${JSON.stringify(parallelPerformance)}`);
   const auditDirectory = join(home, "ui-audit");
   await mkdir(auditDirectory);
   const auditReport = [];
@@ -645,6 +726,7 @@ try {
         "accept",
         "settings",
         "private Webhook settings and real attention delivery",
+        "Webhook status subscriptions, automatic delivery test, external state change delivery, and Feishu/WeCom response validation",
         "per-project ship policy from the desktop UI",
         "high-risk decision from the desktop UI and persisted ledger",
         "save Agent role preferences",
@@ -665,6 +747,8 @@ try {
         "dispatch failure is presented as a retryable concierge connection failure",
         "permanent deletion for completed goals",
         "persistent owner scene entry is available from every active goal detail",
+        "goal detail summarizes next action and latest agent reply while history opens newest-first",
+        `three concurrent goals remain responsive (${Math.round(parallelPerformance.createMs)}ms, max long task ${Math.round(parallelPerformance.maxLongTaskMs)}ms)`,
       ],
       errors,
     }),
