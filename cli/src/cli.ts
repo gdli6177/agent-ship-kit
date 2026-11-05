@@ -8,7 +8,10 @@ import {
 } from "../../packages/core/src/index.js";
 import { readFile, rename, writeFile } from "node:fs/promises";
 import { join } from "node:path";
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
 import { runBoard } from "./board.js";
+const exec = promisify(execFile);
 const usage = `Crewvane — 把所有事整理成清晰的下一步
 
 人的消息入口（只追加原话，不改变目标状态）：
@@ -140,8 +143,11 @@ function herdrLiveEvent() {
     const state = typeof data.agent_status === "string" ? data.agent_status.toLowerCase() : "";
     if (!["working", "idle", "done", "blocked", "unknown"].includes(state))
       throw new Error("Herdr 插件事件包含无效 Agent 状态");
+    const agentName = typeof data.agent_name === "string" ? data.agent_name : undefined;
     return {
+      kind,
       target: { paneId, ...(workspaceId ? { workspaceId } : {}) },
+      ...(agentName ? { reference: { paneId, ...(workspaceId ? { workspaceId } : {}), agent: agentName } } : {}),
       presence: { state: state as "working" | "idle" | "done" | "blocked" | "unknown", checkedAt, reachable: true },
     };
   }
@@ -149,6 +155,7 @@ function herdrLiveEvent() {
     if (!/^[A-Za-z0-9_-]{1,64}:[A-Za-z0-9_-]{1,64}$/.test(paneId))
       throw new Error("Herdr 插件事件缺少有效 Pane ID");
     return {
+      kind,
       target: { paneId, ...(workspaceId ? { workspaceId } : {}) },
       presence: { state: "unknown" as const, checkedAt, reachable: false },
     };
@@ -167,6 +174,7 @@ function herdrLiveEvent() {
     if (!["working", "idle", "done", "blocked", "unknown"].includes(status))
       throw new Error("Herdr 插件事件包含无效 Agent 状态");
     return {
+      kind,
       target: { paneId: previousPaneId, ...(previousWorkspaceId ? { workspaceId: previousWorkspaceId } : {}) },
       reference: {
         paneId: newPaneId,
@@ -182,15 +190,42 @@ function herdrLiveEvent() {
   }
   if (kind === "tab.closed")
     return {
+      kind,
       target: { tabId: targetId("tab"), ...(workspaceId ? { workspaceId } : {}) },
       presence: { state: "unknown" as const, checkedAt, reachable: false },
     };
   if (kind === "workspace.closed")
     return {
+      kind,
       target: { workspaceId: targetId("workspace") },
       presence: { state: "unknown" as const, checkedAt, reachable: false },
     };
   throw new Error(`不支持的 Herdr 插件事件：${kind}`);
+}
+async function currentHerdrAgent(paneId: string) {
+  const injected = process.env.CREWVANE_HERDR_PLUGIN_AGENT?.trim();
+  if (injected) return injected;
+  const session = process.env.HERDR_SESSION?.trim();
+  if (!session) return undefined;
+  const binary = process.env.CREWVANE_HERDR_BINARY?.trim() ||
+    process.env.HERDR_BIN_PATH?.trim() || "herdr";
+  try {
+    const { stdout } = await exec(binary, ["--session", session, "agent", "list"], {
+      timeout: 5_000,
+      maxBuffer: 512_000,
+    });
+    const value = JSON.parse(stdout) as any;
+    const list = value.result?.agents ?? value.agents ?? value;
+    const entry = Array.isArray(list)
+      ? list.find((agent: any) => agent?.pane_id === paneId)
+      : undefined;
+    const name = entry?.name ?? entry?.agent_name ?? entry?.agent;
+    return typeof name === "string" && /^[a-z][a-z0-9_-]{0,31}$/.test(name)
+      ? name
+      : undefined;
+  } catch {
+    return undefined;
+  }
 }
 export async function run(argv: string[], io = { out: console.log, error: console.error }): Promise<number> {
   try {
@@ -262,7 +297,22 @@ export async function run(argv: string[], io = { out: console.log, error: consol
         };
       }
       else if (group === "event" && action === "herdr") {
-        const event = herdrLiveEvent();
+        const { kind, ...event } = herdrLiveEvent();
+        void kind;
+        const target = event.target as { paneId?: string; workspaceId?: string };
+        if (
+          event.presence.reachable !== false &&
+          !event.reference?.agent &&
+          target.paneId
+        ) {
+          const agent = await currentHerdrAgent(target.paneId);
+          if (agent)
+            event.reference = {
+              ...(event.reference ?? {}),
+              paneId: target.paneId,
+              agent,
+            };
+        }
         result = await service.execute({ type: "live.event", ...event });
       }
       else if (group === "goal" && action === "list") { const state = await service.read(); result = args.has("all") ? state.goals : state.goals.filter((goal) => !["completed", "dropped"].includes(goal.status)); }

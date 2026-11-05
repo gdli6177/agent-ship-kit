@@ -87,8 +87,8 @@ export function GoalActionDock({
         }}
       >
         <div className="goal-action-copy">
-          <span>需要你的明确决定</span>
-          <strong>{goal.attention?.summary}</strong>
+          <span>记录你的决定</span>
+          <strong>写下你的原话；批准或拒绝都会记入决定账本。</strong>
         </div>
         <textarea
           aria-label="你的决定"
@@ -102,7 +102,7 @@ export function GoalActionDock({
             className="secondary"
             onClick={() => setReplyMode("message")}
           >
-            仅留言给管家
+            补充意见
           </button>
           <button
             type="button"
@@ -136,8 +136,8 @@ export function GoalActionDock({
     return (
       <div className="goal-decision-row">
         <div className="goal-action-copy">
-          <span>下一步</span>
-          <strong>验收通过后由管家收尾；有问题就退回修改。</strong>
+          <span>明确验收</span>
+          <strong>通过后目标结束；需要修改就退回并说明。</strong>
         </div>
         <div className="goal-action-buttons">
           <button
@@ -145,7 +145,7 @@ export function GoalActionDock({
             className="secondary"
             onClick={() => setReplyMode("message")}
           >
-            有疑问，问管家
+            问管家
           </button>
           <button
             type="button"
@@ -249,16 +249,17 @@ export function GoalActionDock({
 
   if (view.dueFollowUp) {
     return (
-      <div className="goal-quiet-row waiting">
-        <span>
+      <div className="goal-followup-dock waiting">
+        <div className="goal-followup-heading">
           <Clock3 size={18} />
-        </span>
-        <div>
-          <strong>到点跟进了</strong>
-          <small>
-            {goal.waitingFor ? `正在等待 ${goal.waitingFor}。` : ""}
-            {goal.next ? ` ${goal.next}` : " 请确认等待是否已有结果。"}
-          </small>
+          <div>
+            <span>到点跟进</span>
+            <strong>
+              {goal.waitingFor
+                ? `仍在等 ${goal.waitingFor}，还是已经有结果？`
+                : "等待有结果了吗？"}
+            </strong>
+          </div>
         </div>
         <div className="goal-action-buttons">
           <button
@@ -266,7 +267,7 @@ export function GoalActionDock({
             className="secondary"
             onClick={() => setReplyMode("message")}
           >
-            有进展，告诉管家
+            补充情况
           </button>
           <button
             type="button"
@@ -279,31 +280,32 @@ export function GoalActionDock({
               )
             }
           >
-            请管家跟进
+            让管家跟进
           </button>
           <button
             type="button"
             className="secondary"
             onClick={() => setReplyMode("resume")}
           >
-            有结果了，继续推进
+            有结果，继续推进
           </button>
           <button
             type="button"
-            className="primary"
+            className="quiet-action"
             disabled={busy}
             onClick={() =>
               void act(
                 {
-                  type: "goal.resolve",
+                  type: "goal.remind",
                   goalId: goal.id,
-                  actor: "你",
+                  at: new Date(Date.now() + 3_600_000).toISOString(),
+                  note: goal.next,
                 },
-                "这次跟进已处理",
+                "1 小时后再提醒你",
               )
             }
           >
-            完成这次跟进
+            1 小时后再提醒
           </button>
         </div>
       </div>
@@ -329,7 +331,7 @@ export function GoalActionDock({
             className="secondary"
             onClick={() => setReplyMode("message")}
           >
-            有进展，告诉管家
+            补充情况
           </button>
           <button
             type="button"
@@ -342,7 +344,7 @@ export function GoalActionDock({
               )
             }
           >
-            请管家跟进
+            让管家跟进
           </button>
           <button
             type="button"
@@ -367,7 +369,7 @@ export function GoalActionDock({
             className="primary"
             onClick={() => setReplyMode("resume")}
           >
-            有结果了，继续推进
+            有结果，继续推进
           </button>
         </div>
       </div>

@@ -326,3 +326,64 @@ test("uses WeCom's robot payload and surfaces a non-zero errcode", async () => {
     await rm(directory, { recursive: true, force: true });
   }
 });
+
+test("a transition into review sends one WeCom message instead of duplicating status and attention", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "crewvane-webhook-wecom-dedup-"));
+  try {
+    const requests: Record<string, any>[] = [];
+    const notifier = new WebhookNotifier(
+      directory,
+      "0.5.2",
+      async (_input, init) => {
+        requests.push(JSON.parse(String(init?.body)));
+        return new Response(JSON.stringify({ errcode: 0, errmsg: "ok" }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        });
+      },
+    );
+    await notifier.save({
+      enabled: true,
+      url: "https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=test-key",
+    });
+    const goal: Goal = {
+      id: "goal_wecom_once",
+      projectId: "project",
+      title: "确认发布结果",
+      description: "需要人验收发布结果。",
+      mode: "concierge",
+      steps: [],
+      next: "查看交付并完成验收",
+      owner: "负责人",
+      status: "review",
+      attention: {
+        kind: "review",
+        summary: "负责人已提交发布结果",
+        since: "2026-11-05T05:00:00.000Z",
+      },
+      activities: [],
+      createdAt: "2026-11-05T04:50:00.000Z",
+      updatedAt: "2026-11-05T05:00:00.000Z",
+    };
+    const workspace = { name: "发布工作区" };
+
+    const status = await notifier.deliverStatusChange({
+      workspace,
+      goal,
+      previousStatus: "active",
+    });
+    const attention = await notifier.deliver({
+      workspace,
+      goal,
+      kind: "review",
+    });
+
+    assert.deepEqual(attention, { sent: true });
+    assert.equal(status.sent, false);
+    assert.equal(requests.length, 1, "one goal transition must produce one WeCom message");
+    assert.match(requests[0]?.text?.content, /需要你处理/);
+    assert.match(requests[0]?.text?.content, /确认发布结果/);
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});

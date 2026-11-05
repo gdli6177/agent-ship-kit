@@ -12,7 +12,7 @@ import {
 import type { Goal } from "../../../../../packages/core/src/types.js";
 import type { GoalDetailService } from "./goalService.js";
 
-export type GoalReplyMode = "message" | "return" | "resume";
+export type GoalReplyMode = "message" | "return" | "resume" | "drop";
 type ReplyImage = { key: string; file: File; preview: string };
 
 const attachmentFormats = new Set([
@@ -78,6 +78,12 @@ export function GoalReplyComposer({
       placeholder: "写下最新结果与下一步；等待状态会结束。",
       submit: "交给管家继续",
       note: "这是明确的状态更新",
+    },
+    drop: {
+      heading: "放弃目标",
+      placeholder: "写下放弃这件事的原因；记录会保留下来。",
+      submit: "确认放弃",
+      note: "放弃后不会再联系管家；记录仍可查看",
     },
   }[mode];
 
@@ -149,6 +155,15 @@ export function GoalReplyComposer({
           mode: "concierge",
         });
         onComplete("等待已结束，管家会继续推进");
+        return;
+      }
+      if (mode === "drop") {
+        await service.command({
+          type: "goal.drop",
+          goalId: goal.id,
+          note: body,
+        });
+        onComplete("目标已放弃，记录仍可查看");
         return;
       }
       const inputs = await Promise.all(
@@ -225,6 +240,8 @@ export function GoalReplyComposer({
               ? "退回说明"
               : mode === "resume"
                 ? "最新结果与下一步"
+                : mode === "drop"
+                  ? "放弃原因"
                 : "发给管家的消息"
           }
           placeholder={labels.placeholder}

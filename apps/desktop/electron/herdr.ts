@@ -168,16 +168,6 @@ export class HerdrClient {
     await this.ensureSession();
     const checkedAt = new Date().toISOString();
     const sameSession = existing?.session === this.session;
-    if (sameSession && existing.tabId &&
-      existing.launchPolicy !== CONCIERGE_LAUNCH_POLICY) {
-      // A process launched by an older Crewvane may have project write access
-      // and an unscoped command environment. It must not be reused after the
-      // control-plane boundary is enabled.
-      await this.runner.run(["tab", "close", existing.tabId]);
-      // The close is asynchronous in the Herdr server. Returning now avoids a
-      // second close when agent list still exposes the old concierge briefly.
-      return;
-    }
     if (sameSession && existing.transport === "pane" &&
       existing.launchPolicy === CONCIERGE_LAUNCH_POLICY) {
       try {
@@ -192,30 +182,40 @@ export class HerdrClient {
     }
     const listed = agents(await this.runner.run(["agent", "list"]));
     if (sameSession && existing?.launchPolicy === CONCIERGE_LAUNCH_POLICY) {
-      const live = listed.find(agent =>
-        agent.name === existing.agent ||
-        agent.pane_id === existing.paneId ||
-        agent.tab_id === existing.tabId);
+      // Pane and tab IDs survive an agent exit. They identify a terminal
+      // location, not the concierge process. Require the exact governed agent
+      // name and preserve the new IDs when Herdr reports a pane move.
+      const live = listed.find(agent => agent.name === existing.agent);
       if (!live) return;
+      const paneId = named(live.pane_id) ?? existing.paneId;
+      let processId = existing.processId;
+      if (paneId) {
+        try {
+          const running = await this.foreground(paneId);
+          if (processId) {
+            if (!running.some(process => process.pid === processId)) return;
+          } else {
+            processId = running[0]?.pid;
+          }
+        } catch {
+          // A persisted PID is the stronger identity. If it cannot be verified,
+          // recover instead of sending a command to a possibly replaced pane.
+          if (processId) return;
+        }
+      }
       return {
         reference: {
           ...existing,
-          workspaceId: existing.workspaceId ?? named(live.workspace_id),
-          tabId: existing.tabId ?? named(live.tab_id),
-          paneId: existing.paneId ?? named(live.pane_id),
-          agent: existing.agent ?? "concierge",
+          workspaceId: named(live.workspace_id) ?? existing.workspaceId,
+          tabId: named(live.tab_id) ?? existing.tabId,
+          paneId,
+          ...(processId === undefined ? {} : { processId }),
         },
         live: livePresence(live, checkedAt),
       };
     }
     // Without a persisted control-plane reference, provenance is unknown.
-    // Close a same-named agent before creating a governed replacement so an
-    // upgraded or orphaned process cannot keep an old runtime policy.
-    const orphan = listed.find(agent => agent.name === "concierge");
-    if (orphan) {
-      const tabId = named(orphan.tab_id);
-      if (tabId) await this.runner.run(["tab", "close", tabId]);
-    }
+    // Never close or reuse a same-named process the user may have started.
     return;
   }
   async findConcierge(existing?: HerdrReference): Promise<HerdrReference | undefined> {
@@ -268,11 +268,13 @@ export class HerdrClient {
         );
         const pane = current.result?.pane ?? current.pane;
         if (pane?.pane_id === existing.paneId) {
-          if (existing.transport === "pane" && (await this.foreground(existing.paneId)).length)
-            throw new Error("自定义 Agent 的现场仍有其他程序运行。请打开 Herdr 检查，避免重复启动或向错误程序发送任务。");
-          workspaceId = existing.workspaceId;
-          tabId = existing.tabId;
-          paneId = existing.paneId;
+          // A closed concierge can leave its tab and shell behind. Reuse only
+          // that empty shell pane; never replace a manual agent in the same pane.
+          if ((await this.foreground(existing.paneId)).length === 0) {
+            workspaceId = existing.workspaceId;
+            tabId = existing.tabId;
+            paneId = existing.paneId;
+          }
         }
       } catch (error) {
         if (!/not_found|invalid_pane|unknown_pane/.test(String(error)))
@@ -357,6 +359,11 @@ export class HerdrClient {
       "--timeout",
       "180000",
     ], 190_000);
+    const running = await this.foreground(paneId).catch(() => []);
+    if (running[0]) {
+      reference.processId = running[0].pid;
+      await onReference?.(reference);
+    }
     return reference;
   }
   async notifyGoal(

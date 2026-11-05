@@ -5,6 +5,7 @@ import {
   ArrowRight,
   ArrowUpRight,
   Bell,
+  Bot,
   Check,
   ChevronRight,
   CircleAlert,
@@ -361,6 +362,7 @@ function App() {
     [pickingWorkspace, setPickingWorkspace] = useState(false),
     [herdr, setHerdr] = useState<any>(),
     [cli, setCli] = useState<any>(),
+    [skills, setSkills] = useState<any>(),
     [webhook, setWebhook] = useState<WebhookSettings>({
       enabled: false,
       configured: false,
@@ -388,11 +390,12 @@ function App() {
   }
   const goal = state.goals.find((item) => item.id === goalId),
     project = state.projects.find((item) => item.id === projectId),
-    hasConciergeScene = Boolean(state.concierge.tabId || state.concierge.agent),
+    hasConciergeReference = Boolean(state.concierge.tabId || state.concierge.agent),
+    conciergeAvailable = state.concierge.status === "ready" && state.concierge.live?.reachable !== false,
     conciergeLive = state.concierge.status === "ready" ? state.concierge.live?.state : undefined,
     conciergeStatus = state.concierge.status === "ready"
       ? conciergeLive ? conciergeLiveLabel[conciergeLive] : "管家在线"
-      : "管家待准备";
+      : state.concierge.status === "error" ? "管家需要恢复" : "管家已离线";
   const attention = attentionGoals(state.goals),
     waiting = state.goals.filter(
       (item) => item.status === "waiting" && !attention.includes(item),
@@ -453,6 +456,7 @@ function App() {
     if (page === "settings") {
       void api.herdrStatus().then(setHerdr).catch(showError);
       void api.cliStatus().then(setCli).catch(showError);
+      void api.skillsStatus().then(setSkills).catch(showError);
       void api.agentChoices().then(setAgentOptions).catch(showError);
       void api.webhookSettings().then(setWebhook).catch(showError);
     }
@@ -591,13 +595,15 @@ function App() {
           </div>
         </div>
         <button
-          className="workspace-switch"
+          className={`workspace-switch ${page === "home" && !projectId ? "active" : ""}`}
           aria-label="我的工作台"
+          aria-current={page === "home" && !projectId ? "page" : undefined}
           title="查看所有项目和个人事项"
           onClick={() => {
             setPage("home");
             setProjectId("");
             setModal("");
+            document.querySelector("main")?.scrollTo({ top: 0, behavior: "smooth" });
           }}
         >
           <span className="workspace-icon" aria-hidden="true">
@@ -605,7 +611,11 @@ function App() {
           </span>
           <span className="workspace-copy">
             <strong>{state.name}</strong>
-            <small>所有项目与个人事项</small>
+            <small>
+              {page === "home" && !projectId
+                ? "当前：注意力总览"
+                : "所有项目与个人事项"}
+            </small>
           </span>
           <ChevronRight size={14} />
         </button>
@@ -680,7 +690,7 @@ function App() {
           <p>你负责方向，管家负责条理。</p>
           <button disabled={!workspace || busy} aria-label="找管家" onClick={() => void openScene()}>
             <SquareTerminal size={15} />
-            <span>{busy ? "正在处理…" : hasConciergeScene ? "回到现场" : "找管家"}</span>
+            <span>{busy ? "正在处理…" : conciergeAvailable ? "回到现场" : hasConciergeReference ? "恢复管家" : "找管家"}</span>
             <ArrowUpRight size={14} />
           </button>
         </div>
@@ -990,6 +1000,7 @@ function App() {
               state={state}
               herdr={herdr}
               cli={cli}
+              skills={skills}
               agentOptions={agentOptions}
               webhook={webhook}
               saveAgents={async (preferences: AgentPreferences) => {
@@ -1010,6 +1021,13 @@ function App() {
                   if (action === "cli") {
                     const result = await api.installCli();
                     notify(result.output);
+                  }
+                  if (action === "skills") {
+                    const result = await api.installSkills();
+                    setSkills(result.status);
+                    notify(result.errors.length
+                      ? `Skills 已更新；${result.errors.length} 个目录因已有同名技能而跳过。`
+                      : "Crewvane Skills 已安装到检测到的 Agent。");
                   }
                   if (action === "concierge") await api.prepareConcierge();
                   setHerdr(await api.herdrStatus());
@@ -1512,6 +1530,7 @@ function Settings({
   state,
   herdr,
   cli,
+  skills,
   theme,
   setTheme,
   onAction,
@@ -1588,6 +1607,47 @@ function Settings({
         >
           {cli?.installed ? "重新安装" : "安装到 ~/.local/bin"}
         </button>
+      </section>
+      <section className="setting">
+        <div>
+          <Bot />
+          <span>
+            <h3>让外部 Agent 会使用 Crewvane</h3>
+            <p>安装随应用打包的 Crewvane Skill。Codex、Claude Code、Cursor 或其他读取通用 Agent Skills 目录的工具，可以直接提交目标、查看目标并追加说明。</p>
+            {skills?.targets?.length ? (
+              <div className="skill-targets">
+                {skills.targets.map((target: any) => (
+                  <small
+                    key={target.id}
+                    className={target.phase === "conflict" ? "conflict" : target.phase}
+                    title={target.path}
+                  >
+                    {target.label}
+                    <i />
+                    {target.phase === "installed" ? "已安装"
+                      : target.phase === "outdated" ? `可更新 ${target.managedVersion ?? ""}`
+                        : target.phase === "conflict" ? "已有同名 Skill，已保护"
+                          : "未安装"}
+                  </small>
+                ))}
+              </div>
+            ) : <small className="setting-progress">正在检测 Agent Skills 目录…</small>}
+          </span>
+        </div>
+        <div>
+          <span className="setting-count">
+            {skills ? `${skills.installed}/${skills.available} 已就绪` : ""}
+          </span>
+          <button
+            className="secondary"
+            disabled={busy}
+            onClick={() => void onAction("skills")}
+          >
+            {skills?.targets?.length && skills.installed === skills.available
+              ? "重新安装 Skills"
+              : "安装 / 更新 Skills"}
+          </button>
+        </div>
       </section>
       <section className="setting">
         <div>

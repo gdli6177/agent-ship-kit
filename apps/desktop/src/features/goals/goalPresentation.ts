@@ -46,6 +46,25 @@ const contentKinds = new Set<Activity["kind"]>([
   "resolved",
 ]);
 
+export const isGoalConversationActivity = (activity: Activity) =>
+  contentKinds.has(activity.kind);
+
+export function goalConversationActivities(goal: Goal, excludeIds: string[] = []) {
+  const excluded = new Set(excludeIds);
+  return [...goal.activities]
+    .filter(
+      (activity) =>
+        isGoalConversationActivity(activity) && !excluded.has(activity.id),
+    )
+    .sort((a, b) => Date.parse(b.at) - Date.parse(a.at));
+}
+
+export function goalSystemActivities(goal: Goal) {
+  return [...goal.activities]
+    .filter((activity) => !isGoalConversationActivity(activity))
+    .sort((a, b) => Date.parse(b.at) - Date.parse(a.at));
+}
+
 export interface GoalPresentation {
   tone: GoalTone;
   label: string;
@@ -57,6 +76,8 @@ export interface GoalPresentation {
   latestAttachments: GoalAttachment[];
   latestAgentReply?: Activity;
   latestAgentReplyAttachments: GoalAttachment[];
+  contextActivity?: Activity;
+  contextAttachments: GoalAttachment[];
   ended: boolean;
   needsDecision: boolean;
   needsIntervention: boolean;
@@ -86,6 +107,14 @@ export function presentGoal(goal: Goal, state: WorkspaceState): GoalPresentation
       !activity.actor.startsWith("你") &&
       !["系统", "巡检"].includes(activity.actor));
   const latestAgentReplyAttachments = attachmentsFor(latestAgentReply);
+  const contextActivity = [...goal.activities]
+    .reverse()
+    .find((activity) =>
+      isGoalConversationActivity(activity) &&
+      !activity.actor.startsWith("你") &&
+      !["系统", "巡检"].includes(activity.actor) &&
+      !["decision", "delivery", "accepted", "rework", "dropped", "resolved"].includes(activity.kind));
+  const contextAttachments = attachmentsFor(contextActivity);
 
   let tone: GoalTone = "running";
   let label = "管家处理中";
@@ -160,6 +189,8 @@ export function presentGoal(goal: Goal, state: WorkspaceState): GoalPresentation
     latestAttachments,
     latestAgentReply,
     latestAgentReplyAttachments,
+    contextActivity,
+    contextAttachments,
     ended,
     needsDecision,
     needsIntervention,
