@@ -592,6 +592,7 @@ app.whenReady().then(async () => {
     process.platform,
     process.arch,
     app.isPackaged ? join(process.resourcesPath, "herdr") : undefined,
+    process.env.GITHUB_TOKEN?.trim() || process.env.GH_TOKEN?.trim() || undefined,
   );
   if (process.env.CREWVANE_TEST_ISOLATE_TOOLS === "1") herdrInstallation.disableBundledForTest();
   const integrationEnvironment = process.env.CREWVANE_TEST_HOME ? {

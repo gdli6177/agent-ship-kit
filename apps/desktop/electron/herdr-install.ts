@@ -27,7 +27,7 @@ export class HerdrInstallation {
     readonly emit: (status: HerdrStatus) => void,
     readonly fetcher: typeof fetch = fetch,
     readonly platform = process.platform, readonly arch = process.arch,
-    private bundledPath?: string) {}
+    private bundledPath?: string, private readonly githubToken?: string) {}
   disableBundledForTest() {
     // Isolated UI tests must not silently reuse the packaged production Herdr.
     this.bundledPath = undefined;
@@ -77,6 +77,7 @@ export class HerdrInstallation {
         Accept: "application/vnd.github+json",
         "User-Agent": "Crewvane",
         "X-GitHub-Api-Version": "2022-11-28",
+        ...(this.githubToken ? { Authorization: `Bearer ${this.githubToken}` } : {}),
       },
     });
     if (!response.ok) throw new Error(`版本检查失败（HTTP ${response.status}）`);
@@ -132,6 +133,7 @@ export class HerdrInstallation {
           Accept: "application/octet-stream",
           "User-Agent": "Crewvane",
           "X-GitHub-Api-Version": "2022-11-28",
+          ...(this.githubToken ? { Authorization: `Bearer ${this.githubToken}` } : {}),
         },
       });
       if (!response.ok) throw new Error(`下载失败（HTTP ${response.status}）`);

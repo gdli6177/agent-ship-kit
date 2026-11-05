@@ -53,6 +53,38 @@ test("missing Herdr installs a verified latest binary without Homebrew and concu
   await install.ensure();
   assert.equal(calls.length, 2, "no second download/check during cached readiness");
 }));
+test("GitHub authentication is attached to release discovery and asset download", () => fixture(async ({ tools, path }) => {
+  const calls: Array<{ url: string; authorization: string | null }> = [];
+  const binaryBytes = binary("0.9.5");
+  const fetcher = (async (input: string, init?: RequestInit) => {
+    calls.push({
+      url: input,
+      authorization: new Headers(init?.headers).get("authorization"),
+    });
+    if (input.endsWith("/releases/latest")) return Response.json({
+      tag_name: "v0.9.5",
+      assets: [{
+        name: "herdr-macos-aarch64",
+        url: "https://api.github.com/repos/herdrdev/herdr/releases/assets/123",
+        browser_download_url: "https://github.com/herdrdev/herdr/releases/download/v0.9.5/herdr-macos-aarch64",
+        digest: `sha256:${createHash("sha256").update(binaryBytes).digest("hex")}`,
+      }],
+    });
+    return new Response(binaryBytes);
+  }) as typeof fetch;
+  const result = await new HerdrInstallation(
+    tools,
+    path,
+    () => {},
+    fetcher,
+    "darwin",
+    "arm64",
+    undefined,
+    "test-token",
+  ).ensure();
+  assert.equal(result.version, "0.9.5");
+  assert.deepEqual(calls.map(call => call.authorization), ["Bearer test-token", "Bearer test-token"]);
+}));
 test("an already installed latest or newer CLI is reused, invalid candidates are skipped", () => fixture(async ({ home, tools, path }) => {
   await writeFile(path, "#!/bin/sh\nexit 1\n", { mode: 0o700 });
   await mkdir(join(home, ".local/bin"), { recursive: true });

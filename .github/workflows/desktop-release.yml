@@ -37,7 +37,13 @@ jobs:
           GITHUB_TOKEN: ${{ github.token }}
       - run: pnpm test:desktop
       - run: pnpm test:installers
-      - run: pnpm test:onboarding
+      - name: Run packaged-app onboarding with authenticated Herdr download
+        run: pnpm test:onboarding
+        env:
+          # The packaged app performs the same official release discovery a
+          # user sees. Authenticate it so hosted-runner IP quotas cannot turn a
+          # product regression test into a GitHub 403.
+          GITHUB_TOKEN: ${{ github.token }}
       - uses: actions/upload-artifact@v4
         with:
           name: crewvane-macOS-arm64
