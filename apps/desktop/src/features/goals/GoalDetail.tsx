@@ -8,26 +8,51 @@ import {
   Clock3,
   FileText,
   ImagePlus,
-  MessageCircle,
   Sparkles,
   SquareTerminal,
   UserRound,
   X,
 } from "lucide-react";
 import type {
+  Activity,
   Goal,
+  GoalAttachment,
   WorkspaceState,
 } from "../../../../../packages/core/src/types.js";
 import { GoalActionDock } from "./GoalActionDock.js";
 import { GoalAttachments } from "./GoalAttachments.js";
 import { GoalHistory } from "./GoalActivity.js";
 import type { GoalReplyMode } from "./GoalReplyComposer.js";
-import {
-  activityKindLabel,
-  presentGoal,
-  time,
-} from "./goalPresentation.js";
+import { presentGoal, time } from "./goalPresentation.js";
 import type { GoalDetailService } from "./goalService.js";
+
+function ContextAttachments({
+  goal,
+  activity,
+  attachments,
+  service,
+}: {
+  goal: Goal;
+  activity?: Activity;
+  attachments: GoalAttachment[];
+  service: GoalDetailService;
+}) {
+  if (!activity || !attachments.length) return null;
+  return (
+    <div className="context-attachments">
+      {attachments.map((attachment) => (
+        <button
+          type="button"
+          key={attachment.id}
+          onClick={() => void service.openAttachment(goal.id, attachment.id)}
+        >
+          <ImagePlus size={13} />
+          {attachment.name}
+        </button>
+      ))}
+    </div>
+  );
+}
 
 export function GoalDetail({
   goal,
@@ -57,14 +82,36 @@ export function GoalDetail({
   const [replyMode, setReplyMode] = useState<GoalReplyMode | null>(null);
   const [descriptionOpen, setDescriptionOpen] = useState(false);
   const view = presentGoal(goal, state);
-  const summary = view.latestAgentReply ?? view.latest;
-  const summaryIsAgent = Boolean(view.latestAgentReply);
-  const summaryAttachments = view.latestAgentReply
-    ? view.latestAgentReplyAttachments
-    : view.latestAttachments;
-  const summaryIds = summary ? [summary.id] : [];
-  const descriptionChanged = goal.description.trim() !== (summary?.text ?? "").trim();
-  const descriptionCanCollapse = goal.description.trim().length > 260;
+  const descriptionCanCollapse = goal.description.trim().length > 240;
+  const focusTitle = view.needsDecision
+    ? goal.attention?.summary || goal.next
+    : goal.status === "review"
+      ? "检查成果与证据后完成验收"
+      : view.dueFollowUp
+        ? goal.waitingFor
+          ? `确认 ${goal.waitingFor} 是否已有结果`
+          : "确认等待事项是否已有结果"
+        : view.needsIntervention || view.dispatchFailed
+          ? goal.attention?.summary || goal.next
+          : view.brief;
+  const showContext =
+    !!view.contextActivity &&
+    !view.needsIntervention &&
+    !view.dispatchFailed &&
+    goal.status !== "review";
+  const runtimeError =
+    goal.dispatch?.status === "failed"
+      ? goal.dispatch.detail
+      : goal.watchdog?.lastError;
+  const deliveryActivityId = goal.delivery
+    ? [...goal.activities]
+        .reverse()
+        .find((activity) => activity.kind === "delivery")?.id
+    : undefined;
+  const conversationExcludeIds = [
+    ...(showContext ? [view.contextActivity!.id] : []),
+    ...(deliveryActivityId ? [deliveryActivityId] : []),
+  ];
 
   return (
     <Dialog.Root
@@ -90,16 +137,20 @@ export function GoalDetail({
               </p>
             </div>
             <div className="goal-detail-header-actions">
-              {goal.herdr && !view.ended && (
+              {!view.ended && (
                 <button
                   type="button"
                   className="goal-scene-button"
                   disabled={busy}
-                  title={`打开 ${goal.owner} 的 Herdr 工作现场`}
+                  title={
+                    goal.herdr
+                      ? `打开 ${goal.owner} 的 Herdr 工作现场`
+                      : "打开当前工作区的管家现场"
+                  }
                   onClick={() => void service.openHerdr(goal.id)}
                 >
                   <SquareTerminal size={15} />
-                  <span>回到现场</span>
+                  <span>{goal.herdr ? "回到现场" : "找管家"}</span>
                 </button>
               )}
               <span className={`goal-state-pill ${view.tone}`}>
@@ -115,91 +166,95 @@ export function GoalDetail({
             目标详情：{goal.title}
           </Dialog.Title>
           <Dialog.Description className="visually-hidden">
-            当前目标原文、状态、附件、历史操作和与你管家的消息记录。
+            当前目标结论、待办、交付证据、对话记录、附件和状态操作。
           </Dialog.Description>
-          <div className="goal-detail-scroll">
+
+          <div className="goal-detail-body">
             <article className="goal-detail-content">
               <header className="goal-detail-title">
                 <h2>{goal.title}</h2>
                 <div className="goal-detail-meta">
-                  <span>{goal.owner}</span>
                   <span>
-                    {goal.live?.state === "blocked"
-                      ? "现场阻塞"
-                      : goal.live?.state === "working"
-                        ? "负责人工作中"
-                        : goal.live?.reachable === false
-                          ? "现场不可达"
-                          : goal.status === "review"
-                            ? `第 ${goal.reviewRounds ?? 1} 轮审查`
-                            : "状态由 Crewvane 维护"}
-                  </span>
-                  <time>{time(goal.updatedAt)} 更新</time>
-                </div>
-              </header>
-              <section className={`goal-brief ${view.tone}`} aria-label="当前情况与下一步">
-                <div className="goal-brief-status">
-                  <small>现在发生了什么</small>
-                  <p>{view.brief}</p>
-                  <span>{view.detail}</span>
-                </div>
-                <div className="goal-brief-next">
-                  <small>{view.nextLabel}</small>
-                  <p>{goal.next || "暂无记录，等待管家更新。"}</p>
-                </div>
-                <div className="goal-next-context">
-                  <span>
-                    <UserRound size={13} />
-                    负责人 · {goal.owner}
+                    <UserRound size={12} />
+                    {goal.owner}
                   </span>
                   {goal.waitingFor && (
                     <span>
-                      <Clock3 size={13} />
-                      等待 · {goal.waitingFor}
+                      <Clock3 size={12} />
+                      等待 {goal.waitingFor}
                     </span>
                   )}
                   {goal.remindAt && (
                     <span>
-                      <Clock3 size={13} />
+                      <Clock3 size={12} />
                       {time(goal.remindAt)} 跟进
                     </span>
                   )}
+                  {goal.status === "review" && (
+                    <span>第 {goal.reviewRounds ?? 1} 轮审查</span>
+                  )}
+                  <time>{time(goal.updatedAt)} 更新</time>
+                </div>
+              </header>
+
+              <section
+                className={`goal-focus ${view.tone}`}
+                aria-label="现在需要你关注的事"
+              >
+                <div className="goal-focus-copy">
+                  <span>{view.label}</span>
+                  <h3>{focusTitle}</h3>
+                  <p>{view.detail}</p>
+                </div>
+                <div className="goal-focus-next">
+                  <small>{view.nextLabel}</small>
+                  <p>{goal.next || "暂无记录，等待管家更新。"}</p>
                 </div>
               </section>
-              {descriptionChanged && !!goal.description.trim() && (
-                <section className="goal-original">
+
+              {showContext && (
+                <section className="goal-handoff" aria-label="最近一次交接">
                   <header>
                     <span>
-                      <FileText size={14} />
-                      目标说明
+                      <Bot size={14} />
                     </span>
-                    {descriptionCanCollapse && (
-                      <button
-                        type="button"
-                        onClick={() => setDescriptionOpen((open) => !open)}
-                      >
-                        {descriptionOpen ? "收起" : "展开全文"}
-                      </button>
-                    )}
+                    <div>
+                      <strong>{view.contextActivity!.actor}</strong>
+                      <small>
+                        最近交接 · {time(view.contextActivity!.at)}
+                      </small>
+                    </div>
                   </header>
-                  <p className={descriptionOpen ? "" : "clamped"}>{goal.description}</p>
+                  <p>{view.contextActivity!.text}</p>
+                  <ContextAttachments
+                    goal={goal}
+                    activity={view.contextActivity}
+                    attachments={view.contextAttachments}
+                    service={service}
+                  />
                 </section>
               )}
+
               {goal.delivery && (
-                <section className="delivery goal-delivery">
+                <section className="delivery goal-delivery" aria-label="交付与证据">
                   <div className="section-heading">
-                    <h3>交付与证据</h3>
+                    <div>
+                      <small className="goal-section-kicker">交付</small>
+                      <h3>成果与证据</h3>
+                    </div>
                     <small>
                       {time(goal.delivery.submittedAt)} ·{" "}
                       {goal.delivery.submittedBy}
                     </small>
                   </div>
-                  <p>{goal.delivery.summary}</p>
-                  {goal.delivery.location && goal.delivery.location !== goal.delivery.url && (
-                    <code>{goal.delivery.location}</code>
-                  )}
+                  <p className="delivery-summary">{goal.delivery.summary}</p>
+                  {goal.delivery.location &&
+                    goal.delivery.location !== goal.delivery.url && (
+                      <code>{goal.delivery.location}</code>
+                    )}
                   {goal.delivery.url && (
                     <button
+                      type="button"
                       className="text-link"
                       onClick={() => void service.openUrl(goal.delivery!.url!)}
                     >
@@ -208,57 +263,45 @@ export function GoalDetail({
                     </button>
                   )}
                   <div className="checks">
-                    {goal.delivery.checks.map((check, index) => (
-                      <div key={`${check.name}-${index}`}>
-                        <Check size={14} />
-                        <strong>{check.name}</strong>
-                        <code>{check.command}</code>
-                        {check.note && <span>{check.note}</span>}
-                      </div>
-                    ))}
+                    {goal.delivery.checks.length ? (
+                      goal.delivery.checks.map((check, index) => (
+                        <div key={`${check.name}-${index}`}>
+                          <Check size={14} />
+                          <div>
+                            <strong>{check.name}</strong>
+                            <code>{check.command}</code>
+                            {check.note && <span>{check.note}</span>}
+                          </div>
+                          <small className={check.result}>{check.result}</small>
+                        </div>
+                      ))
+                    ) : (
+                      <p className="checks-empty">没有附加检查记录。</p>
+                    )}
                   </div>
                 </section>
               )}
-              <section
-                className="goal-latest-message"
-                aria-label="最新消息原文"
-              >
-                <div className="goal-message-meta">
+
+              <section className="goal-original">
+                <header>
                   <span>
-                    {summary?.actor.startsWith("你") ? (
-                      <MessageCircle size={15} />
-                    ) : (
-                      <Bot size={15} />
-                    )}
+                    <FileText size={14} />
+                    目标说明
                   </span>
-                  <strong>
-                    {summaryIsAgent ? "最近交接" : "最近记录"}
-                    {summary ? ` · ${summary.actor}` : ""}
-                  </strong>
-                  <small>
-                    {summary
-                      ? `${activityKindLabel[summary.kind]} · ${time(summary.at)}`
-                      : "创建目标时"}
-                  </small>
-                </div>
-                <div className="goal-raw-message">
-                  {summary?.text || goal.description}
-                </div>
-                {!!summaryAttachments.length && (
-                  <div className="latest-message-attachments">
-                    {summaryAttachments.map((attachment) => (
-                      <button
-                        type="button"
-                        key={attachment.id}
-                        onClick={() => void service.openAttachment(goal.id, attachment.id)}
-                      >
-                        <ImagePlus size={13} />
-                        {attachment.name}
-                      </button>
-                    ))}
-                  </div>
-                )}
+                  {descriptionCanCollapse && (
+                    <button
+                      type="button"
+                      onClick={() => setDescriptionOpen((open) => !open)}
+                    >
+                      {descriptionOpen ? "收起" : "展开全文"}
+                    </button>
+                  )}
+                </header>
+                <p className={descriptionOpen ? "" : "clamped"}>
+                  {goal.description || "创建目标时没有附加说明。"}
+                </p>
               </section>
+
               {!!goal.attachments?.length && (
                 <GoalAttachments
                   goalId={goal.id}
@@ -267,40 +310,26 @@ export function GoalDetail({
                   remove={removeAttachment}
                 />
               )}
-              {goal.dispatch && (
-                <p
-                  className={`dispatch-note ${goal.dispatch.status}`}
-                  role="status"
-                >
-                  {goal.dispatch.status === "pending"
-                    ? "消息正在交给管家。"
-                    : goal.dispatch.status === "failed"
-                      ? goal.dispatch.detail
-                      : `已送达管家 · ${time(goal.dispatch.at)}`}
-                </p>
+
+              {runtimeError && (
+                <details className="goal-runtime-note">
+                  <summary>
+                    运行时连接有问题
+                    <ChevronDown size={14} />
+                  </summary>
+                  <p>{runtimeError}</p>
+                </details>
               )}
-              {goal.watchdog && !goal.attention && (
-                <p className="dispatch-note">
-                  {goal.watchdog.contactedAt
-                    ? "管家正在核查这个目标的现场。"
-                    : "巡检正在确认下一步。"}
-                </p>
-              )}
-              <GoalHistory
-                goal={goal}
-                latestIds={summaryIds}
-                service={service}
-              />
+
               <details className="manual-tools goal-detail-advanced">
                 <summary>
-                  更多操作
+                  目标管理
                   <ChevronDown size={14} />
                 </summary>
-                <p>
-                  这些操作用于人工接管或纠正记录。正常协调请直接回复上方管家。
-                </p>
+                <p>用于人工接管、纠正记录或结束目标。日常推进优先使用底部操作。</p>
                 <div className="modal-actions">
                   <button
+                    type="button"
                     className="secondary"
                     disabled={busy}
                     onClick={edit}
@@ -309,6 +338,7 @@ export function GoalDetail({
                   </button>
                   {goal.status !== "review" && (
                     <button
+                      type="button"
                       className="secondary"
                       disabled={busy}
                       onClick={submit}
@@ -318,6 +348,7 @@ export function GoalDetail({
                   )}
                   {!view.ended && goal.mode === "concierge" && (
                     <button
+                      type="button"
                       className="secondary"
                       disabled={busy}
                       onClick={async () => {
@@ -337,6 +368,7 @@ export function GoalDetail({
                   )}
                   {!view.ended && goal.mode === "manual" && (
                     <button
+                      type="button"
                       className="secondary"
                       disabled={busy}
                       onClick={async () => {
@@ -356,6 +388,7 @@ export function GoalDetail({
                   )}
                   {view.ended ? (
                     <button
+                      type="button"
                       className="secondary danger-action"
                       disabled={busy}
                       onClick={deleteGoal}
@@ -364,6 +397,7 @@ export function GoalDetail({
                     </button>
                   ) : (
                     <button
+                      type="button"
                       className="secondary danger-action"
                       disabled={busy}
                       onClick={async () => {
@@ -387,7 +421,16 @@ export function GoalDetail({
                 </div>
               </details>
             </article>
+
+            <aside className="goal-detail-context">
+              <GoalHistory
+                goal={goal}
+                latestIds={conversationExcludeIds}
+                service={service}
+              />
+            </aside>
           </div>
+
           <footer className={`goal-action-dock ${view.tone}`}>
             <GoalActionDock
               goal={goal}

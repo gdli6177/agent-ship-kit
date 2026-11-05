@@ -7,7 +7,11 @@ import {
   WorkspaceService,
   type Goal,
 } from "../../../packages/core/src/index.ts";
-import { presentGoal } from "../src/features/goals/goalPresentation.ts";
+import {
+  goalConversationActivities,
+  goalSystemActivities,
+  presentGoal,
+} from "../src/features/goals/goalPresentation.ts";
 
 async function fixture() {
   return mkdtemp(join(tmpdir(), "crewvane-goal-presentation-"));
@@ -122,4 +126,61 @@ test("a manual active goal is presented as owned by the human", async () => {
   assert.equal(current.mode, "manual");
   assert.equal(view.label, "由你处理");
   assert.match(view.detail, /提交成果/);
+});
+
+test("decision context uses the latest agent handoff while keeping transport events out of conversation", async () => {
+  const root = await fixture();
+  const service = new WorkspaceService(root);
+  const goal = await service.execute({
+    type: "goal.create",
+    input: {
+      title: "选择实现方向",
+      projectId: "personal",
+      mode: "concierge",
+    },
+  }) as Goal;
+  await service.execute({
+    type: "goal.progress",
+    goalId: goal.id,
+    summary: "负责人完成了两种方案的对比，并建议先保品牌辨识度。",
+    actor: "负责人",
+  });
+  await service.execute({
+    type: "goal.decide",
+    goalId: goal.id,
+    question: "先保品牌辨识度，还是先直白解释功能？",
+    actor: "管家",
+  });
+  await service.execute({
+    type: "goal.dispatch",
+    goalId: goal.id,
+    status: "failed",
+    detail: "运行时连接失败",
+  });
+
+  const state = await service.read();
+  const current = state.goals.find((item) => item.id === goal.id)!;
+  const view = presentGoal(current, state);
+  const conversation = goalConversationActivities(current);
+  const system = goalSystemActivities(current);
+  const historyWithoutContext = goalConversationActivities(current, [
+    view.contextActivity!.id,
+  ]);
+  assert.equal(view.needsDecision, true);
+  assert.match(view.contextActivity?.text ?? "", /两种方案的对比/);
+  assert.equal(conversation[0]?.kind, "decision");
+  assert.ok(
+    historyWithoutContext.every(
+      (activity) => activity.id !== view.contextActivity!.id,
+    ),
+  );
+  assert.ok(conversation.every((activity) => activity.kind !== "session"));
+  assert.ok(system.some((activity) => activity.kind === "session"));
+  assert.ok(
+    conversation.every(
+      (activity, index) =>
+        index === 0 ||
+        Date.parse(conversation[index - 1]!.at) >= Date.parse(activity.at),
+    ),
+  );
 });

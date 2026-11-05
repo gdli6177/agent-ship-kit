@@ -1,5 +1,5 @@
-import { useState } from "react";
 import {
+  ChevronDown,
   ImagePlus,
   MessageCircle,
 } from "lucide-react";
@@ -9,6 +9,8 @@ import type {
 } from "../../../../../packages/core/src/types.js";
 import {
   activityKindLabel,
+  goalConversationActivities,
+  goalSystemActivities,
   time,
 } from "./goalPresentation.js";
 import type { GoalDetailService } from "./goalService.js";
@@ -16,14 +18,16 @@ import type { GoalDetailService } from "./goalService.js";
 export function GoalActivityFeed({
   goal,
   excludeIds = [],
+  activities: suppliedActivities,
   service,
 }: {
   goal: Goal;
   excludeIds?: string[];
+  activities?: Goal["activities"];
   service: GoalDetailService;
 }) {
   const excluded = new Set(excludeIds);
-  const activities = [...goal.activities]
+  const activities = [...(suppliedActivities ?? goal.activities)]
     .filter((item) => !excluded.has(item.id))
     .sort((a, b) => Date.parse(b.at) - Date.parse(a.at));
   return (
@@ -81,20 +85,36 @@ export function GoalHistory({
   latestIds?: string[];
   service: GoalDetailService;
 }) {
-  const [open, setOpen] = useState(true);
-  const count = goal.activities.filter(activity => !latestIds.includes(activity.id)).length;
+  const conversation = goalConversationActivities(goal, latestIds);
+  const system = goalSystemActivities(goal);
   return (
-    <details
-      className="goal-history"
-      open={open}
-      onToggle={event => setOpen(event.currentTarget.open)}
-    >
-      <summary>
+    <section className="goal-history" aria-label="对话与交接">
+      <header>
         <MessageCircle size={14} />
-        <span>消息与交接记录</span>
-        <small>{count} 条 · 最新在上</small>
-      </summary>
-      <GoalActivityFeed goal={goal} excludeIds={latestIds} service={service} />
-    </details>
+        <div>
+          <strong>对话与交接</strong>
+          <small>{conversation.length} 条 · 最新在上</small>
+        </div>
+      </header>
+      <GoalActivityFeed
+        goal={goal}
+        excludeIds={latestIds}
+        activities={conversation}
+        service={service}
+      />
+      {system.length > 0 && (
+        <details className="goal-system-events">
+          <summary>
+            系统记录 {system.length} 条
+            <ChevronDown size={13} />
+          </summary>
+          <GoalActivityFeed
+            goal={goal}
+            activities={system}
+            service={service}
+          />
+        </details>
+      )}
+    </section>
   );
 }
