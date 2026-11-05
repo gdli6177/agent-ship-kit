@@ -100,7 +100,7 @@ try {
   assert.ok(current.goals.some(goal => goal.title === "确认出行日期" && goal.attention?.kind === "decision"));
   await page.getByRole("button", { name: "隐藏终端", exact: true }).click();
   await page.getByText("交付样稿", { exact: true }).first().click();
-  await page.getByText("交付与证据", { exact: true }).waitFor();
+  await page.getByText("成果与证据", { exact: true }).waitFor();
   await page.screenshot({ path: join(trial, "actual-delivery.png") });
   await page.getByLabel("退回原因").fill("请负责人在 result.md 再加入 VERIFIED，并实际检查 READY 与 VERIFIED 均存在后重新提交。");
   await page.getByRole("button", { name: "退回修改", exact: true }).click();

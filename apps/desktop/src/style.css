@@ -1,5 +1,5 @@
 :root { font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "PingFang SC", sans-serif; color: #ecf0f8; background: #111520; font-synthesis: none; text-rendering: optimizeLegibility; -webkit-font-smoothing: antialiased; color-scheme: dark; --bg: #111520; --sidebar: #151a26; --surface: #1b2130; --surface-soft: #222a3a; --surface-hover: #252f40; --surface-raised: #1b2130; --text: #ecf0f8; --secondary: #b2bdcf; --muted: #8b98ae; --line: #2b3546; --accent: #a9b8ff; --accent-strong: #8398fc; --accent-soft: #29324f; --on-accent: #182039; --mint: #83e4c2; --mint-soft: #1f3938; --warm: #ebc894; --warm-soft: #3d342a; --danger: #eda5ad; --shadow: 0 24px 80px #05081266; --shadow-card: none; --fs-caption: 11px; --lh-caption: 16px; --fs-meta: 12px; --lh-meta: 18px; --fs-body: 13px; --lh-body: 20px; --fs-body-strong: 14px; --lh-body-strong: 21px; --fs-subtitle: 15px; --lh-subtitle: 22px; --fs-title: 20px; --lh-title: 28px; --fs-display: 30px; --lh-display: 38px; --fs-hero: 48px; --lh-hero: 56px; }
-:root[data-theme="light"] { color: #252e42; background: #f7f8fb; color-scheme: light; --bg: #f7f8fb; --sidebar: #f0f2f7; --surface: #fff; --surface-soft: #eef1f7; --surface-hover: #eaedf5; --surface-raised: #fff; --text: #252e42; --secondary: #4a5568; --muted: #626b79; --line: #ccd4e0; --accent: #4d61bb; --accent-strong: #435abb; --accent-soft: #e8ecfb; --on-accent: #fff; --mint: #24725e; --mint-soft: #e2f2eb; --warm: #8d5e27; --warm-soft: #f7eddf; --danger: #a94f5c; --shadow: 0 24px 80px #27324a22; --shadow-card: 0 1px 2px #1820390d, 0 10px 28px #1820390f; }
+:root[data-theme="light"] { color: #252e42; background: #f7f8fb; color-scheme: light; --bg: #f7f8fb; --sidebar: #f0f2f7; --surface: #fff; --surface-soft: #eef1f7; --surface-hover: #eaedf5; --surface-raised: #fff; --text: #252e42; --secondary: #4a5568; --muted: #626b79; --line: #ccd4e0; --accent: #4d61bb; --accent-strong: #435abb; --accent-soft: #e8ecfb; --on-accent: #fff; --mint: #24725e; --mint-soft: #e2f2eb; --warm: #8d5e27; --warm-soft: #f7eddf; --danger: #873b48; --shadow: 0 24px 80px #27324a22; --shadow-card: 0 1px 2px #1820390d, 0 10px 28px #1820390f; }
 * { box-sizing: border-box; }
 body { margin: 0; min-width: 900px; }
 .terminal-panel { position: fixed; z-index: 9; right: 18px; bottom: 18px; left: 254px; height: min(56vh, 560px); min-width: 480px; min-height: 260px; display: flex; flex-direction: column; padding: 0 10px 10px; border: 1px solid var(--line); border-radius: 13px; background: var(--surface); box-shadow: var(--shadow); overflow: hidden; }
@@ -69,6 +69,10 @@ button svg { vertical-align: middle; }
 .brand span { display: block; margin-top: 2px; color: var(--muted); font-size: var(--fs-caption); letter-spacing: 3px; }
 .workspace-switch { display: flex; align-items: center; gap: 10px; width: 100%; margin-top: 25px; padding: 11px 10px; border: 1px solid var(--line); border-radius: 10px; text-align: left; }
 .workspace-switch:hover { background: var(--surface); }
+.workspace-switch.active { border-color: color-mix(in srgb, var(--accent) 42%, var(--line)); background: color-mix(in srgb, var(--accent-soft) 62%, var(--sidebar)); }
+.workspace-switch > svg { transition: transform .16s ease, color .16s ease; }
+.workspace-switch.active > svg { color: var(--accent); transform: rotate(90deg); }
+.workspace-switch.active .workspace-icon { color: var(--accent); }
 .workspace-copy { flex: 1; min-width: 0; }
 .workspace-switch strong, .workspace-switch small { display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .workspace-switch strong { font-size: var(--fs-body); font-weight: 550; }
@@ -316,6 +320,7 @@ h1 em { color: var(--accent); font-style: normal; }
 .goal-focus.review::before { background: var(--mint); }
 .goal-focus.waiting::before { background: var(--warm); }
 .goal-focus.blocked::before { background: var(--danger); }
+.goal-focus.blocked .goal-focus-copy > span { color: var(--danger); }
 .goal-handoff { margin: 0 0 22px; padding: 16px 18px; border: 1px solid var(--line); border-radius: 12px; background: color-mix(in srgb, var(--accent-soft) 18%, var(--surface)); }
 .goal-handoff > header { display: flex; align-items: center; gap: 9px; }
 .goal-handoff > header > span { display: grid; place-items: center; width: 28px; height: 28px; border-radius: 8px; color: var(--accent); background: var(--accent-soft); }
@@ -358,7 +363,7 @@ h1 em { color: var(--accent); font-style: normal; }
 .goal-detail-advanced > summary svg { margin-left: auto; color: var(--muted); transition: transform .15s ease; }
 .goal-runtime-note { margin: 16px 0 0; border: 1px solid color-mix(in srgb, var(--warm) 28%, var(--line)); border-radius: 9px; background: color-mix(in srgb, var(--warm-soft) 36%, transparent); }
 .goal-runtime-note > summary { display: flex; align-items: center; gap: 7px; padding: 10px 12px; color: var(--warm); cursor: pointer; font-size: var(--fs-caption); list-style: none; }
-.goal-runtime-note > p { max-height: 130px; margin: 0; padding: 0 12px 11px; overflow: auto; color: var(--muted); font-family: ui-monospace, "SFMono-Regular", monospace; font-size: 10px; line-height: 1.55; overflow-wrap: anywhere; }
+.goal-runtime-note > p { max-height: 130px; margin: 0; padding: 0 12px 11px; overflow: auto; color: var(--muted); font-family: ui-monospace, "SFMono-Regular", monospace; font-size: var(--fs-caption); line-height: 1.55; overflow-wrap: anywhere; }
 .goal-inline-error { margin: 0; padding: 8px 10px; border-radius: 7px; color: var(--warm); background: var(--warm-soft); font-size: var(--fs-caption); line-height: 1.6; overflow-wrap: anywhere; }
 .goal-action-dock { max-height: min(250px, 34vh); padding: 14px 22px 16px; border-top: 1px solid var(--line); background: color-mix(in srgb, var(--surface) 96%, transparent); box-shadow: 0 -18px 44px #00000012; overflow-y: auto; }
 .goal-action-dock > * { width: 100%; }

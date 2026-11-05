@@ -162,6 +162,11 @@ try {
   await page.getByRole("button", { name: "我的工作台", exact: true }).click();
   await page.getByRole("heading", { name: "现在，可以安心了。" }).waitFor();
   assert.equal(await page.locator(".projects button.active").count(), 0);
+  assert.equal(
+    await page.getByRole("button", { name: "我的工作台", exact: true })
+      .getAttribute("aria-current"),
+    "page",
+  );
   await page
     .locator(".top-actions")
     .getByRole("button", { name: "新目标" })
@@ -263,27 +268,27 @@ try {
       actor: "负责人 alpha-owner",
     }), { id: goalId, index });
   }
-  await page.getByText("最近交接 · 负责人 alpha-owner", { exact: true }).waitFor();
-  await page.locator(".goal-raw-message").getByText(
+  await page.locator(".conversation-feed").getByText(
     "负责人具体答复：旧接口仍可只读调用，但新界面应改用 /v2/items，并保留两轮兼容期。",
     { exact: true },
   ).waitFor();
+  await page.locator(".goal-focus").getByText("联系管家失败", { exact: true }).waitFor();
   await page.locator(".goal-original").getByText(
     "桌面试用交付",
     { exact: true },
   ).waitFor();
-  assert.equal(await page.locator(".goal-history").getAttribute("open"), "");
+  await page.getByRole("region", { name: "对话与交接" }).waitFor();
   const historyText = await page.locator(".conversation-entry p").allInnerTexts();
   assert.ok(
     historyText.findIndex(text => text === "负责人过程记录 4") <
       historyText.findIndex(text => text === "负责人过程记录 3"),
     "message and handoff history must put newer records before older records",
   );
-  assert.ok(
-    !historyText.includes(
-      "负责人具体答复：旧接口仍可只读调用，但新界面应改用 /v2/items，并保留两轮兼容期。",
-    ),
-    "the latest handoff should appear in the summary instead of repeating in history",
+  assert.equal(
+    historyText.filter(text =>
+      text === "负责人具体答复：旧接口仍可只读调用，但新界面应改用 /v2/items，并保留两轮兼容期。").length,
+    1,
+    "the latest owner answer must appear once in the conversation",
   );
   assert.equal(
     await page.locator(".conversation-feed").getByText("请保留现有验收记录，不要扩大范围。", { exact: true }).count(),
@@ -341,7 +346,7 @@ try {
     },
   });
   await page.getByText("查看并验收").click();
-  await page.getByText("交付与证据").waitFor();
+  await page.getByText("成果与证据", { exact: true }).waitFor();
   await page.screenshot({ path: join(home, "review-dark.png") });
   await page.getByRole("button", { name: "退回修改", exact: true }).click();
   await page.getByLabel("退回说明", { exact: true }).fill("请补充桌面端的实际验收说明");
@@ -437,6 +442,47 @@ try {
   assert.equal(statusEvent.body.goal.status, "waiting");
   assert.equal(statusEvent.body.goal.waitingFor, "法务");
   assert.equal(statusEvent.headers.authorization, "Bearer desktop-smoke-token");
+  const deduplicatedReviewGoal = await service.execute({
+    type: "goal.create",
+    input: {
+      title: "企业微信单次验收提醒",
+      description: "验证目标进入待验收时只触发一次外部通知。",
+      projectId: "personal",
+      mode: "concierge",
+    },
+  });
+  await page.waitForTimeout(250);
+  await service.execute({
+    type: "goal.review",
+    goalId: deduplicatedReviewGoal.id,
+    actor: "负责人",
+    delivery: {
+      summary: "待验收结果已提交",
+      checks: [
+        { name: "交付已生成", command: "test -f result.txt", result: "passed" },
+      ],
+    },
+  });
+  for (let attempt = 0; attempt < 100; attempt += 1) {
+    if (webhookEvents.some(event =>
+      event.body.event === "attention.required" &&
+      event.body.goal?.id === deduplicatedReviewGoal.id)) break;
+    await page.waitForTimeout(100);
+  }
+  await page.waitForTimeout(800);
+  const reviewNotifications = webhookEvents.filter(event =>
+    event.body.goal?.id === deduplicatedReviewGoal.id &&
+    (event.body.event === "goal.status_changed" ||
+      event.body.event === "attention.required"));
+  assert.deepEqual(
+    reviewNotifications.map(event => event.body.event),
+    ["attention.required"],
+    "a goal entering review must send one attention notification, not a status notification as well",
+  );
+  assert.equal(
+    reviewNotifications[0]?.headers["x-crewvane-delivery"],
+    reviewNotifications[0]?.body.deliveryId,
+  );
   await page.screenshot({ path: join(home, "settings-dark.png") });
   await page.evaluate(() => {
     const main = document.querySelector("main");
@@ -566,7 +612,7 @@ try {
   let waitingState = (await service.read()).goals.find(item => item.id === waiting.id);
   assert.ok(Date.parse(waitingState.remindAt) > Date.now());
   assert.equal(waitingState.status, "waiting");
-  await page.getByRole("button", { name: "有结果了，继续推进", exact: true }).click();
+  await page.getByRole("button", { name: "有结果，继续推进", exact: true }).click();
   await page.getByLabel("最新结果与下一步", { exact: true }).fill("审批通过了，我亲自处理。");
   await page.getByRole("button", { name: "交给管家继续", exact: true }).click();
   await page.waitForFunction(async goalId => {
@@ -626,6 +672,25 @@ try {
   await page.getByRole("button", { name: "回到现场", exact: true }).waitFor();
   assert.equal(await page.getByRole("button", { name: "回到现场", exact: true }).count(), 1);
   await page.screenshot({ path: join(home, "goal-scene-entry.png"), animations: "disabled" });
+  await page.getByRole("button", { name: "关闭", exact: true }).click();
+  const droppable = await service.execute({
+    type: "goal.create",
+    input: {
+      title: "放弃交互验证",
+      projectId: "personal",
+      mode: "manual",
+    },
+  });
+  await page.getByText("放弃交互验证", { exact: true }).click();
+  await page.locator(".goal-detail-advanced").evaluate(element => { element.open = true; });
+  await page.getByRole("button", { name: "放弃目标", exact: true }).click();
+  await page.getByLabel("放弃原因", { exact: true }).fill("验证放弃操作不再依赖系统弹窗");
+  await page.getByRole("button", { name: "确认放弃", exact: true }).click();
+  await page.waitForFunction(async goalId => {
+    const state = await window.crewvane.command({ type: "snapshot" });
+    return state.goals.find(goal => goal.id === goalId)?.status === "dropped";
+  }, droppable.id);
+  await page.getByText("目标已放弃，记录仍可查看", { exact: true }).waitFor();
   await page.getByRole("button", { name: "关闭", exact: true }).click();
   const offline = await page.evaluate(() => window.crewvane.command({
     type: "goal.create",
@@ -749,6 +814,7 @@ try {
         "settings",
         "private Webhook settings and real attention delivery",
         "Webhook status subscriptions, automatic delivery test, external state change delivery, and Feishu/WeCom response validation",
+        "one review transition sends exactly one application-level Webhook request",
         "per-project ship policy from the desktop UI",
         "high-risk decision from the desktop UI and persisted ledger",
         "save Agent role preferences",
@@ -768,6 +834,7 @@ try {
         "6 theme/size UI audit combinations across 5 core screens",
         "dispatch failure is presented as a retryable concierge connection failure",
         "permanent deletion for completed goals",
+        "in-app goal abandonment with a recorded reason",
         "persistent owner scene entry is available from every active goal detail",
         "goal detail summarizes next action and latest agent reply while history opens newest-first",
         `three concurrent goals remain responsive (${Math.round(parallelPerformance.createMs)}ms, max long task ${Math.round(parallelPerformance.maxLongTaskMs)}ms)`,

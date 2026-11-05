@@ -257,7 +257,7 @@ try {
   await page.evaluate(id => window.crewvane.command({ type:"goal.wait", goalId:id, reason:"等 YR 审批", owner:"YR", remindAt:"2030-01-01T00:00:00Z" }), waiting.id);
   await page.getByRole("button", { name:"全部目标", exact:true }).click();
   await page.getByText("等待审批后继续", { exact:true }).click();
-  await page.getByRole("button", { name:"有结果了，继续推进", exact:true }).click();
+  await page.getByRole("button", { name:"有结果，继续推进", exact:true }).click();
   await page.getByLabel("最新结果与下一步").fill("YR 已批准，按原方案继续开发");
   await page.getByRole("button", { name:"交给管家继续", exact:true }).click();
   await expect.poll(async () => {
@@ -268,7 +268,7 @@ try {
   let waitingGoal = (await page.evaluate(() => window.crewvane.command({type:"snapshot"}))).goals.find(goal => goal.id === waiting.id);
   assert.equal(waitingGoal.status,"active"); assert.equal(waitingGoal.remindAt,undefined);
   await page.evaluate(id => window.crewvane.command({ type:"goal.wait", goalId:id, reason:"继续等 YR 审批", owner:"YR", remindAt:"2030-01-01T00:00:00Z" }), waiting.id);
-  await page.getByRole("button", { name:"请管家跟进", exact:true }).click();
+  await page.getByRole("button", { name:"让管家跟进", exact:true }).click();
   await expect.poll(async () => {
     const state = await page.evaluate(() => window.crewvane.command({type:"snapshot"}));
     return state.goals.find(goal => goal.id === waiting.id)?.dispatch?.status;
@@ -280,7 +280,7 @@ try {
   await page.getByRole("button", { name:"1 小时后提醒", exact:true }).click();
   waitingGoal = (await page.evaluate(() => window.crewvane.command({type:"snapshot"}))).goals.find(goal => goal.id === waiting.id);
   assert.ok(Date.parse(waitingGoal.remindAt) > Date.now());
-  await page.getByRole("button", { name:"有结果了，继续推进", exact:true }).click();
+  await page.getByRole("button", { name:"有结果，继续推进", exact:true }).click();
   await page.getByLabel("最新结果与下一步").fill("审批已确认，我自己收尾");
   await page.getByRole("button", { name:"交给管家继续", exact:true }).click();
   await expect.poll(async () => {

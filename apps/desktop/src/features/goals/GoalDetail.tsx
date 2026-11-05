@@ -400,20 +400,7 @@ export function GoalDetail({
                       type="button"
                       className="secondary danger-action"
                       disabled={busy}
-                      onClick={async () => {
-                        const note = window.prompt("为什么放弃这个目标？");
-                        if (!note?.trim()) return;
-                        try {
-                          await service.command({
-                            type: "goal.drop",
-                            goalId: goal.id,
-                            note,
-                          });
-                          notify("目标已放弃，记录仍可查看");
-                        } catch {
-                          // The application-level command surface reports the real error.
-                        }
-                      }}
+                      onClick={() => setReplyMode("drop")}
                     >
                       放弃目标
                     </button>

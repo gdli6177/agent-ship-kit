@@ -595,13 +595,15 @@ function App() {
           </div>
         </div>
         <button
-          className="workspace-switch"
+          className={`workspace-switch ${page === "home" && !projectId ? "active" : ""}`}
           aria-label="我的工作台"
+          aria-current={page === "home" && !projectId ? "page" : undefined}
           title="查看所有项目和个人事项"
           onClick={() => {
             setPage("home");
             setProjectId("");
             setModal("");
+            document.querySelector("main")?.scrollTo({ top: 0, behavior: "smooth" });
           }}
         >
           <span className="workspace-icon" aria-hidden="true">
@@ -609,7 +611,11 @@ function App() {
           </span>
           <span className="workspace-copy">
             <strong>{state.name}</strong>
-            <small>所有项目与个人事项</small>
+            <small>
+              {page === "home" && !projectId
+                ? "当前：注意力总览"
+                : "所有项目与个人事项"}
+            </small>
           </span>
           <ChevronRight size={14} />
         </button>
