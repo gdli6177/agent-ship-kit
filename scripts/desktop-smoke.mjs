@@ -620,6 +620,11 @@ try {
     return state.goals.find(item => item.id === goalId)?.mode === "manual";
   }, waiting.id);
   await service.execute({ type: "goal.wait", goalId: waiting.id, reason: "等 YR 审批", owner: "YR", remindAt: "2030-01-01T00:00:00Z" });
+  // FSEvents delivery is not guaranteed within Playwright's timeout on CI.
+  // Reload after the external write so the renderer reads the persisted state.
+  await page.reload();
+  await page.getByRole("button", { name: "全部目标", exact: true }).click();
+  await page.locator(".goal-row").filter({ hasText: "等待审批操作" }).click();
   await page.getByText("现在不用处理", { exact: true }).waitFor();
   assert.equal(await page.getByLabel("当前安排").count(), 0);
   await page.getByRole("button", { name: "1 小时后提醒", exact: true }).click();
@@ -635,6 +640,7 @@ try {
     type: "goal.update", goalId: waiting.id,
     patch: { remindAt: new Date(Date.now() - 1_000).toISOString() },
   });
+  await page.reload();
   await page.getByRole("button", { name: "注意力", exact: true }).click();
   await page.getByText("处理跟进", { exact: true }).click();
   await page.locator(".goal-attention-modal").waitFor();
