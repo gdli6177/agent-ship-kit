@@ -4,10 +4,15 @@ import { HerdrClient, terminalPrompt, type HerdrRunner } from "../electron/herdr
 
 function fake(responses: Record<string, string>) {
   const calls: string[][] = [];
+  const concierge = {
+    name: "concierge", agent_status: "idle", workspace_id: "w1", tab_id: "w1:t1", pane_id: "w1:p1",
+  };
+  const idleConcierge = JSON.stringify({ result: { agents: [concierge] } });
   const runner: HerdrRunner = { async run(args) {
     calls.push(args);
     const key = args.slice(0, 2).join(" ");
-    const value = responses[key] ?? responses[args[0]!];
+    const value = responses[key] ?? responses[args[0]!] ??
+      (key === "agent list" ? idleConcierge : key === "agent wait" ? JSON.stringify({ result: { agent: concierge } }) : undefined);
     if (value === undefined) throw new Error(`unexpected Herdr call ${key}`);
     if (value.startsWith("!")) throw new Error(value.slice(1));
     return value;
@@ -34,6 +39,36 @@ test("reuses only a persisted control-plane concierge", async () => {
   });
   assert.equal(mock.calls.some((args) => args[0] === "workspace"), false);
   assert.equal(mock.calls.some((args) => args[0] === "agent" && args[1] === "start"), false);
+});
+
+test("creates a new concierge in the selected workspace, not the default global root", async () => {
+  const calls: string[][] = [], responses: Record<string, string> = {
+    "agent start": "{}", "agent prompt": "{}",
+    "pane process-info": JSON.stringify({ result: { process_info: {
+      shell_pid: 12, foreground_processes: [{ pid: 42, name: "codex" }],
+    } } }),
+    "pane run": "{}", "pane wait-output": "{}", "tab focus": "{}",
+    "workspace create": '{"result":{"workspace":{"workspace_id":"w-selected"},"tab":{"tab_id":"w-selected:t1"},"root_pane":{"pane_id":"w-selected:p1"}}}',
+  };
+  let listCalls = 0;
+  const runner: HerdrRunner = { async run(args) {
+    calls.push(args);
+    const key = args.slice(0, 2).join(" ");
+    if (key === "agent list") {
+      if (listCalls++ === 0) throw new Error("server_not_running");
+      return '{"result":{"agents":[]}}';
+    }
+    const value = responses[key] ?? responses[args[0]!];
+    if (value === undefined) throw new Error(`unexpected Herdr call ${key}`);
+    return value;
+  } };
+  const client = new HerdrClient(runner, "crewvane-test", "/tmp/selected-workspace", async () => {});
+  const reference = await client.prepareConcierge("/tmp/selected-workspace");
+  assert.equal(reference.paneId, "w-selected:p1");
+  assert.equal(listCalls, 3, "the client starts, verifies the session, then inspects its agents");
+  const creation = calls.find(args => args[0] === "workspace" && args[1] === "create");
+  assert.ok(creation);
+  assert.equal(creation[creation.indexOf("--cwd") + 1], "/tmp/selected-workspace/.crewvane");
 });
 
 test("inspects and opens a persisted blocked concierge without prompting or changing its input", async () => {
@@ -141,23 +176,29 @@ test("new goals notify the same concierge without creating an owner or another s
     activities: [{ id: "activity", at: new Date().toISOString(), actor: "你", kind: "created", text: "完整原文\n保留全部约束" }],
     createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
   }, "/workspace");
-  assert.equal(mock.calls.length, 3);
-  assert.ok(mock.calls.every(args => args.slice(0, 3).join(" ") === "agent prompt concierge"));
-  assert.match(mock.calls[0]![3]!, /goal_one/);
-  assert.match(mock.calls[1]![3]!, /goal_two/);
-  for (const args of mock.calls) {
+  const prompts = mock.calls.filter(args => args.slice(0, 3).join(" ") === "agent prompt concierge");
+  assert.equal(prompts.length, 3);
+  assert.match(prompts[0]![3]!, /goal_one/);
+  assert.match(prompts[1]![3]!, /goal_two/);
+  for (const args of prompts) {
     assert.match(args[3]!, /不亲自执行目标/);
     assert.match(args[3]!, /整理后交给本目标独立负责人/);
     assert.match(args[3]!, /退回修改转交原负责人/);
     assert.match(args[3]!, /向人交接/);
+    assert.match(args[3]!, /agent prompt <名称> "<完整任务>" --wait --until working/);
+    assert.match(args[3]!, /agent_prompt_stalled/);
+    assert.match(args[3]!, /禁止未经核对就重复发送/);
+    assert.match(args[3]!, /crewvane owner launch <目标ID> --name <负责人名称> --json/);
+    assert.match(args[3]!, /命令行单次输入通常只有约 1 KB/);
+    assert.match(args[3]!, /禁止手工串联 Herdr 命令/);
     assert.equal((args[3]!.match(/\[CREWVANE_CASE_BEGIN\]/g) ?? []).length, 1);
     assert.equal((args[3]!.match(/\[CREWVANE_CASE_END\]/g) ?? []).length, 1);
   }
-  assert.match(mock.calls[2]![3]!, /完整原文\\n保留全部约束/);
-  assert.doesNotMatch(mock.calls[2]![3]!, /待管家梳理|"steps"|"stageId"/);
-  assert.match(mock.calls[2]![3]!, /\/workspace\/\.crewvane\/attachments\/att_0123456789abcdef\.png/);
-  assert.match(mock.calls[2]![3]!, /实际查看图片/);
-  assert.ok(mock.calls.every(args => args.includes("--wait") && args.includes("--timeout")));
+  assert.match(prompts[2]![3]!, /完整原文\\n保留全部约束/);
+  assert.doesNotMatch(prompts[2]![3]!, /待管家梳理|"steps"|"stageId"/);
+  assert.match(prompts[2]![3]!, /\/workspace\/\.crewvane\/attachments\/att_0123456789abcdef\.png/);
+  assert.match(prompts[2]![3]!, /实际查看图片/);
+  assert.ok(prompts.every(args => args.includes("--wait") && !args.includes("--timeout")));
 });
 
 test("watchdog keeps recovery with owners instead of asking the concierge to execute", async () => {
@@ -168,9 +209,10 @@ test("watchdog keeps recovery with owners instead of asking the concierge to exe
       { goalId: "goal_stale", reason: "stale" },
     ],
   );
-  assert.equal(mock.calls.length, 2);
+  const prompts = mock.calls.filter(args => args.slice(0, 3).join(" ") === "agent prompt concierge");
+  assert.equal(prompts.length, 2);
   for (const [index, goalId] of ["goal_blocked", "goal_stale"].entries()) {
-    const message = mock.calls[index]![3]!;
+    const message = prompts[index]![3]!;
     assert.match(message, new RegExp(goalId));
     assert.match(message, /不亲自执行目标/);
     assert.match(message, /联系其他负责人协调恢复/);
@@ -178,8 +220,9 @@ test("watchdog keeps recovery with owners instead of asking the concierge to exe
     assert.equal((message.match(/case_id:/g) ?? []).length, 1);
     assert.doesNotMatch(message, /能处理的由你处理/);
   }
-  assert.doesNotMatch(mock.calls[0]![3]!, /goal_stale/);
-  assert.doesNotMatch(mock.calls[1]![3]!, /goal_blocked/);
+  assert.doesNotMatch(prompts[0]![3]!, /goal_stale/);
+  assert.doesNotMatch(prompts[1]![3]!, /goal_blocked/);
+  assert.ok(prompts.every(args => args.includes("--wait") && !args.includes("--timeout")));
 });
 test("resumed concierge receives current role instructions without starting another agent", async () => {
   const mock=fake({"agent prompt":"{}"});
@@ -191,6 +234,7 @@ test("resumed concierge receives current role instructions without starting anot
   assert.match(mock.calls[0]![3]!,/不亲自执行目标/);
   assert.match(mock.calls[0]![3]!,/custom-cli/);
   assert.doesNotMatch(mock.calls[0]![3]!,/Codex 负责人使用 workspace-write/);
+  assert.ok(mock.calls[0]!.includes("--wait") && !mock.calls[0]!.includes("--timeout"));
 });
 
 test("an agent_blocked dispatch becomes an actionable reminder without changing terminal input", async () => {
@@ -208,6 +252,19 @@ test("an agent_blocked dispatch becomes an actionable reminder without changing 
   assert.equal(mock.calls.length, 1);
   assert.deepEqual(mock.calls[0]!.slice(0, 3), ["agent", "prompt", "concierge"]);
   assert.equal(mock.calls.some(args => args[0] === "pane" && args[1] === "run"), false);
+});
+
+test("a stalled lifecycle probe does not duplicate a prompt that already reached the agent", async () => {
+  const mock = fake({
+    "agent prompt": '!Herdr agent prompt：{"code":"agent_prompt_stalled","message":"prompt was submitted but produced no observed working state"}',
+  });
+  await new HerdrClient(mock.runner, "crewvane-test").notifyGoal(
+    { session: "crewvane-test", agent: "concierge" },
+    "goal_stalled_probe",
+    "已送达但状态侦测延迟",
+  );
+  assert.equal(mock.calls.length, 1);
+  assert.deepEqual(mock.calls[0]!.slice(0, 3), ["agent", "prompt", "concierge"]);
 });
 
 test("surfaces a stopped server without inventing a session", async () => {
@@ -250,6 +307,9 @@ test("starts one replacement only after a stale pane is rejected", async () => {
   assert.match(instructions!, /由负责人产出真实成果、实际运行检查/);
   assert.match(instructions!, /crewvane direct --new/);
   assert.match(instructions!, /不能在终端里处理完却不写回 App/);
+  assert.match(instructions!, /crewvane owner launch/);
+  assert.match(instructions!, /清除管家继承的案卷限制/);
+  assert.match(instructions!, /不要手工串联/);
     assert.match(instructions!, /不得只写「已回答」/);
   assert.doesNotMatch(instructions!, /workflow list|--stage|工序快照/);
   assert.doesNotMatch(instructions!, /简单事项你可以自己完成/);

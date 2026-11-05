@@ -1,9 +1,7 @@
 import { useState } from "react";
 import * as Dialog from "@radix-ui/react-dialog";
 import {
-  ArrowUpRight,
   Bot,
-  Check,
   ChevronDown,
   Clock3,
   FileText,
@@ -22,6 +20,7 @@ import type {
 import { GoalActionDock } from "./GoalActionDock.js";
 import { GoalAttachments } from "./GoalAttachments.js";
 import { GoalHistory } from "./GoalActivity.js";
+import { GoalDeliveryEvidence } from "./GoalDeliveryEvidence.js";
 import type { GoalReplyMode } from "./GoalReplyComposer.js";
 import { presentGoal, time } from "./goalPresentation.js";
 import type { GoalDetailService } from "./goalService.js";
@@ -235,52 +234,7 @@ export function GoalDetail({
                 </section>
               )}
 
-              {goal.delivery && (
-                <section className="delivery goal-delivery" aria-label="交付与证据">
-                  <div className="section-heading">
-                    <div>
-                      <small className="goal-section-kicker">交付</small>
-                      <h3>成果与证据</h3>
-                    </div>
-                    <small>
-                      {time(goal.delivery.submittedAt)} ·{" "}
-                      {goal.delivery.submittedBy}
-                    </small>
-                  </div>
-                  <p className="delivery-summary">{goal.delivery.summary}</p>
-                  {goal.delivery.location &&
-                    goal.delivery.location !== goal.delivery.url && (
-                      <code>{goal.delivery.location}</code>
-                    )}
-                  {goal.delivery.url && (
-                    <button
-                      type="button"
-                      className="text-link"
-                      onClick={() => void service.openUrl(goal.delivery!.url!)}
-                    >
-                      打开交付链接
-                      <ArrowUpRight size={13} />
-                    </button>
-                  )}
-                  <div className="checks">
-                    {goal.delivery.checks.length ? (
-                      goal.delivery.checks.map((check, index) => (
-                        <div key={`${check.name}-${index}`}>
-                          <Check size={14} />
-                          <div>
-                            <strong>{check.name}</strong>
-                            <code>{check.command}</code>
-                            {check.note && <span>{check.note}</span>}
-                          </div>
-                          <small className={check.result}>{check.result}</small>
-                        </div>
-                      ))
-                    ) : (
-                      <p className="checks-empty">没有附加检查记录。</p>
-                    )}
-                  </div>
-                </section>
-              )}
+              <GoalDeliveryEvidence goal={goal} service={service} />
 
               <section className="goal-original">
                 <header>

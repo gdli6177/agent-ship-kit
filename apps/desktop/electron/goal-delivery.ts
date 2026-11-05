@@ -25,8 +25,9 @@ export async function deliverGoalUpdate(
     } catch (error) {
       const latest = (await target.read()).goals.find(goal => goal.id === goalId);
       if (!latest || ["completed", "dropped"].includes(latest.status)) return;
+      const detail = (error instanceof Error ? error.message : String(error)).replace(/[。.!！]\s*$/, "");
       await target.execute({ type: "goal.dispatch", goalId, status: "failed", requestId,
-        detail: `${error instanceof Error ? error.message : String(error)}。内容已保存，请重试联系管家。` });
+        detail: `${detail}。内容已保存，请重试联系管家。` });
     }
     // A newer pending request is drained by the same in-flight operation.
   }

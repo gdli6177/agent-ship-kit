@@ -6,4 +6,5 @@ export * from "./workflows.js";
 export * from "./service.js";
 export * from "./watchdog.js";
 export * from "./attachments.js";
+export * from "./agent-command.js";
 export { readEvents, withLock } from "./storage.js";

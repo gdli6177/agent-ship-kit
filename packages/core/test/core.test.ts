@@ -1,6 +1,6 @@
 import test, { afterEach } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -354,14 +354,126 @@ test("concurrent services retain both updates and state file is valid", async ()
     2,
   );
 });
-test("old state fails clearly rather than being migrated", async () => {
+test("incompatible state is archived and a recoverable v2 workspace is created", async () => {
+  const { root, service } = await fixture(),
+    legacy = join(root, ".crewvane");
+  await mkdir(join(legacy, "attachments"), { recursive: true });
+  await writeFile(
+    join(legacy, "state.json"),
+    JSON.stringify({ version: 1, tasks: [{ id: "legacy-task" }] }),
+  );
+  await writeFile(join(legacy, "attachments", "legacy.txt"), "preserved");
+
+  const recovered = await service.read();
+  assert.equal(recovered.version, 2);
+  assert.equal(recovered.recovery?.reason, "unsupported-version");
+  assert.match(recovered.recovery?.detail ?? "", /版本 1/);
+  assert.ok(recovered.recovery?.archivedPath);
+  assert.equal((await stat(recovered.recovery!.archivedPath)).isDirectory(), true);
+  assert.deepEqual(
+    JSON.parse(await readFile(join(recovered.recovery!.archivedPath, "state.json"), "utf8")),
+    { version: 1, tasks: [{ id: "legacy-task" }] },
+  );
+  assert.equal(
+    await readFile(join(recovered.recovery!.archivedPath, "attachments/legacy.txt"), "utf8"),
+    "preserved",
+  );
+  assert.equal(JSON.parse(await readFile(join(legacy, "state.json"), "utf8")).version, 2);
+  assert.equal((await service.read()).recovery?.id, recovered.recovery?.id);
+  assert.equal(
+    (await readdir(root)).filter(name => name.startsWith(".crewvane.backup-")).length,
+    1,
+  );
+  await service.execute({ type: "workspace.recovery.dismiss" });
+  assert.equal((await service.read()).recovery, undefined);
+});
+
+test("concurrent readers archive an incompatible workspace only once", async () => {
+  const { root } = await fixture(),
+    legacy = join(root, ".crewvane");
+  await mkdir(legacy, { recursive: true });
+  await writeFile(
+    join(legacy, "state.json"),
+    JSON.stringify({ version: 1, tasks: [{ id: "legacy-task" }] }),
+  );
+
+  const [first, second] = await Promise.all([
+    new WorkspaceService(root).read(),
+    new WorkspaceService(root).read(),
+  ]);
+  assert.equal(first.recovery?.id, second.recovery?.id);
+  assert.equal(first.recovery?.archivedPath, second.recovery?.archivedPath);
+  assert.equal(
+    (await readdir(root)).filter(name => name.startsWith(".crewvane.backup-")).length,
+    1,
+  );
+});
+
+test("a first write against incompatible state recovers under the same workspace lock", async () => {
+  const { root, service } = await fixture();
+  await mkdir(join(root, ".crewvane"), { recursive: true });
+  await writeFile(join(root, ".crewvane/state.json"), JSON.stringify({ version: 1, tasks: [] }));
+
+  const item = await create(service);
+  const state = await service.read();
+  assert.equal(state.goals[0]?.id, item.id);
+  assert.equal(state.recovery?.reason, "unsupported-version");
+  assert.equal((await readdir(root)).filter(name => name.startsWith(".crewvane.backup-")).length, 1);
+});
+
+test("legacy event-only workspaces are archived before a new snapshot is written", async () => {
   const { root, service } = await fixture();
   await mkdir(join(root, ".crewvane"), { recursive: true });
   await writeFile(
-    join(root, ".crewvane/state.json"),
-    JSON.stringify({ version: 1, tasks: [] }),
+    join(root, ".crewvane/events.jsonl"),
+    `${JSON.stringify({ type: "workspace_changed", state: { version: 1, tasks: [] } })}\n`,
   );
-  await assert.rejects(() => service.read(), /不支持的工作区状态版本/);
+  const recovered = await service.read();
+  assert.equal(recovered.recovery?.reason, "legacy-event-log");
+  assert.match(
+    await readFile(join(recovered.recovery!.archivedPath, "events.jsonl"), "utf8"),
+    /"version":1/,
+  );
+});
+
+test("unreadable state JSON is preserved instead of blocking the workspace", async () => {
+  const { root, service } = await fixture();
+  await mkdir(join(root, ".crewvane"), { recursive: true });
+  await writeFile(join(root, ".crewvane/state.json"), "{not-json");
+  const recovered = await service.read();
+  assert.equal(recovered.recovery?.reason, "invalid-state");
+  assert.equal(
+    await readFile(join(recovered.recovery!.archivedPath, "state.json"), "utf8"),
+    "{not-json",
+  );
+});
+test("future versions and malformed nested snapshots are also protected", async () => {
+  for (const [version, goals] of [[3, []], [2, [null]]] as const) {
+    const { root, service } = await fixture();
+    await mkdir(join(root, ".crewvane"), { recursive: true });
+    await writeFile(join(root, ".crewvane/state.json"), JSON.stringify({
+      version,
+      name: "test",
+      projects: [],
+      workflows: [],
+      goals,
+      decisions: [],
+      concierge: { session: "crewvane", status: "not_ready" },
+    }));
+    const recovered = await service.read();
+    assert.equal(recovered.version, 2);
+    assert.equal(recovered.recovery?.reason,
+      version === 3 ? "unsupported-version" : "invalid-state");
+    assert.equal((await readdir(root)).filter(name => name.startsWith(".crewvane.backup-")).length, 1);
+  }
+});
+test("a compatible v2 snapshot is reused without creating a backup", async () => {
+  const { root, service } = await fixture();
+  const created = await create(service);
+  const second = await service.read();
+  assert.equal(second.goals[0]?.id, created.id);
+  assert.equal(second.recovery, undefined);
+  assert.equal((await readdir(root)).filter(name => name.startsWith(".crewvane.backup-")).length, 0);
 });
 test("resolving a due reminder clears it so it cannot notify twice", async () => {
   const { service } = await fixture();

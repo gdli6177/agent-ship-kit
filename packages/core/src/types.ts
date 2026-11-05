@@ -12,6 +12,17 @@ export interface Project { id: string; name: string; path?: string; policy: Proj
 export interface WorkflowStep { id: string; name: string; prompt: string }
 export interface Workflow { id: string; name: string; steps: WorkflowStep[] }
 export interface AgentPreferences { concierge: string; owner?: string; worker?: string }
+export type WorkspaceRecoveryReason =
+  | "unsupported-version"
+  | "invalid-state"
+  | "legacy-event-log";
+export interface WorkspaceRecovery {
+  id: string;
+  detectedAt: string;
+  archivedPath: string;
+  reason: WorkspaceRecoveryReason;
+  detail: string;
+}
 export interface Attention {
   kind: AttentionKind; summary: string; since: string; notifiedAt?: string;
   source?: "live" | "dispatch" | "watchdog" | "governance";
@@ -68,6 +79,7 @@ export interface WorkspaceState {
   version: 2; name: string; projects: Project[]; workflows: Workflow[]; goals: Goal[];
   decisions: DecisionRecord[];
   agents?: AgentPreferences;
+  recovery?: WorkspaceRecovery;
   concierge: HerdrReference & {
     status: "not_ready" | "ready" | "error";
     detail?: string;
@@ -77,6 +89,7 @@ export interface WorkspaceState {
 export type CrewvaneCommand =
   | { type: "snapshot" }
   | { type: "workspace.rename"; name: string }
+  | { type: "workspace.recovery.dismiss" }
   | { type: "agents.configure"; preferences: AgentPreferences }
   | { type: "project.add"; name: string; path?: string }
   | { type: "project.remove"; projectId: string }

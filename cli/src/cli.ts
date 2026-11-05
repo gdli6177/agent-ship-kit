@@ -11,6 +11,7 @@ import { join } from "node:path";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { runBoard } from "./board.js";
+import { launchOwner } from "./owner-launch.js";
 const exec = promisify(execFile);
 const usage = `Crewvane — 把所有事整理成清晰的下一步
 
@@ -43,8 +44,10 @@ Agent 状态协议（仅在明确事实发生后使用）：
   crewvane goal resolve ID --note TEXT [--outcome approved|rejected]
   crewvane goal drop ID --reason TEXT
   crewvane goal remind ID --at ISO [--note TEXT]
-  crewvane session set [ID] [--workspace ID] [--tab ID] [--pane ID] [--agent NAME]
+  crewvane session set ID [--workspace ID] [--tab ID] [--pane ID] [--agent NAME]
     [--transport pane --process-id PID]（自定义 CLI）
+  crewvane owner launch ID --name NAME [--task TEXT | --task-file FILE]
+    创建隔离的负责人现场；省略任务内容时读取目标详情与下一步
 
 使用 --root DIR 或 CREWVANE_WORKSPACE 指定工作区。所有读写与桌面共用状态。
 goal message 与 direct 不修改 status、next、等待对象或提醒；禁止用正文猜测批准、验收或完成。
@@ -233,12 +236,14 @@ export async function run(argv: string[], io = { out: console.log, error: consol
     if (args.has("help") || !group) { io.out(usage); return 0; }
     const service = new WorkspaceService(args.one("root") ?? (process.env.CREWVANE_WORKSPACE?.trim() || process.cwd())),
       coordinatorMode = process.env.CREWVANE_COORDINATOR === "1",
-      coordinatorCase = await coordinatorCaseId(group === "direct" && args.has("new"));
+      coordinatorCase = await coordinatorCaseId(group === "direct" && args.has("new")),
+      actor = args.one("actor") ?? (process.env.CREWVANE_AGENT_NAME?.trim() || undefined);
     if (group === "board" && !coordinatorCase) {
       await runBoard(service, io, { once: args.has("once"), startWithNewGoal: args.has("new") });
       return 0;
     }
-    let command: CrewvaneCommand | undefined, result: unknown, coordinatorRead = false;
+    let command: CrewvaneCommand | undefined, result: unknown, coordinatorRead = false,
+      ownerLaunch: { name: string; task?: string; taskFile?: string } | undefined;
     if (coordinatorMode && !coordinatorCase) {
       if (group !== "direct" || !args.has("new"))
         throw new Error("管家当前没有案卷范围；只有 crewvane direct --new 可以直接建立新目标");
@@ -258,6 +263,8 @@ export async function run(argv: string[], io = { out: console.log, error: consol
       } else if (group === "goal" && ["update", "progress", "wait", "decide", "risk", "ship"].includes(action ?? "")) {
         assertCoordinatorCase(coordinatorCase, target);
       } else if (group === "session" && action === "set") {
+        assertCoordinatorCase(coordinatorCase, target);
+      } else if (group === "owner" && action === "launch") {
         assertCoordinatorCase(coordinatorCase, target);
       } else if (group === "direct") {
         if (args.has("new") && args.one("goal"))
@@ -330,7 +337,7 @@ export async function run(argv: string[], io = { out: console.log, error: consol
       } };
       else if (group === "goal" && action === "progress") {
         if (args.has("stage")) throw new Error("工序已移除；请直接写清当前实际结果和下一步");
-        command = { type: "goal.progress", goalId: target!, summary: args.one("summary")!, next: args.one("next"), actor: args.one("actor") ?? args.one("owner") };
+        command = { type: "goal.progress", goalId: target!, summary: args.one("summary")!, next: args.one("next"), actor: actor ?? args.one("owner") };
       }
       else if (group === "goal" && action === "message") {
         const message = textArg(args.one("text"), "--text");
@@ -340,11 +347,11 @@ export async function run(argv: string[], io = { out: console.log, error: consol
           ...(attachments.length ? { attachments } : {}),
         };
       }
-      else if (group === "goal" && action === "wait") command = { type: "goal.wait", goalId: target!, reason: args.one("reason")!, owner: args.one("owner"), remindAt: args.one("remind-at"), actor: args.one("actor") };
-      else if (group === "goal" && action === "decide") command = { type: "goal.decide", goalId: target!, question: args.one("question")!, next: args.one("next"), actor: args.one("actor"), key: args.one("key") };
+      else if (group === "goal" && action === "wait") command = { type: "goal.wait", goalId: target!, reason: args.one("reason")!, owner: args.one("owner"), remindAt: args.one("remind-at"), actor };
+      else if (group === "goal" && action === "decide") command = { type: "goal.decide", goalId: target!, question: args.one("question")!, next: args.one("next"), actor, key: args.one("key") };
       else if (group === "goal" && action === "risk") command = {
         type: "goal.risk", goalId: target!, category: args.one("category") as HighRiskCategory,
-        summary: args.one("summary")!, actionKey: args.one("key"), actor: args.one("actor"),
+        summary: args.one("summary")!, actionKey: args.one("key"), actor,
       };
       else if (group === "goal" && action === "ship") {
         const checksPassed = args.one("checks");
@@ -352,22 +359,39 @@ export async function run(argv: string[], io = { out: console.log, error: consol
           throw new Error("--checks 必须是 passed 或 failed");
         command = {
           type: "goal.ship", goalId: target!, operation: args.one("operation") as "merge" | "deploy",
-          checksPassed: checksPassed === "passed", actor: args.one("actor"),
+          checksPassed: checksPassed === "passed", actor,
         };
       }
-      else if (group === "goal" && action === "review") command = { type: "goal.review", goalId: target!, delivery: { summary: args.one("summary")!, location: args.one("location"), url: args.one("url"), checks: checks(args.all("check")) }, actor: args.one("actor") };
-      else if (group === "goal" && ["accept", "rework", "drop"].includes(action ?? "")) command = { type: `goal.${action}` as "goal.accept", goalId: target!, note: args.one("note") ?? args.one("reason") ?? "", actor: args.one("actor") };
+      else if (group === "goal" && action === "review") command = { type: "goal.review", goalId: target!, delivery: { summary: args.one("summary")!, location: args.one("location"), url: args.one("url"), checks: checks(args.all("check")) }, actor };
+      else if (group === "goal" && ["accept", "rework", "drop"].includes(action ?? "")) command = { type: `goal.${action}` as "goal.accept", goalId: target!, note: args.one("note") ?? args.one("reason") ?? "", actor };
       else if (group === "goal" && action === "resolve") command = {
-        type: "goal.resolve", goalId: target!, note: args.one("note") ?? args.one("reason"), actor: args.one("actor"),
+        type: "goal.resolve", goalId: target!, note: args.one("note") ?? args.one("reason"), actor,
         outcome: (args.one("outcome") ?? "approved") as "approved" | "rejected",
         source: "cli",
       };
       else if (group === "goal" && action === "remind") command = { type: "goal.remind", goalId: target!, at: args.one("at")!, note: args.one("note") };
-      else if (group === "session" && action === "set") command = { type: "session.set", goalId: target, reference: { session: args.one("session") ?? process.env.HERDR_SESSION ?? "crewvane", workspaceId: args.one("workspace"), tabId: args.one("tab"), paneId: args.one("pane"), agent: args.one("agent"),
-        ...(args.has("transport") ? { transport: args.one("transport") as "pane", processId: Number(args.one("process-id")) } : {}) } };
+      else if (group === "session" && action === "set") {
+        if (!target)
+          throw new Error("session set 必须指定目标 ID；全局管家现场由桌面应用管理。");
+        command = { type: "session.set", goalId: target, reference: { session: args.one("session") ?? process.env.HERDR_SESSION ?? "crewvane", workspaceId: args.one("workspace"), tabId: args.one("tab"), paneId: args.one("pane"), agent: args.one("agent"),
+          ...(args.has("transport") ? { transport: args.one("transport") as "pane", processId: Number(args.one("process-id")) } : {}) } };
+      }
+      else if (group === "owner" && action === "launch")
+        ownerLaunch = {
+          name: textArg(args.one("name"), "--name"),
+          ...(args.one("task")
+            ? { task: textArg(args.one("task"), "--task") }
+            : {}),
+          ...(args.one("task-file")
+            ? { taskFile: textArg(args.one("task-file"), "--task-file") }
+            : {}),
+        };
       else throw new Error(`不支持的命令：${args.positional.join(" ")}\n\n${usage}`);
     }
-    if (command) result = await service.execute(command);
+    if (ownerLaunch) {
+      if (!target) throw new Error("owner launch 必须指定当前目标 ID");
+      result = await launchOwner(service, { goalId: target, ...ownerLaunch });
+    } else if (command) result = await service.execute(command);
     if (coordinatorMode && group === "direct" && args.has("new") && command?.type === "goal.direct")
       await advanceCoordinatorCase(result as import("../../packages/core/src/index.js").Goal);
     if (args.has("json")) io.out(JSON.stringify(result, null, 2));
@@ -386,7 +410,12 @@ export async function run(argv: string[], io = { out: console.log, error: consol
       io.out(`${goal.title}\n${goal.status} · ${goal.next}\n\n${goal.description}${images}`);
     }
     else if (Array.isArray(result)) io.out(result.length ? result.map((item) => `${item.id}  ${item.title ?? item.name}  ${item.next ?? ""}`).join("\n") : "暂无记录");
-    else if (group === "status") { const state = result as import("../../packages/core/src/index.js").WorkspaceState; io.out(`${state.name} · ${state.goals.filter((goal) => !["completed", "dropped"].includes(goal.status)).length} 个进行中目标 · ${attentionGoals(state.goals).length} 项需要处理`); }
+    else if (group === "status") {
+      const state = result as import("../../packages/core/src/index.js").WorkspaceState;
+      if (state.recovery)
+        io.out(`旧版工作区已自动保护：${state.recovery.detail} 备份位于 ${state.recovery.archivedPath}`);
+      io.out(`${state.name} · ${state.goals.filter((goal) => !["completed", "dropped"].includes(goal.status)).length} 个进行中目标 · ${attentionGoals(state.goals).length} 项需要处理`);
+    }
     else { const goal = result as import("../../packages/core/src/index.js").Goal; io.out(goal?.id ? `${goal.id} · ${goal.status}\n${goal.next}` : JSON.stringify(result)); }
     return 0;
   } catch (error) { io.error(`crewvane: ${error instanceof Error ? error.message : String(error)}`); return 1; }

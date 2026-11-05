@@ -17,9 +17,9 @@ Crewvane 不运行模型，不扫描或适配 Agent 协议，不管理模型凭�
 
 ## 状态
 
-工作区由用户选择，状态位于 `<workspace>/.crewvane/`。`state.json` 是完整快照，`events.jsonl` 是追加事件记录，`.crewvane-lock/` 串行化桌面和 CLI 的并发写入。每次修改先写临时文件，再原子替换快照。`decisions.md` 与 `rejected.md` 由结构化决定记录派生，供 Agent 和人直接阅读。图片原图位于 `.crewvane/attachments/`，状态只保存相对路径、MIME、大小和 SHA-256；导入校验真实文件魔数并限制数量与体积。已结束目标保留图片 30 天，应用启动时清理，也支持逐张或随目标永久删除。
+工作区由用户选择，状态位于 `<workspace>/.crewvane/`。`state.json` 是完整快照，`events.jsonl` 是追加事件记录，工作区根目录的 `.crewvane-lock/` 串行化桌面和 CLI 的读取、恢复与并发写入，确保旧状态被整体归档时不会与写入交错。每次修改先写临时文件，再原子替换快照。`decisions.md` 与 `rejected.md` 由结构化决定记录派生，供 Agent 和人直接阅读。图片原图位于 `.crewvane/attachments/`，状态只保存相对路径、MIME、大小和 SHA-256；导入校验真实文件魔数并限制数量与体积。已结束目标保留图片 30 天，应用启动时清理，也支持逐张或随目标永久删除。
 
-`WorkspaceState.version = 2` 当前包含项目及项目上线策略、目标、决定账本与唯一管家引用。旧状态中的 `workflows` / `steps` 字段只作为结构兼容占位读取，不再暴露产品或协议入口。旧版状态没有迁移路径，打开会明确报不支持。
+`WorkspaceState.version = 2` 当前包含项目及项目上线策略、目标、决定账本与唯一管家引用。旧状态中的 `workflows` / `steps` 字段只作为结构兼容占位读取，不再暴露产品或协议入口。打开工作区时，core 先验证快照版本和顶层结构；有效 v2 原样读取。发现 v1、未来版本、损坏 JSON、缺字段快照或只有旧事件日志时，在 workspace 根目录取得恢复锁，先在相邻临时目录完整生成 v2 数据，再把整个 `.crewvane` 原子归档为 `.crewvane.backup-*` 并切换新目录。归档保留附件与旧事件，不猜测迁移执行状态或 Herdr 现场；新状态写入 `recovery` 标记，桌面显示备份原因和打开入口。细节见 [工作区兼容检查与自动恢复](product/workspace-recovery.md)。
 
 目标内容与状态命令分离：
 
@@ -41,6 +41,12 @@ Crewvane 不运行模型，不扫描或适配 Agent 协议，不管理模型凭�
 
 `done` 只是 Agent 空闲，Crewvane 只有在交付检查记录通过且人验收后才把目标设为完成。
 
+### 场景优先导航
+
+注意力中的真实现场介入与有真实引用的普通活动目标直接打开 Herdr；决定、验收、到期跟进与派发失败使用轻量动作卡。已完成和已放弃目标只打开历史记录。完整记录继续承担附件、消息历史和目标管理，现场条仅展示结构化目标事实并提供回到注意力的入口。
+
+入口策略集中在 `apps/desktop/src/features/goals/goalEntry.ts`，动作卡复用 `GoalActionDock` 与 core 命令。Electron 的 `terminal-open` 事件携带当前 `goalId`，渲染进程只从同一份工作区快照派生现场上下文，不维护终端内容副本，也不把滚动历史注入 Agent 上下文。
+
 ## Herdr 管家
 
 `Executables` 将 Finder 的精简 PATH 与用户登录 shell 的 PATH、常见安装目录合并，保留可执行入口的符号链接名称。安装包在构建时从 Herdr 官方 GitHub Release 获取当前平台二进制，校验 SHA-256 后再连同应用签名；用户首次启动不依赖 Homebrew、网络或系统 PATH。`HerdrInstallation` 启动时先探测应用内置、userData/runtime 或本机已有版本，有效二进制立即可用；随后通过轻量 GitHub Releases API 在后台检查最新版，发现更新时把官方资产下载到 userData/runtime/herdr，再次校验 SHA-256 与实际版本后原子替换。安装请求去重，不修改用户已有安装。更新检查失败时继续使用内置或本机 CLI，并显示可重试提示；安装失败不丢目标。
@@ -58,6 +64,8 @@ Herdr 0.9.5 的插件事件不暴露用户提交的 prompt 文本。用户直接
 职责边界通过初始身份说明、每次目标通知与巡检消息传达。身份初始化是一个没有案卷的独立回合，只确认长期职责后结束，不得读取或猜测目标。每次目标与巡检通知只包含一个 `case_id` 和一个目标的快照，并以案子标记包裹；同一工作区的通知由队列严格串行，必须等当前管家回合进入 `idle` / `done` / `blocked` 后再发送下一案卷，不同工作区可以并行。处理案卷的回合不得创建后台任务、循环轮询或等待负责人完成，否则旧案卷会悬挂并污染下一条通知的 scope。每次应用启动后首次恢复已有管家时，只有 Herdr 状态为 `idle` / `done` 才刷新身份说明，同一运行中按实际管家引用去重；`working` / `blocked` / `unknown` 只保留并聚焦真实现场，不发送身份 prompt。“找管家”直接打开已登记的 Tab/Pane，让用户处理阻塞 UI；已知 blocked 时派发返回可操作状态，不自动发送 Enter、Esc 或其他输入。它是 Agent 行为契约，不是操作系统权限隔离；Crewvane 无法拦截任意第三方 CLI 内部的工具调用。
 
 管家进程从 `<workspace>/.crewvane` 启动，并继承 `CREWVANE_COORDINATOR=1` 与当前案卷 scope 文件。受管 Crewvane CLI 只允许读取当前目标的详情和 status，以及更新该目标的 progress、wait、decide、risk、ship 和 session；`goal list`、attention、ask 和跨目标读写会被拒绝。该边界保护 Crewvane 数据 API，不能阻止 Agent 直接读取文件或绕过 CLI。
+
+首次创建负责人统一调用受管的 `crewvane owner launch`。这个 CLI 流程原子地创建独立 Herdr Tab、在 Pane 内清除管家的 `CREWVANE_COORDINATOR*` 环境、写入负责人署名与真实 workspace/tab/pane 上下文、启动设置中保存的完整 Agent argv、记录真实现场并发送任务。默认任务正文直接读取已保存的目标原文与下一步，避免受 CLI 终端约 1 KB 的单次命令输入上限影响；长补充说明只能通过当前工作区内受校验的 `--task-file` 传入。它避免模型手工串联多个 Herdr 命令时漏掉环境隔离；任一阶段失败会关闭尚未绑定的 Tab 或用结构化错误保留已绑定现场供核对。自定义 CLI 仍通过真实前台 PID 记录为 pane transport。
 
 ## 上线策略与决定账本
 

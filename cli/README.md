@@ -47,6 +47,8 @@ crewvane direct --new "从终端新建并带图" --attachment ~/Desktop/context.
 
 CLI 只接受 PNG、JPEG、WebP、GIF；单张最多 10 MB，每个目标最多 8 张且总计不超过 30 MB。文件按魔数校验后复制到 `<workspace>/.crewvane/attachments/`，状态与分析事件只保存相对路径、大小和 SHA-256，不保存 Base64。`goal show` 的普通文本输出会列出可直接读取的绝对路径。目标结束 30 天后，桌面启动时清理原图；也可以在目标详情逐张删除，或永久删除整个已结束目标。完成或放弃目标时，应用会关闭对应负责人 Tab。
 
+管家首次派发目标时使用 `crewvane owner launch`。该命令只接受当前受管案卷，默认读取已保存的目标原文和下一步，创建独立 Herdr Tab，清除管家继承的协调者环境，按设置中的负责人启动命令与完整参数启动 Agent，绑定真实现场后再发送任务。长补充说明使用当前工作区内的 `--task-file`，避免受 Agent 终端约 1 KB 的单次命令行输入限制。已有负责人时直接复用原现场。
+
 `crewvane event herdr` 是插件内部入口，读取 Herdr 注入的 `HERDR_PLUGIN_EVENT_JSON`。它把 `pane.agent_status_changed`、`pane.exited`、`pane.closed`、`pane.moved`、`tab.closed` 和 `workspace.closed` 同步到已经登记为对应现场的目标；Pane 移动时以 Herdr 返回的新 Pane、Tab 与 Workspace ID 原子替换旧现场。无关或跨目标现场不会串案。
 
 ## 管家案卷边界

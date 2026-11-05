@@ -29,7 +29,14 @@ test("offline handoff is saved, restart retries the actual follow-up message wit
   assert.equal(goal.attention?.source, "dispatch");
   assert.equal(goal.status, "waiting");
   const calls: string[][] = [];
-  const messenger = new HerdrClient({ async run(args) { calls.push(args); return "{}"; } }, "trial");
+  const messenger = new HerdrClient({ async run(args) {
+    calls.push(args);
+    if (args.slice(0, 2).join(" ") === "agent wait")
+      return JSON.stringify({ result: { agent: {
+        name: "concierge", agent_status: "idle", workspace_id: "w1", tab_id: "w1:t1", pane_id: "w1:p1",
+      } } });
+    return "{}";
+  } }, "trial");
   await deliverGoalUpdate(new WorkspaceService(service.root), id, async item => {
     await messenger.notifyFollowUp({ session: "trial", agent: "concierge" }, item.id, item.dispatch!.note!, item);
   });
