@@ -348,7 +348,13 @@ try {
       ],
     },
   });
-  await page.getByText("查看并验收").click();
+  await page.waitForFunction(async id => {
+    const snapshot = await window.crewvane.command({ type: "snapshot" });
+    return snapshot.goals.find(goal => goal.id === id)?.status === "review";
+  }, goalId);
+  await page.reload();
+  await page.getByRole("button", { name: "全部目标", exact: true }).click();
+  await page.locator(".goal-row").filter({ hasText: "桌面试用交付" }).click();
   await page.locator(".goal-attention-modal").waitFor();
   assert.equal(await page.locator(".goal-detail-modal").count(), 0);
   await page.getByText("成果与证据", { exact: true }).waitFor();
@@ -356,6 +362,11 @@ try {
   await page.getByRole("button", { name: "退回修改", exact: true }).click();
   await page.getByLabel("退回说明", { exact: true }).fill("请补充桌面端的实际验收说明");
   await page.getByRole("button", { name: "退回并交给管家", exact: true }).click();
+  await page.locator(".goal-attention-modal").waitFor({ state: "detached" });
+  await page.waitForFunction(async id => {
+    const snapshot = await window.crewvane.command({ type: "snapshot" });
+    return snapshot.goals.find(goal => goal.id === id)?.status === "active";
+  }, goalId);
   await service.execute({
     type: "goal.review",
     goalId,
@@ -367,8 +378,16 @@ try {
       ],
     },
   });
-  await page.getByText("查看并验收").click();
+  await page.waitForFunction(async id => {
+    const snapshot = await window.crewvane.command({ type: "snapshot" });
+    return snapshot.goals.find(goal => goal.id === id)?.status === "review";
+  }, goalId);
+  await page.reload();
+  await page.getByRole("button", { name: "全部目标", exact: true }).click();
+  await page.locator(".goal-row").filter({ hasText: "桌面试用交付" }).click();
+  await page.locator(".goal-attention-modal").waitFor();
   await page.getByRole("button", { name: "验收通过", exact: true }).click();
+  await page.getByRole("button", { name: "注意力", exact: true }).click();
   await page.getByText("现在，可以安心了。").waitFor();
   assert.equal(await page.getByRole("button", { name: "工序", exact: true }).count(), 0);
   await page.getByRole("button", { name: "设置", exact: true }).click();
