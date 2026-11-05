@@ -706,7 +706,7 @@ try {
   await service.execute({ type: "goal.resume", goalId: sceneGoal.id, mode: "manual", note: "继续核实现场入口" });
   await page.getByRole("button", { name: "全部目标", exact: true }).click();
   await page.locator(".goal-row").filter({ hasText: "现场入口验证" }).click();
-  await page.locator(".error").getByText(/Herdr|管家|现场/).waitFor();
+  await page.locator(".error").getByText(/Herdr|管家|现场/).first().waitFor();
   assert.equal(await page.locator(".goal-detail-modal").count(), 0,
     "a live goal scene failure must stay out of the full-detail modal");
   await page.screenshot({ path: join(home, "goal-scene-entry.png"), animations: "disabled" });
