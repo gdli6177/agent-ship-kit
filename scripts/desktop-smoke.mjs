@@ -539,6 +539,26 @@ try {
     return !state.goals.some(item => item.id === goalId);
   }, waiting.id);
   assert.equal((await service.read()).goals.some(item => item.id === waiting.id), false);
+  const sceneGoal = await service.execute({
+    type: "goal.create",
+    input: { title: "现场入口验证", projectId: "personal", mode: "manual" },
+  });
+  await service.execute({
+    type: "session.set",
+    goalId: sceneGoal.id,
+    reference: {
+      session: "crewvane-ui-test",
+      agent: "owner-ui-test",
+      paneId: "w1:p2",
+      tabId: "w1:t2",
+    },
+  });
+  await page.getByRole("button", { name: "全部目标", exact: true }).click();
+  await page.getByText("现场入口验证", { exact: true }).click();
+  await page.getByRole("button", { name: "回到现场", exact: true }).waitFor();
+  assert.equal(await page.getByRole("button", { name: "回到现场", exact: true }).count(), 1);
+  await page.screenshot({ path: join(home, "goal-scene-entry.png"), animations: "disabled" });
+  await page.getByRole("button", { name: "关闭", exact: true }).click();
   const offline = await page.evaluate(() => window.crewvane.command({
     type: "goal.create",
     input: { title: "联系管家失败界面", projectId: "personal", mode: "concierge" },
@@ -644,6 +664,7 @@ try {
         "6 theme/size UI audit combinations across 5 core screens",
         "dispatch failure is presented as a retryable concierge connection failure",
         "permanent deletion for completed goals",
+        "persistent owner scene entry is available from every active goal detail",
       ],
       errors,
     }),

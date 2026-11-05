@@ -8,6 +8,7 @@ import {
   ImagePlus,
   MessageCircle,
   Sparkles,
+  SquareTerminal,
   X,
 } from "lucide-react";
 import type {
@@ -76,6 +77,18 @@ export function GoalDetail({
               </p>
             </div>
             <div className="goal-detail-header-actions">
+              {goal.herdr && !view.ended && (
+                <button
+                  type="button"
+                  className="goal-scene-button"
+                  disabled={busy}
+                  title={`打开 ${goal.owner} 的 Herdr 工作现场`}
+                  onClick={() => void service.openHerdr(goal.id)}
+                >
+                  <SquareTerminal size={15} />
+                  <span>回到现场</span>
+                </button>
+              )}
               <span className={`goal-state-pill ${view.tone}`}>
                 <i />
                 {view.label}

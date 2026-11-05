@@ -265,6 +265,9 @@ h1 em { color: var(--accent); font-style: normal; }
 .goal-detail-origin small { color: var(--muted); font-size: var(--fs-caption); letter-spacing: .12em; }
 .goal-detail-origin strong { font-size: var(--fs-meta); font-weight: 620; }
 .goal-detail-header-actions { display: flex; align-items: center; gap: 12px; }
+.goal-scene-button { display: inline-flex; align-items: center; gap: 6px; min-height: 32px; padding: 0 11px; border: 1px solid color-mix(in srgb, var(--accent) 34%, var(--line)); border-radius: 9px; color: var(--accent); background: var(--accent-soft); font-size: var(--fs-caption); font-weight: 650; white-space: nowrap; }
+.goal-scene-button:hover { border-color: color-mix(in srgb, var(--accent) 58%, var(--line)); background: color-mix(in srgb, var(--accent-soft) 74%, var(--surface)); }
+.goal-scene-button:disabled { opacity: .55; cursor: wait; }
 .goal-state-pill { display: inline-flex; align-items: center; gap: 6px; min-height: 27px; padding: 0 10px; border: 1px solid var(--line); border-radius: 999px; color: var(--muted); background: var(--surface-soft); font-size: var(--fs-caption); font-weight: 600; }
 .goal-state-pill i { width: 5px; height: 5px; border-radius: 50%; background: currentColor; }
 .goal-state-pill.reply { border-color: color-mix(in srgb, var(--accent) 32%, var(--line)); color: var(--accent); background: var(--accent-soft); }
