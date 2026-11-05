@@ -28,6 +28,10 @@ function text(value: unknown, label: string, limit = 20_000): string {
     throw new Error(`请提供有效的${label}`);
   return value.trim();
 }
+function automaticGoalTitle(request: string): string {
+  const firstLine = request.split(/\r\n?|\n/).find(line => line.trim())?.trim();
+  return Array.from(firstLine || "新目标").slice(0, 80).join("");
+}
 function id(value: unknown): string {
   if (typeof value !== "string" || !/^[a-zA-Z0-9_-]{1,100}$/.test(value))
     throw new Error("无效的记录 ID");
@@ -319,10 +323,10 @@ export class WorkspaceService {
           const projectId = command.projectId && command.projectId !== "personal" ? command.projectId : "personal";
           const project = state.projects.find(item => item.id === id(projectId));
           if (!project) throw new Error("请选择有效项目");
-          const at = nowIso(), firstLine = request.split("\n")[0]!.trim();
+          const at = nowIso();
           const item: Goal = {
             id: newId("goal"), projectId: project.id,
-            title: text(firstLine || "新目标", "目标", 160).slice(0, 80), description: request,
+            title: automaticGoalTitle(request), description: request,
             mode: "concierge", status: "active",
             steps: [], next: "管家正在理解原文并整理目标。", owner: "待分配负责人",
             attention: null,
@@ -364,10 +368,10 @@ export class WorkspaceService {
           const projectId = command.projectId && command.projectId !== "personal" ? command.projectId : "personal";
           const project = state.projects.find(item => item.id === id(projectId));
           if (!project) throw new Error("请选择有效项目");
-          const at = nowIso(), firstLine = request.split("\n")[0]!.trim();
+          const at = nowIso();
           const item: Goal = {
             id: newId("goal"), projectId: project.id,
-            title: text(firstLine || "新目标", "目标", 160).slice(0, 80), description: request,
+            title: automaticGoalTitle(request), description: request,
             mode: "concierge", status: "active",
             steps: [], next: "管家正在理解 Herdr 终端中的原文并整理目标。", owner: "待分配负责人",
             attention: null,

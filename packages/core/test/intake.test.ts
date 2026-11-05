@@ -54,6 +54,35 @@ test("an intake request beginning with a newline still has a title", async () =>
   assert.equal(goal.title, "整理今天所有的事情");
 });
 
+test("a valid single-line intake request gets a bounded automatic title", async () => {
+  const root = await mkdtemp(join(tmpdir(), "crewvane-intake-long-title-")); roots.push(root);
+  const service = new WorkspaceService(root);
+  const request = `${"长".repeat(180)}\n保留完整正文。`;
+  const goal = await service.execute({ type: "goal.intake", text: request }) as Goal;
+  assert.equal(goal.title, "长".repeat(80));
+  assert.equal(goal.description, request);
+  assert.equal(goal.activities[0]?.text, request);
+});
+
+test("a long Herdr direct message gets the same bounded automatic title", async () => {
+  const root = await mkdtemp(join(tmpdir(), "crewvane-direct-long-title-")); roots.push(root);
+  const service = new WorkspaceService(root);
+  const request = "航".repeat(180);
+  const goal = await service.execute({ type: "goal.direct", text: request }) as Goal;
+  assert.equal(goal.title, "航".repeat(80));
+  assert.equal(goal.description, request);
+  assert.equal(goal.activities[0]?.text, request);
+});
+
+test("automatic titles do not split Unicode surrogate pairs", async () => {
+  const root = await mkdtemp(join(tmpdir(), "crewvane-intake-title-unicode-")); roots.push(root);
+  const service = new WorkspaceService(root);
+  const request = "🧭".repeat(100);
+  const goal = await service.execute({ type: "goal.intake", text: request }) as Goal;
+  assert.equal(goal.title, "🧭".repeat(80));
+  assert.equal(goal.description, request);
+});
+
 test("human feedback replaces an in-flight notification and can be handed back to the concierge", async () => {
   const root = await mkdtemp(join(tmpdir(), "crewvane-intake-feedback-")); roots.push(root);
   const service = new WorkspaceService(root);

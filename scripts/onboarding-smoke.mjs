@@ -240,16 +240,20 @@ try {
   assert.equal(started.pid, state.concierge.processId);
   await page.evaluate(() => window.crewvane.prepareConcierge());
   assert.equal((await readFile(log, "utf8")).split("\n").filter(line => line.includes('"kind":"start"')).length, 1);
+  const longGoalRequest =
+    `${"请保留全部约束并完成端到端验收。".repeat(14)}完整正文末尾标记-${randomUUID()}`;
+  const longGoalTitle = Array.from(longGoalRequest).slice(0, 80).join("");
+  assert.ok(Array.from(longGoalRequest).length > 160);
   await page.locator(".top-actions").getByRole("button", { name:"新目标" }).click();
-  await page.getByLabel("要交给管家的事情").fill("自定义 CLI 收到真实目标\n请保留这段完整背景，先梳理要求和下一步。");
+  await page.getByLabel("要交给管家的事情").fill(longGoalRequest);
   await page.getByRole("button", { name:"交给管家", exact:true }).click();
   await expect.poll(async () => {
-    const state = await page.evaluate(() => window.crewvane.command({type:"snapshot"}));
-    return state.goals.some(goal => goal.title === "自定义 CLI 收到真实目标");
+    const current = await page.evaluate(() => window.crewvane.command({type:"snapshot"}));
+    return current.goals.some(goal => goal.title === longGoalTitle);
   }, {timeout:10_000}).toBe(true);
   const created = (await page.evaluate(() => window.crewvane.command({type:"snapshot"}))).goals
-    .find(goal => goal.title === "自定义 CLI 收到真实目标");
-  assert.equal(created.description, "自定义 CLI 收到真实目标\n请保留这段完整背景，先梳理要求和下一步。");
+    .find(goal => goal.title === longGoalTitle);
+  assert.equal(created.description, longGoalRequest);
   assert.deepEqual(created.steps, []);
   await expect.poll(async () => {
     const state = await page.evaluate(() => window.crewvane.command({type:"snapshot"}));
@@ -262,8 +266,8 @@ try {
     .filter(entry => entry.kind === "input" && entry.text.includes("不亲自执行目标"));
   assert.ok(roleInputs.length >= 2, "initial identity and new goal must both carry the no-execution boundary into real stdin");
   assert.ok(messages.includes("整理后交给本目标独立负责人"));
-  assert.ok(messages.includes("请保留这段完整背景"), "the full one-box intake must reach the real CLI");
-  await page.getByRole("dialog", { name:/自定义 CLI 收到真实目标/ }).waitFor();
+  assert.ok(messages.includes(longGoalRequest), "the full one-box intake must reach the real CLI");
+  await page.getByRole("dialog").waitFor();
   await page.getByRole("button", { name:"给管家留言", exact:true }).click();
   await page.getByLabel("发给管家的消息", { exact:true }).fill("补充约束：不要改变交付范围");
   await page.getByRole("button", { name:"交给管家", exact:true }).click();
