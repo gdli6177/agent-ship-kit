@@ -652,6 +652,12 @@ try {
     const state = await window.crewvane.command({ type: "snapshot" });
     return state.goals.find(item => item.id === goalId)?.status === "active";
   }, waiting.id);
+  await page.locator(".goal-attention-modal").waitFor({ state: "detached" });
+  // The attention card can close from the state event before the renderer has
+  // applied the same snapshot to the surrounding navigation. Reload after the
+  // persisted transition so this assertion exercises the target flow rather
+  // than the CI-dependent order of FSEvents and IPC delivery.
+  await page.reload();
   await page.getByRole("button", { name: "全部目标", exact: true }).click();
   await page.locator(".goal-row").filter({ hasText: "等待审批操作" }).click();
   if (await page.locator(".goal-attention-modal").count())
