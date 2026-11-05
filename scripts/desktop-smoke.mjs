@@ -764,8 +764,14 @@ try {
     const current = snapshot.goals.find(goal => goal.id === goalId);
     return current?.attention?.source === "dispatch" && current.dispatch?.status === "failed";
   }, offline.id);
+  // This failure is written by the out-of-process service too. Reload from
+  // the persisted snapshot so the row and action card cannot disagree when
+  // FSEvents arrives after the direct state read.
+  await page.reload();
   await page.getByRole("button", { name: "全部目标", exact: true }).click();
-  await page.getByText("联系管家失败界面", { exact: true }).click();
+  const offlineRow = page.locator(".goal-row").filter({ hasText: "联系管家失败界面" });
+  await offlineRow.getByText("恢复联系", { exact: true }).waitFor();
+  await offlineRow.click();
   await page.locator(".goal-attention-modal").waitFor();
   await page.locator(".attention-action-focus").getByText("联系管家失败", { exact: true }).waitFor();
   await page.getByRole("button", { name: "重试联系管家", exact: true }).waitFor();
