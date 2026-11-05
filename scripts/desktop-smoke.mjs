@@ -493,6 +493,10 @@ try {
   await page.getByRole("dialog", { name: /个人事项界面闭环/ }).waitFor();
   await page.locator(".goal-detail-advanced").evaluate(element => { element.open = true; });
   await page.getByRole("button", { name: "我来处理", exact: true }).click();
+  await page.waitForFunction(async title => {
+    const state = await window.crewvane.command({ type: "snapshot" });
+    return state.goals.find(goal => goal.title === title)?.mode === "manual";
+  }, "个人事项界面闭环");
   await page.getByRole("button", { name: "补充说明", exact: true }).click();
   await page.getByLabel("发给管家的消息", { exact: true }).fill("审批已经通过，继续处理");
   const previousNext = (await service.read()).goals.find(item => item.title === "个人事项界面闭环").next;
@@ -516,7 +520,8 @@ try {
   await page.waitForFunction(async goalId => {
     const state = await window.crewvane.command({ type: "snapshot" });
     const item = state.goals.find(goal => goal.id === goalId);
-    return item?.status === "waiting" &&
+    return item?.mode === "manual" &&
+      item.status === "waiting" &&
       item.remindAt === new Date("2030-01-01T09:30").toISOString();
   }, personal.id);
   let manual = (await service.read()).goals.find(item => item.title === "个人事项界面闭环");
