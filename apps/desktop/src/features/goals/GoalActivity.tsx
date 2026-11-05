@@ -23,9 +23,9 @@ export function GoalActivityFeed({
   service: GoalDetailService;
 }) {
   const excluded = new Set(excludeIds);
-  const activities = goal.activities
+  const activities = [...goal.activities]
     .filter((item) => !excluded.has(item.id))
-    .reverse();
+    .sort((a, b) => Date.parse(b.at) - Date.parse(a.at));
   return (
     <section className="conversation" aria-label="当前目标的消息与交接记录，最新在上">
       <div className="conversation-feed">

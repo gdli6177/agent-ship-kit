@@ -273,10 +273,17 @@ try {
     { exact: true },
   ).waitFor();
   assert.equal(await page.locator(".goal-history").getAttribute("open"), "");
-  assert.match(
-    await page.locator(".conversation-entry p").first().innerText(),
-    /负责人过程记录 4/,
-    "message and handoff history must put the newest remaining record first",
+  const historyText = await page.locator(".conversation-entry p").allInnerTexts();
+  assert.ok(
+    historyText.findIndex(text => text === "负责人过程记录 4") <
+      historyText.findIndex(text => text === "负责人过程记录 3"),
+    "message and handoff history must put newer records before older records",
+  );
+  assert.ok(
+    !historyText.includes(
+      "负责人具体答复：旧接口仍可只读调用，但新界面应改用 /v2/items，并保留两轮兼容期。",
+    ),
+    "the latest handoff should appear in the summary instead of repeating in history",
   );
   assert.equal(
     await page.locator(".conversation-feed").getByText("请保留现有验收记录，不要扩大范围。", { exact: true }).count(),
@@ -486,6 +493,10 @@ try {
   await page.getByRole("dialog", { name: /个人事项界面闭环/ }).waitFor();
   await page.locator(".goal-detail-advanced").evaluate(element => { element.open = true; });
   await page.getByRole("button", { name: "我来处理", exact: true }).click();
+  await page.waitForFunction(async title => {
+    const state = await window.crewvane.command({ type: "snapshot" });
+    return state.goals.find(goal => goal.title === title)?.mode === "manual";
+  }, "个人事项界面闭环");
   await page.getByRole("button", { name: "补充说明", exact: true }).click();
   await page.getByLabel("发给管家的消息", { exact: true }).fill("审批已经通过，继续处理");
   const previousNext = (await service.read()).goals.find(item => item.title === "个人事项界面闭环").next;
@@ -506,6 +517,13 @@ try {
   await page.getByLabel("下一步", { exact: true }).fill("等待下一次核对");
   await page.getByLabel("跟进提醒", { exact: true }).fill("2030-01-01T09:30");
   await page.getByRole("button", { name: "保存更新", exact: true }).click();
+  await page.waitForFunction(async goalId => {
+    const state = await window.crewvane.command({ type: "snapshot" });
+    const item = state.goals.find(goal => goal.id === goalId);
+    return item?.mode === "manual" &&
+      item.status === "waiting" &&
+      item.remindAt === new Date("2030-01-01T09:30").toISOString();
+  }, personal.id);
   let manual = (await service.read()).goals.find(item => item.title === "个人事项界面闭环");
   assert.equal(manual.status, "waiting");
   assert.equal(manual.remindAt, new Date("2030-01-01T09:30").toISOString());
@@ -541,6 +559,10 @@ try {
   await page.getByText("现在不用处理", { exact: true }).waitFor();
   assert.equal(await page.getByLabel("当前安排").count(), 0);
   await page.getByRole("button", { name: "1 小时后提醒", exact: true }).click();
+  await page.waitForFunction(async goalId => {
+    const state = await window.crewvane.command({ type: "snapshot" });
+    return Date.parse(state.goals.find(goal => goal.id === goalId)?.remindAt ?? "") > Date.now();
+  }, waiting.id);
   let waitingState = (await service.read()).goals.find(item => item.id === waiting.id);
   assert.ok(Date.parse(waitingState.remindAt) > Date.now());
   assert.equal(waitingState.status, "waiting");

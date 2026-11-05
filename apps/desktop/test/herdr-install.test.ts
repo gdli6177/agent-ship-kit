@@ -101,3 +101,28 @@ test("a bundled Herdr remains usable when update metadata is unavailable", () =>
   assert.equal(result.executable, bundled);
   assert.match(result.detail!, /继续使用应用内置 Herdr 0\.9\.5/);
 }));
+test("an installed Herdr is ready before a slow update check completes", () => fixture(async ({ tools, path }) => {
+  await writeFile(path, binary("0.9.5"), { mode: 0o700 });
+  let rejectFetch!: (error: Error) => void;
+  const stalled = new Promise<Response>((_resolve, reject) => { rejectFetch = reject; });
+  const install = new HerdrInstallation(tools, path, () => {}, (() => stalled) as typeof fetch,
+    "darwin", "arm64");
+  const preparing = install.ensure();
+  let current = await install.status();
+  for (let attempt = 0; attempt < 100 && !current.installed; attempt += 1) {
+    await new Promise(resolve => setTimeout(resolve, 10));
+    current = await install.status();
+  }
+  assert.deepEqual(await install.status(), {
+    installed: true,
+    executable: path,
+    version: "0.9.5",
+    latestVersion: "0.9.5",
+    phase: "ready",
+    detail: "Herdr 0.9.5 已可用，正在检查更新…",
+  });
+  rejectFetch(new Error("offline"));
+  const settled = await preparing;
+  assert.equal(settled.phase, "ready");
+  assert.match(settled.detail!, /继续使用本机 Herdr 0\.9\.5/);
+}));
