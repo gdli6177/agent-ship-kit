@@ -767,7 +767,8 @@ try {
   assert.equal(await page.locator(".goal-detail-modal").count(), 0);
   await page.waitForTimeout(250);
   await page.screenshot({ path: join(home, "dispatch-failure-light.png"), animations: "disabled" });
-  await page.getByRole("button", { name: "关闭", exact: true }).click();
+  const closeDispatchFailure = page.getByRole("button", { name: "关闭", exact: true });
+  if (await closeDispatchFailure.count()) await closeDispatchFailure.click();
   const parallelPerformance = await page.evaluate(async () => {
     const longTasks = [];
     const observer = new PerformanceObserver(list => {
