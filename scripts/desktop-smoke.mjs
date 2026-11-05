@@ -1,6 +1,5 @@
 import { _electron as electron } from "@playwright/test";
 import { mkdir, mkdtemp, readFile, rm, stat } from "node:fs/promises";
-import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { execFile } from "node:child_process";
 import { createServer } from "node:http";
@@ -90,7 +89,7 @@ function auditRenderedUi() {
     issues.push({ kind: "horizontal-scroll", over: document.documentElement.scrollWidth - document.documentElement.clientWidth });
   return issues;
 }
-const home = await mkdtemp(join(tmpdir(), "crewvane-desktop-v04-")),
+const home = await mkdtemp("/tmp/cv-desktop-"),
   workspace = join(home, "workspace");
 await mkdir(workspace);
 await mkdir(join(home, "userData"), { recursive: true });
@@ -129,6 +128,10 @@ const app = await electron.launch({
     CREWVANE_TEST_WORKSPACE: workspace,
     CREWVANE_TEST_ISOLATE_TOOLS: "1",
     CREWVANE_TEST_SKIP_HERDR_SETUP: "1",
+    HOME: home,
+    XDG_CONFIG_HOME: join(home, ".config"),
+    XDG_STATE_HOME: join(home, ".local/state"),
+    PATH: "/usr/bin:/bin",
   },
   timeout: 60_000,
 });
@@ -346,6 +349,8 @@ try {
     },
   });
   await page.getByText("查看并验收").click();
+  await page.locator(".goal-attention-modal").waitFor();
+  assert.equal(await page.locator(".goal-detail-modal").count(), 0);
   await page.getByText("成果与证据", { exact: true }).waitFor();
   await page.screenshot({ path: join(home, "review-dark.png") });
   await page.getByRole("button", { name: "退回修改", exact: true }).click();
@@ -362,8 +367,8 @@ try {
       ],
     },
   });
+  await page.getByText("查看并验收").click();
   await page.getByRole("button", { name: "验收通过", exact: true }).click();
-  await page.getByRole("button", { name: "关闭", exact: true }).click();
   await page.getByText("现在，可以安心了。").waitFor();
   assert.equal(await page.getByRole("button", { name: "工序", exact: true }).count(), 0);
   await page.getByRole("button", { name: "设置", exact: true }).click();
@@ -397,6 +402,10 @@ try {
   await page.getByRole("button", { name: "管理 Webhook", exact: true }).click();
   await page.getByText(/4 种状态/).waitFor();
   await page.screenshot({ path: join(home, "webhook-dark.png"), animations: "disabled" });
+  await page.getByRole("button", { name: "关闭", exact: true }).click();
+  await page.getByRole("button", { name: "设置", exact: true }).click();
+  await page.getByText(/herdr session attach crewvane-/).waitFor();
+  await page.getByRole("button", { name: "管理 Webhook", exact: true }).click();
   await page.getByRole("button", { name: "测试当前配置", exact: true }).click();
   for (let attempt = 0; attempt < 100; attempt += 1) {
     if (webhookEvents.some(event =>
@@ -507,6 +516,10 @@ try {
     input: { title: "权限变更试用", projectId: "personal", mode: "manual" },
   }));
   await page.evaluate((goalId) => window.crewvane.command({
+    type: "goal.progress", goalId, summary: "负责人已核对：只读权限可以完成验收，不需要增加管理员。",
+    actor: "负责人",
+  }), riskGoal.id);
+  await page.evaluate((goalId) => window.crewvane.command({
     type: "goal.risk", goalId, category: "change-permissions",
     summary: "给生产环境增加一名管理员", actor: "管家",
   }), riskGoal.id);
@@ -523,14 +536,19 @@ try {
   assert.equal(attentionEvent.body.goal.title, "权限变更试用");
   assert.equal(attentionEvent.body.goal.kind, "decision");
   assert.equal(attentionEvent.headers.authorization, "Bearer desktop-smoke-token");
-  await page.getByText("权限变更试用", { exact: true }).click();
+  const riskAttentionCard = page.locator(".goal-attention-modal");
+  if (!await riskAttentionCard.count())
+    await page.getByText("权限变更试用", { exact: true }).click();
+  await page.locator(".goal-attention-modal").waitFor();
+  assert.equal(await page.locator(".goal-detail-modal").count(), 0);
+  await page.locator(".attention-evidence").getByText(/只读权限可以完成验收/).waitFor();
   await page.getByLabel("你的决定").fill("只允许只读权限，不增加管理员。");
   await page.getByRole("button", { name: "批准并继续", exact: true }).click();
   await page.getByText("已记入批准账本，正在通知管家", { exact: true }).waitFor();
   const ledger = await readFile(join(workspace, ".crewvane", "decisions.md"), "utf8");
   assert.match(ledger, /只允许只读权限/);
   assert.match(ledger, /change-permissions/);
-  await page.getByRole("button", { name: "关闭", exact: true }).click();
+  await page.locator(".goal-attention-modal").waitFor({ state: "detached" });
   await page.screenshot({ path: join(home, "home-light.png") });
   // A personal item must be manageable without asking an Agent or using CLI.
   await page.locator(".top-actions").getByRole("button", { name: "新目标" }).click();
@@ -612,6 +630,15 @@ try {
   let waitingState = (await service.read()).goals.find(item => item.id === waiting.id);
   assert.ok(Date.parse(waitingState.remindAt) > Date.now());
   assert.equal(waitingState.status, "waiting");
+  await page.getByRole("button", { name: "关闭", exact: true }).click();
+  await service.execute({
+    type: "goal.update", goalId: waiting.id,
+    patch: { remindAt: new Date(Date.now() - 1_000).toISOString() },
+  });
+  await page.getByRole("button", { name: "注意力", exact: true }).click();
+  await page.getByText("处理跟进", { exact: true }).click();
+  await page.locator(".goal-attention-modal").waitFor();
+  await page.getByText("当前下一步", { exact: true }).waitFor();
   await page.getByRole("button", { name: "有结果，继续推进", exact: true }).click();
   await page.getByLabel("最新结果与下一步", { exact: true }).fill("审批通过了，我亲自处理。");
   await page.getByRole("button", { name: "交给管家继续", exact: true }).click();
@@ -619,6 +646,11 @@ try {
     const state = await window.crewvane.command({ type: "snapshot" });
     return state.goals.find(item => item.id === goalId)?.status === "active";
   }, waiting.id);
+  await page.getByRole("button", { name: "全部目标", exact: true }).click();
+  await page.locator(".goal-row").filter({ hasText: "等待审批操作" }).click();
+  if (await page.locator(".goal-attention-modal").count())
+    await page.getByRole("button", { name: "完整记录", exact: true }).click();
+  await page.locator(".goal-detail-modal").waitFor();
   await page.locator(".goal-detail-advanced").evaluate(element => { element.open = true; });
   await page.getByRole("button", { name: "我来处理", exact: true }).click();
   await page.waitForFunction(async goalId => {
@@ -645,6 +677,10 @@ try {
   await page.getByLabel("通过依据").fill("目标状态为 review");
   await page.getByRole("button", { name: "提交验收", exact: true }).click();
   await page.getByRole("button", { name: "验收通过", exact: true }).click();
+  await page.getByRole("button", { name: "关闭", exact: true }).click();
+  await page.getByRole("button", { name: "全部目标", exact: true }).click();
+  await page.locator(".goal-row").filter({ hasText: "等待审批操作" }).click();
+  await page.locator(".goal-detail-modal").waitFor();
   page.once("dialog", dialog => void dialog.accept());
   await page.locator(".goal-detail-advanced").evaluate(element => { element.open = true; });
   await page.getByRole("button", { name: "永久删除目标", exact: true }).click();
@@ -667,12 +703,14 @@ try {
       tabId: "w1:t2",
     },
   });
+  await service.execute({ type: "goal.resume", goalId: sceneGoal.id, mode: "manual", note: "继续核实现场入口" });
   await page.getByRole("button", { name: "全部目标", exact: true }).click();
-  await page.getByText("现场入口验证", { exact: true }).click();
-  await page.getByRole("button", { name: "回到现场", exact: true }).waitFor();
-  assert.equal(await page.getByRole("button", { name: "回到现场", exact: true }).count(), 1);
+  await page.locator(".goal-row").filter({ hasText: "现场入口验证" }).click();
+  await page.locator(".error").getByText(/Herdr|管家|现场/).waitFor();
+  assert.equal(await page.locator(".goal-detail-modal").count(), 0,
+    "a live goal scene failure must stay out of the full-detail modal");
   await page.screenshot({ path: join(home, "goal-scene-entry.png"), animations: "disabled" });
-  await page.getByRole("button", { name: "关闭", exact: true }).click();
+  await page.getByRole("button", { name: "关闭提示", exact: true }).click();
   const droppable = await service.execute({
     type: "goal.create",
     input: {
@@ -681,7 +719,7 @@ try {
       mode: "manual",
     },
   });
-  await page.getByText("放弃交互验证", { exact: true }).click();
+  await page.locator(".goal-row").filter({ hasText: "放弃交互验证" }).click();
   await page.locator(".goal-detail-advanced").evaluate(element => { element.open = true; });
   await page.getByRole("button", { name: "放弃目标", exact: true }).click();
   await page.getByLabel("放弃原因", { exact: true }).fill("验证放弃操作不再依赖系统弹窗");
@@ -691,6 +729,11 @@ try {
     return state.goals.find(goal => goal.id === goalId)?.status === "dropped";
   }, droppable.id);
   await page.getByText("目标已放弃，记录仍可查看", { exact: true }).waitFor();
+  await page.getByRole("button", { name: "关闭", exact: true }).click();
+  await page.locator(".goal-row").filter({ hasText: "放弃交互验证" }).click();
+  await page.locator(".goal-detail-modal").waitFor();
+  assert.equal(await page.locator(".goal-attention-modal").count(), 0,
+    "an ended goal must open its history, not a live attention card");
   await page.getByRole("button", { name: "关闭", exact: true }).click();
   const offline = await page.evaluate(() => window.crewvane.command({
     type: "goal.create",
@@ -704,11 +747,18 @@ try {
     requestId: offlineState.dispatch.id,
     detail: "测试环境无法连接管家",
   });
+  await page.waitForFunction(async goalId => {
+    const snapshot = await window.crewvane.command({ type: "snapshot" });
+    const current = snapshot.goals.find(goal => goal.id === goalId);
+    return current?.attention?.source === "dispatch" && current.dispatch?.status === "failed";
+  }, offline.id);
   await page.getByRole("button", { name: "全部目标", exact: true }).click();
   await page.getByText("联系管家失败界面", { exact: true }).click();
-  await page.locator(".goal-state-pill").getByText("联系管家失败", { exact: true }).waitFor();
+  await page.locator(".goal-attention-modal").waitFor();
+  await page.locator(".attention-action-focus").getByText("联系管家失败", { exact: true }).waitFor();
   await page.getByRole("button", { name: "重试联系管家", exact: true }).waitFor();
   assert.equal(await page.getByText("负责人现场需要你处理", { exact: true }).count(), 0);
+  assert.equal(await page.locator(".goal-detail-modal").count(), 0);
   await page.waitForTimeout(250);
   await page.screenshot({ path: join(home, "dispatch-failure-light.png"), animations: "disabled" });
   await page.getByRole("button", { name: "关闭", exact: true }).click();

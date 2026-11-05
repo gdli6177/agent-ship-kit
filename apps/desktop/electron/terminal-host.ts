@@ -17,7 +17,11 @@ interface Connection extends TerminalSnapshot {
 // One attachment per workspace. Hiding the terminal never stops its agents.
 export class TerminalHost {
   private readonly connections = new Map<string, Connection>();
-  constructor(private readonly emit: (event: unknown) => void) {}
+  constructor(private readonly emit: (event: unknown) => void,
+    private environment: Record<string, string | undefined> = process.env) {}
+  setEnvironment(environment: Record<string, string | undefined>) {
+    this.environment = environment;
+  }
   async attach(executable: string, session: string, cwd: string): Promise<TerminalSnapshot> {
     const previous = this.connections.get(session);
     if (previous?.running) {
@@ -27,6 +31,7 @@ export class TerminalHost {
     const child = utilityProcess.fork(join(__dirname, "terminal-worker.cjs"), [], {
       serviceName: "Crewvane Herdr terminal",
       stdio: "pipe",
+      env: this.environment,
     });
     let resolve!: () => void, reject!: (reason: Error) => void;
     const ready = new Promise<void>((yes, no) => { resolve = yes; reject = no; });

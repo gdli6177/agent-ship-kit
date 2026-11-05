@@ -185,6 +185,9 @@ export class WorkspaceService {
         case "workspace.rename":
           state.name = text(command.name, "工作区名称", 80);
           return state.name;
+        case "workspace.recovery.dismiss":
+          delete state.recovery;
+          return true;
         case "agents.configure": {
           const startup = (value: unknown) => {
             if (typeof value !== "string" || !value.trim() || value.length > 2000 || /[\x00-\x1f\x7f;&|<>`$]/.test(value)) throw new Error("无效的 Agent 启动命令：请使用单行 CLI 命令与参数，不支持 shell 表达式");

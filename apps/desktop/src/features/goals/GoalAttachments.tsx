@@ -17,7 +17,7 @@ function GoalAttachmentTile({
   goalId: string;
   attachment: GoalAttachment;
   service: GoalDetailService;
-  remove: () => void;
+  remove?: () => void;
 }) {
   const [preview, setPreview] = useState("");
   useEffect(() => {
@@ -49,17 +49,19 @@ function GoalAttachmentTile({
         </span>
         <ArrowUpRight size={13} />
       </button>
-      <button
-        type="button"
-        className="goal-attachment-remove"
-        aria-label={`删除图片 ${attachment.name}`}
-        title="永久删除这张图片"
-        onClick={() => {
-          if (window.confirm(`永久删除图片「${attachment.name}」？`)) remove();
-        }}
-      >
-        <Trash2 size={13} />
-      </button>
+      {remove && (
+        <button
+          type="button"
+          className="goal-attachment-remove"
+          aria-label={`删除图片 ${attachment.name}`}
+          title="永久删除这张图片"
+          onClick={() => {
+            if (window.confirm(`永久删除图片「${attachment.name}」？`)) remove();
+          }}
+        >
+          <Trash2 size={13} />
+        </button>
+      )}
     </div>
   );
 }
@@ -69,11 +71,13 @@ export function GoalAttachments({
   attachments,
   service,
   remove,
+  readOnly = false,
 }: {
   goalId: string;
   attachments: GoalAttachment[];
   service: GoalDetailService;
-  remove: (attachmentId: string) => void;
+  remove?: (attachmentId: string) => void;
+  readOnly?: boolean;
 }) {
   return (
     <section className="goal-attachments">
@@ -88,13 +92,15 @@ export function GoalAttachments({
             goalId={goalId}
             attachment={attachment}
             service={service}
-            remove={() => remove(attachment.id)}
+            remove={!readOnly && remove ? () => remove(attachment.id) : undefined}
           />
         ))}
       </div>
-      <p className="attachment-retention">
-        目标结束后保留 30 天；也可以逐张删除或随目标永久删除。
-      </p>
+      {!readOnly && (
+        <p className="attachment-retention">
+          目标结束后保留 30 天；也可以逐张删除或随目标永久删除。
+        </p>
+      )}
     </section>
   );
 }

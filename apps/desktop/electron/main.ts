@@ -1,7 +1,7 @@
 import { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, nativeImage, Notification, shell, Tray } from "electron";
 import { watch, type FSWatcher } from "node:fs";
 import { access, chmod, lstat, mkdir, readFile, readlink, realpath, rm, stat, symlink, unlink, writeFile } from "node:fs/promises";
-import { dirname, join } from "node:path";
+import { basename, dirname, join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
@@ -44,7 +44,7 @@ const here = __dirname;
 const WINDOW_BACKGROUND = "#111520";
 const terminals = new TerminalHost((event) => {
   if (window && !window.isDestroyed()) window.webContents.send("crewvane:event", event);
-});
+}, process.env);
 const rendererURL = pathToFileURL(join(here, "renderer/index.html")).href;
 let tools: Executables, herdrInstallation: HerdrInstallation, herdrPlugin: HerdrPlugin, webhookNotifier: WebhookNotifier, skillInstaller: CrewvaneSkillInstaller;
 function sessionName(path = root) { return process.env.CREWVANE_HERDR_SESSION ?? `crewvane-${createHash("sha256").update(path ?? "").digest("hex").slice(0, 10)}`; }
@@ -179,7 +179,8 @@ async function installCliNow(workspace = root) {
 }
 function client(path: string, workspace = root) {
   const session = sessionName(workspace);
-  return new HerdrClient(herdrRunner(path, session), session, async () => {
+  if (!workspace) throw new Error("请先选择工作区");
+  return new HerdrClient(herdrRunner(path, session), session, workspace, async () => {
     await terminals.attach(path, session, workspace!);
     if (root === workspace) window.webContents.send("crewvane:event", { type: "terminal-available", session, title: "全局管家" });
   });
@@ -306,6 +307,7 @@ async function doPrepareConcierge(target: WorkspaceService) {
       preferences,
       command.args,
       agentExecutable,
+      (await cliStatus()).directory,
     );
     refreshedConcierges.set(target.root, conciergeIdentity(reference));
     await target.execute({
@@ -332,22 +334,23 @@ async function doPrepareConcierge(target: WorkspaceService) {
     throw new Error(`管家尚未准备好：${detail}`);
   }
 }
-async function openHerdr(reference?: HerdrReference) {
+async function openHerdr(reference?: HerdrReference, goalId?: string) {
   const target = activeService(), session = sessionName(target.root);
   const status = await herdrInstallation.ensure(); if (!status.executable) throw new Error("Herdr 尚未准备好，请在设置中重试");
   const connection = client(status.executable, target.root);
-  await terminals.attach(status.executable, session, target.root);
   await connection.ensureSession();
   if (reference?.tabId || reference?.agent) await connection.open(reference);
+  else await connection.ensureWorkspace();
+  await terminals.attach(status.executable, session, target.root);
   if (root === target.root) window.webContents.send("crewvane:event", {
-    type: "terminal-open", session, title: reference?.agent === "concierge" ? "全局管家" : "工作现场",
+    type: "terminal-open", session, title: reference?.agent === "concierge" ? "全局管家" : "工作现场", goalId,
   });
 }
-async function openConcierge(target = activeService()) {
+async function openConcierge(target = activeService(), goalId?: string) {
   // A stored tab is only a locator. It may still be open while the concierge
   // process has exited or been replaced by a manually started agent.
   const reference = await prepareConcierge(target);
-  await openHerdr(reference);
+  await openHerdr(reference, goalId);
   const latest = (await target.read()).concierge;
   if (latest.status !== "ready" || latest.detail) {
     await target.execute({
@@ -569,6 +572,14 @@ app.on("second-instance", () => { window?.show(); window?.focus(); });
 app.whenReady().then(async () => {
   if (process.env.CREWVANE_TEST_USER_DATA) app.setPath("userData", process.env.CREWVANE_TEST_USER_DATA);
   if (process.env.CREWVANE_TEST_HOME) app.setPath("home", process.env.CREWVANE_TEST_HOME);
+  if (process.env.CREWVANE_TEST_HOME) {
+    // Every Herdr child must address the same session, including the PTY and
+    // CLI diagnostics. Changing Electron's home alone leaves HOME unchanged.
+    process.env.HOME = app.getPath("home");
+    process.env.XDG_CONFIG_HOME = join(app.getPath("home"), ".config");
+    process.env.XDG_STATE_HOME = join(app.getPath("home"), ".local/state");
+  }
+  terminals.setEnvironment(process.env);
   webhookNotifier = new WebhookNotifier(app.getPath("userData"), app.getVersion());
   const managedBin = join(app.getPath("userData"), "runtime");
   tools = new Executables(app.getPath("home"), managedBin, process.env,
@@ -582,6 +593,7 @@ app.whenReady().then(async () => {
     process.arch,
     app.isPackaged ? join(process.resourcesPath, "herdr") : undefined,
   );
+  if (process.env.CREWVANE_TEST_ISOLATE_TOOLS === "1") herdrInstallation.disableBundledForTest();
   const integrationEnvironment = process.env.CREWVANE_TEST_HOME ? {
     ...process.env,
     HOME: app.getPath("home"),
@@ -726,10 +738,10 @@ app.whenReady().then(async () => {
     const item = goalId ? state.goals.find((goal) => goal.id === goalId) : undefined;
     if (goalId && !item) throw new Error("目标不存在");
     if (item?.mode === "concierge" && !item.herdr) {
-      await openConcierge(target);
+      await openConcierge(target, goalId);
       return;
     }
-    await openHerdr(item?.herdr);
+    await openHerdr(item?.herdr, goalId);
   });
   ipcMain.handle("crewvane:terminal-snapshot", (event) => { sender(event); activeService(); return terminals.snapshot(sessionName()); });
   ipcMain.handle("crewvane:terminal-write", (event, session: string, data: string) => {
@@ -739,6 +751,17 @@ app.whenReady().then(async () => {
     sender(event); activeService(); if (session !== sessionName()) throw new Error("终端不属于当前工作区"); terminals.resize(session, cols, rows);
   });
   ipcMain.handle("crewvane:open-url", async (event, url: string) => { sender(event); if (typeof url !== "string" || !url.startsWith("https://")) throw new Error("只允许打开 HTTPS 链接"); await shell.openExternal(url); });
+  ipcMain.handle("crewvane:open-recovery-backup", async (event) => {
+    sender(event);
+    const target = activeService(), recovery = (await target.read()).recovery;
+    if (!recovery) throw new Error("当前工作区没有待查看的旧版备份");
+    const owner = await realpath(target.root),
+      archived = await realpath(recovery.archivedPath).catch(() => "");
+    if (!archived || dirname(archived) !== owner || !basename(archived).startsWith(".crewvane.backup-"))
+      throw new Error("旧版备份路径已失效或不属于当前工作区");
+    const failure = await shell.openPath(archived);
+    if (failure) throw new Error(`无法打开旧版备份：${failure}`);
+  });
   ipcMain.handle("crewvane:show-cli", async (event) => { sender(event); shell.showItemInFolder((await cliStatus()).path); });
   // Use the approved application artwork, with a Retina representation.
   const traySource = nativeImage.createFromPath(join(here, "assets/crewvane-icon.png"));

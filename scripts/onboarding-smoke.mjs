@@ -53,11 +53,16 @@ try {
   page.on("pageerror", error => errors.push(String(error)));
   await page.getByRole("button", { name: "选择存储位置并开始" }).waitFor();
   // The app must install Herdr itself, with no Homebrew and no system Herdr.
-  await expect.poll(async () => {
-    const status = await page.evaluate(() => window.crewvane.herdrStatus());
-    return status.installed && status.phase === "ready" && !!status.latestVersion;
-  }, { timeout: 180_000 }).toBe(true);
-  installed = await page.evaluate(() => window.crewvane.herdrStatus());
+  const installDeadline = Date.now() + 180_000;
+  do {
+    installed = await page.evaluate(() => window.crewvane.herdrStatus());
+    if (installed.phase === "error")
+      throw new Error(`Herdr 自动安装失败：${installed.detail ?? JSON.stringify(installed)}`);
+    if (installed.installed && installed.phase === "ready" && installed.latestVersion) break;
+    await new Promise(resolve => setTimeout(resolve, 500));
+  } while (Date.now() < installDeadline);
+  assert.ok(installed?.installed && installed.phase === "ready" && installed.latestVersion,
+    `Herdr 自动安装超时：${JSON.stringify(installed)}`);
   assert.equal(installed.phase, "ready", JSON.stringify(installed));
   assert.ok(installed.executable, JSON.stringify(installed));
   assert.equal(installed.version, installed.latestVersion);
@@ -110,9 +115,27 @@ try {
   assert.equal(await page.getByRole("dialog").isVisible(), true);
   await picker(legacy);
   await page.getByRole("dialog").getByRole("button", { name: "选择其他工作区文件夹" }).click();
-  await page.getByRole("dialog").getByRole("alert").filter({hasText:"不支持的工作区状态版本"}).waitFor();
-  assert.equal((await page.evaluate(() => window.crewvane.environment())).workspace, await realpath(rootA));
-  assert.ok(!(await page.getByRole("dialog").getByRole("alert").innerText()).includes("remote method"));
+  await expect.poll(async () =>
+    (await page.evaluate(() => window.crewvane.environment())).workspace
+  ).toBe(await realpath(legacy));
+  await page.getByText("旧版工作区已自动保护", { exact: true }).waitFor();
+  await page.screenshot({ path: join(home, "legacy-recovered-dark.png"), animations:"disabled" });
+  const recovered = await page.evaluate(() => window.crewvane.command({type:"snapshot"}));
+  assert.equal(recovered.recovery.reason, "unsupported-version");
+  assert.equal(JSON.parse(await readFile(join(legacy, ".crewvane/state.json"), "utf8")).version, 2);
+  assert.equal((await stat(recovered.recovery.archivedPath)).isDirectory(), true);
+  assert.equal(
+    JSON.parse(await readFile(join(recovered.recovery.archivedPath, "state.json"), "utf8")).version,
+    1,
+  );
+  await page.getByRole("button", { name: "浅色模式", exact: true }).click();
+  await page.screenshot({ path: join(home, "legacy-recovered-light.png"), animations:"disabled" });
+  await page.getByRole("button", { name: "深色模式", exact: true }).click();
+  await page.getByRole("button", { name: "关闭恢复提示", exact: true }).click();
+  await page.getByText("旧版数据继续保留在备份目录中。", { exact: true }).waitFor();
+  assert.equal(await page.getByText("旧版工作区已自动保护", { exact: true }).count(), 0);
+  await page.getByRole("button", { name: "设置", exact: true }).click();
+  await page.getByRole("button", { name: "更换工作区", exact: true }).click();
   await picker(rootB);
   await page.getByRole("dialog").getByRole("button", { name: "选择其他工作区文件夹" }).click();
   await expect.poll(async () =>
@@ -384,9 +407,9 @@ try {
   await restored.getByRole("button", { name: "找管家", exact: true }).click();
   await expect.poll(async () => (await restored.evaluate(() => window.crewvane.command({type:"snapshot"})))
     .concierge.status, { timeout: 90_000 }).toBe("ready");
-  const recovered = (await restored.evaluate(() => window.crewvane.command({type:"snapshot"}))).concierge;
-  assert.notEqual(recovered.paneId, firstReference.paneId);
-  assert.notEqual(recovered.processId, firstReference.processId);
+  const recoveredConcierge = (await restored.evaluate(() => window.crewvane.command({type:"snapshot"}))).concierge;
+  assert.notEqual(recoveredConcierge.paneId, firstReference.paneId);
+  assert.notEqual(recoveredConcierge.processId, firstReference.processId);
   await expect.poll(() => readFile(log, "utf8").then(value =>
     value.split("\n").filter(line => line.includes('"kind":"start"')).length),
   { timeout: 10_000 }).toBe(3);
@@ -416,7 +439,8 @@ try {
     "bundled Herdr plugin auto-linked", "real Herdr plugin pane renders Crewvane attention",
     "real Herdr plugin action creates a one-line goal",
     "real Herdr pane close event reaches the matching goal",
-    "same directory feedback", "cancel preserves state", "invalid workspace preserves state and shows readable error", "workspace switching",
+    "same directory feedback", "cancel preserves state", "legacy workspace is archived and automatically recovered",
+    "workspace switching",
     "packaged Crewvane skill installs into detected agent directories", "system clipboard round trip",
     "arbitrary CLI saves and starts", "native argv preserved", "reuse custom concierge",
     "real goal and delegation-only role delivered to CLI stdin", "raw Herdr opens independently", "restart reuses installed latest and running CLI",

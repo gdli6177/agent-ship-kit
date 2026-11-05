@@ -43,6 +43,9 @@ import type {
 } from "../../../packages/core/src/types.js";
 import { api } from "./api.js";
 import { GoalDetail } from "./features/goals/GoalDetail.js";
+import { GoalAttentionCard } from "./features/goals/GoalAttentionCard.js";
+import { goalEntryDestination } from "./features/goals/goalEntry.js";
+import { presentSceneContext } from "./features/goals/goalPresentation.js";
 import type { GoalDetailService } from "./features/goals/goalService.js";
 import type { WebhookSettings } from "../electron/webhook-notifications.js";
 import pixelMark from "../assets/brand/crewvane-mage.png";
@@ -353,7 +356,7 @@ function App() {
     [query, setQuery] = useState(""),
     [filter, setFilter] = useState("all");
   const [modal, setModal] = useState<
-      "new" | "project" | "goal" | "edit" | "delivery" | "workspace" | "webhook" | ""
+      "new" | "project" | "attention" | "goal" | "edit" | "delivery" | "workspace" | "webhook" | ""
     >(""),
     [goalId, setGoalId] = useState("");
   const [error, setError] = useState(""),
@@ -370,7 +373,9 @@ function App() {
       statuses: goalStatusOptions.map(([value]) => value),
     });
   const [agentOptions, setAgentOptions] = useState<{ kind: string; installed: boolean }[]>([]);
-  const [terminal, setTerminal] = useState<{ session: string; title: string; visible: boolean }>();
+  const [terminal, setTerminal] = useState<{ session: string; title: string; goalId?: string; visible: boolean }>();
+  const stateRef = useRef(state);
+  stateRef.current = state;
   const pendingState = useRef<{ state: WorkspaceState; signature: string } | undefined>(undefined);
   const stateFrame = useRef<number | undefined>(undefined);
   const lastStateSignature = useRef("");
@@ -412,6 +417,8 @@ function App() {
           .toLowerCase()
           .includes(query.toLowerCase()),
     );
+  const sceneGoal = terminal?.goalId ? state.goals.find(item => item.id === terminal.goalId) : undefined;
+  const sceneContext = sceneGoal ? presentSceneContext(sceneGoal, state) : undefined;
   useEffect(() => {
     document.documentElement.dataset.theme = theme;
     localStorage.setItem("crewvane.theme", theme);
@@ -442,7 +449,7 @@ function App() {
         setTerminal(current => current?.session === event.session ? current : { session: event.session, title: event.title, visible: false });
       }
       if (event.type === "terminal-open") {
-        setTerminal({ session: event.session, title: event.title, visible: true });
+        setTerminal({ session: event.session, title: event.title, goalId: event.goalId, visible: true });
       }
     });
     void api.herdrStatus().then(setHerdr).catch(showError);
@@ -555,8 +562,30 @@ function App() {
     }
   }
   function openGoal(id: string) {
-    setGoalId(id);
-    setModal("goal");
+    const item = stateRef.current.goals.find(goal => goal.id === id);
+    if (!item) return;
+    const destination = goalEntryDestination(item);
+    if (destination === "scene") {
+      void openScene(item.id);
+      return;
+    }
+    setGoalId(item.id);
+    setModal(destination === "attention" ? "attention" : "goal");
+  }
+  function attentionActionLabel(item: Goal) {
+    const kind = attentionKind(item);
+    if (kind === "review") return "查看并验收";
+    if (kind === "decision") return "作出决定";
+    if (kind === "follow_up") return "处理跟进";
+    if (item.attention?.source === "dispatch") return "恢复联系";
+    return "进入现场";
+  }
+  function goalRowLabel(item: Goal) {
+    const destination = goalEntryDestination(item);
+    if (destination === "details" && (item.status === "completed" || item.status === "dropped")) return "查看记录";
+    if (destination === "scene") return "回到现场";
+    if (destination === "attention") return attentionActionLabel(item);
+    return "查看目标";
   }
   async function saveGoal(text: string, files: File[]) {
     setBusy(true);
@@ -740,6 +769,28 @@ function App() {
             </IconButton>
           </div>
         )}
+        {state.recovery && (
+          <div className="recovery-notice" role="status" aria-live="polite">
+            <CircleAlert size={18} />
+            <div>
+              <strong>旧版工作区已自动保护</strong>
+              <p>{state.recovery.detail} 已创建兼容的新工作区，旧数据没有被删除。</p>
+              <code title={state.recovery.archivedPath}>{state.recovery.archivedPath}</code>
+            </div>
+            <button className="secondary" type="button" onClick={() => void api.openRecoveryBackup().catch(showError)}>
+              <Folder size={14} />
+              打开备份
+            </button>
+            <IconButton
+              label="关闭恢复提示"
+              onClick={() => void execute({ type: "workspace.recovery.dismiss" })
+                .then(() => notify("旧版数据继续保留在备份目录中。"))
+                .catch(showError)}
+            >
+              <X size={15} />
+            </IconButton>
+          </div>
+        )}
         {herdr && (herdr.phase === "checking" || herdr.phase === "downloading" || herdr.phase === "error") && (
           <div className={`setup-status ${herdr.phase}`} role="status" aria-live="polite">
             <SquareTerminal size={16} />
@@ -853,7 +904,7 @@ function App() {
                           </div>
                           <span className="card-link">
                             <span className="card-link-label">
-                              {kind === "review" ? "查看并验收" : "查看下一步"}
+                              {attentionActionLabel(item)}
                             </span>
                             <ArrowRight size={15} />
                           </span>
@@ -978,9 +1029,7 @@ function App() {
                         <p>{item.next}</p>
                       </div>
                       <span className={`status-pill ${item.status}`}>
-                        {attention.includes(item)
-                          ? attentionLabel[attentionKind(item)!]
-                          : statusLabel[item.status]}
+                        {goalRowLabel(item)}
                       </span>
                       <ChevronRight />
                     </button>
@@ -1053,7 +1102,23 @@ function App() {
           )}
         </main>
       </div>
-      {terminal && <Suspense fallback={null}><HerdrTerminal session={terminal.session} title={terminal.title} theme={theme} visible={terminal.visible && !modal} onClose={() => setTerminal(current => current ? { ...current, visible: false } : current)} /></Suspense>}
+      {terminal && <Suspense fallback={null}><HerdrTerminal
+        session={terminal.session}
+        title={terminal.title}
+        goal={sceneContext}
+        theme={theme}
+        visible={terminal.visible && !modal}
+        onClose={() => setTerminal(current => current ? { ...current, visible: false } : current)}
+        onOpenGoal={id => {
+          setGoalId(id);
+          setModal("goal");
+        }}
+        onReturnToAttention={() => {
+          setPage("home");
+          setProjectId("");
+          setTerminal(current => current ? { ...current, visible: false } : current);
+        }}
+      /></Suspense>}
       {modal === "workspace" && <Modal title="工作区存储位置" description="这里只设置所有目标、提醒和管家的保存位置，不是选择项目。" error={error} onClose={() => setModal("")}>
         <div className="workspace-location">
           <Folder size={22} />
@@ -1192,6 +1257,19 @@ function App() {
           busy={busy}
           onClose={() => setModal("")}
           onSubmit={saveGoal}
+        />
+      )}
+      {modal === "attention" && goal && (
+        <GoalAttentionCard
+          key={goal.id}
+          goal={goal}
+          state={state}
+          service={goalDetailService}
+          busy={busy}
+          error={error}
+          onClose={() => setModal("")}
+          openDetails={() => setModal("goal")}
+          notify={notify}
         />
       )}
       {modal === "project" && (
@@ -1563,6 +1641,8 @@ function Settings({
             <h3>Herdr 与全局管家</h3>
             <p>会话由 Herdr 托管，关闭 Crewvane 窗口也不会终止。</p>
             <p>启动时自动检查最新版，并安装 Crewvane 注意力面板插件，无需 Homebrew。</p>
+            {herdr?.session && <p>外部终端连接同一现场：<code>herdr session attach {herdr.session}</code></p>}
+            <p>裸跑 herdr 默认连接 default Session，不会自动显示这个工作区。</p>
             {herdr?.executable && <code className="tool-location">{herdr.executable}</code>}
           </span>
         </div>

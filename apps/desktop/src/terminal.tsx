@@ -1,8 +1,9 @@
 import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
 import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
-import { Grip, Maximize2, Minimize2, RefreshCw, X } from "lucide-react";
+import { ArrowLeft, ChevronRight, FileText, Grip, Maximize2, Minimize2, RefreshCw, X } from "lucide-react";
 import { api } from "./api.js";
+import type { GoalSceneContext } from "./features/goals/goalPresentation.js";
 import "@xterm/xterm/css/xterm.css";
 
 type TerminalGeometry = { x: number; y: number; width: number; height: number };
@@ -33,8 +34,10 @@ function boundedGeometry(input: TerminalGeometry): TerminalGeometry {
     height,
   };
 }
-export function HerdrTerminal({ session, title, theme, visible, onClose }: {
-  session: string; title: string; theme: string; visible: boolean; onClose: () => void;
+export function HerdrTerminal({ session, title, goal, theme, visible, onClose, onOpenGoal, onReturnToAttention }: {
+  session: string; title: string; goal?: GoalSceneContext; theme: string; visible: boolean; onClose: () => void;
+  onOpenGoal: (goalId: string) => void;
+  onReturnToAttention: () => void;
 }) {
   const container = useRef<HTMLDivElement>(null);
   const term = useRef<Terminal | undefined>(undefined);
@@ -208,8 +211,27 @@ export function HerdrTerminal({ session, title, theme, visible, onClose }: {
           <button className="secondary terminal-hide" title="隐藏面板，Agent 继续执行" onClick={onClose}><X size={15} />隐藏终端</button>
         </div>
       </header>
+      {goal && (
+        <div className="scene-context" role="region" aria-label={`现场目标：${goal.title}`}>
+          <button type="button" className="scene-attention" onClick={onReturnToAttention}>
+            <ArrowLeft size={14} />回到注意力
+          </button>
+          <span className="scene-context-divider" />
+          <div className="scene-goal-copy">
+            <small>{goal.projectName} · {goal.label}</small>
+            <strong title={goal.title}>{goal.title}</strong>
+          </div>
+          <div className="scene-current-action" title={goal.currentAction}>
+            <small>当前事项</small>
+            <span>{goal.currentAction}</span>
+          </div>
+          <button type="button" className="scene-record" onClick={() => onOpenGoal(goal.id)}>
+            <FileText size={14} /><span>目标记录</span><ChevronRight size={13} />
+          </button>
+        </div>
+      )}
       {error && <div className="terminal-error" role="alert"><span>{error}</span><button className="secondary" onClick={async () => {
-        try { await api.openHerdr(); setAttempt((value) => value + 1); }
+        try { await api.openHerdr(goal?.id); setAttempt((value) => value + 1); }
         catch (reason) { setError(String(reason)); }
       }}><RefreshCw size={14} />重新连接</button></div>}
       <div className="terminal-surface" ref={container} />

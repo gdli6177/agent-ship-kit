@@ -185,7 +185,7 @@ export function GoalActionDock({
         </span>
         <div>
           <strong>还没有联系上管家</strong>
-          <small>{goal.dispatch?.detail || "目标已经安全保存，可以直接重试。"}</small>
+          <small>目标已经安全保存，恢复连接后可以直接重试。</small>
         </div>
         <div className="goal-action-buttons">
           <button

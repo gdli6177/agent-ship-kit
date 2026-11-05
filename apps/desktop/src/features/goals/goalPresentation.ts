@@ -85,6 +85,25 @@ export interface GoalPresentation {
   dueFollowUp: boolean;
 }
 
+export interface GoalSceneContext {
+  id: string;
+  title: string;
+  projectName: string;
+  label: string;
+  currentAction: string;
+}
+
+export function presentSceneContext(goal: Goal, state: WorkspaceState): GoalSceneContext {
+  const view = presentGoal(goal, state);
+  return {
+    id: goal.id,
+    title: goal.title,
+    projectName: view.projectName,
+    label: view.label,
+    currentAction: goal.attention?.summary || goal.next || view.brief,
+  };
+}
+
 export function presentGoal(goal: Goal, state: WorkspaceState): GoalPresentation {
   const ended = goal.status === "completed" || goal.status === "dropped";
   const kind = attentionKind(goal);

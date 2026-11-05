@@ -27,7 +27,11 @@ export class HerdrInstallation {
     readonly emit: (status: HerdrStatus) => void,
     readonly fetcher: typeof fetch = fetch,
     readonly platform = process.platform, readonly arch = process.arch,
-    readonly bundledPath?: string) {}
+    private bundledPath?: string) {}
+  disableBundledForTest() {
+    // Isolated UI tests must not silently reuse the packaged production Herdr.
+    this.bundledPath = undefined;
+  }
   private publish(status: HerdrStatus) { this.current = status; this.emit({ ...status }); return { ...status }; }
   private async installed() {
     // A file existing is not enough: wrong-architecture/stale executables must

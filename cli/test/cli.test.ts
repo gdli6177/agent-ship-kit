@@ -1,6 +1,6 @@
 import test, { afterEach } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { tmpdir } from "node:os";
@@ -52,6 +52,22 @@ test("real CLI writes goals that desktop service can read", async () => {
   assert.equal((await call(root, ["goal", "accept", item.id])).json.status, "completed");
   assert.equal((await call(root, ["goal", "show", item.id])).json.activities.length, 7);
 });
+test("CLI reports an automatically protected legacy workspace", async () => {
+  const root = await fixture("crewvane-cli-recovery-");
+  await mkdir(join(root, ".crewvane"), { recursive: true });
+  await writeFile(join(root, ".crewvane/state.json"), JSON.stringify({ version: 1, tasks: [] }));
+  let stdout = "";
+  const code = await run(["status", "--root", root], {
+    out: text => { stdout += text; },
+    error: () => {},
+  });
+  assert.equal(code, 0);
+  assert.match(stdout, /旧版工作区已自动保护/);
+  assert.match(stdout, /\.crewvane\.backup-/);
+  const next = JSON.parse(await readFile(join(root, ".crewvane/state.json"), "utf8"));
+  assert.equal(next.version, 2);
+  assert.equal(next.recovery.reason, "unsupported-version");
+});
 test("CLI rejects incomplete or fabricated review records", async () => {
   const root = await fixture("crewvane-cli-invalid-");
   const created = await call(root, ["goal", "create", "--title", "检查证据", "--project", "personal"]);
@@ -61,6 +77,10 @@ test("CLI rejects incomplete or fabricated review records", async () => {
 test("CLI records a custom terminal transport and rejects missing process identity", async () => {
   const root = await fixture("crewvane-cli-custom-");
   const created = await call(root, ["goal", "create", "--title", "自定义 CLI", "--project", "personal"]);
+  const noTarget = await call(root, ["session", "set", "--pane", "w1:p0", "--agent", "owner"]);
+  assert.equal(noTarget.code, 1);
+  assert.match(noTarget.stderr, /必须指定目标 ID/);
+  assert.equal((await new WorkspaceService(root).read()).concierge.agent, undefined);
   const missing = await call(root, ["session", "set", created.json.id, "--pane", "w1:p1", "--transport", "pane"]);
   assert.equal(missing.code, 1); assert.match(missing.stderr, /前台进程 ID/);
   const valid = await call(root, ["session", "set", created.json.id, "--pane", "w1:p1", "--transport", "pane", "--process-id", "123"]);
@@ -68,6 +88,50 @@ test("CLI records a custom terminal transport and rejects missing process identi
   assert.equal((await new WorkspaceService(root).read()).goals[0]?.herdr?.processId, 123);
   const invalid = await call(root, ["session", "set", created.json.id, "--pane", "w1:p1", "--transport", "shell", "--process-id", "123"]);
   assert.equal(invalid.code, 1);
+});
+test("owner names from the managed pane are attributed without manual flags", async () => {
+  const root = await fixture("crewvane-cli-owner-name-");
+  const created = (await call(root, ["goal", "create", "--title", "负责人署名"])).json as Goal;
+  const previous = process.env.CREWVANE_AGENT_NAME;
+  process.env.CREWVANE_AGENT_NAME = "trial-owner";
+  try {
+    const reviewed = await call(root, ["goal", "review", created.id,
+      "--summary", "真实成果", "--check", "检查::true::passed::通过"]);
+    assert.equal(reviewed.code, 0, reviewed.stderr);
+    assert.equal(reviewed.json.delivery.submittedBy, "trial-owner");
+    assert.equal(reviewed.json.activities.at(-1).actor, "trial-owner");
+  } finally {
+    if (previous === undefined) delete process.env.CREWVANE_AGENT_NAME;
+    else process.env.CREWVANE_AGENT_NAME = previous;
+  }
+});
+test("owner launch is routed through the current concierge case", async () => {
+  const root = await fixture("crewvane-cli-owner-launch-");
+  const created = (await call(root, ["goal", "create", "--title", "启动负责人"])).json as Goal;
+  const previousEnv = process.env.HERDR_ENV;
+  const previousSession = process.env.HERDR_SESSION;
+  delete process.env.HERDR_ENV;
+  process.env.HERDR_SESSION = "crewvane-test";
+  try {
+    const result = await coordinator(root, created.id, () =>
+      call(root, [
+        "owner",
+        "launch",
+        created.id,
+        "--name",
+        "case-owner",
+        "--task",
+        "完成当前目标",
+      ])
+    );
+    assert.equal(result.code, 1);
+    assert.match(result.stderr, /Herdr 管家的受管现场/);
+  } finally {
+    if (previousEnv === undefined) delete process.env.HERDR_ENV;
+    else process.env.HERDR_ENV = previousEnv;
+    if (previousSession === undefined) delete process.env.HERDR_SESSION;
+    else process.env.HERDR_SESSION = previousSession;
+  }
 });
 test("Herdr plugin events update only their real owner pane and record exits", async () => {
   const root = await fixture("crewvane-cli-live-event-");

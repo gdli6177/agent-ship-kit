@@ -1,4 +1,4 @@
-import type { AttentionKind, Goal, ProjectPolicy, WorkspaceState } from "./types.js";
+import type { AttentionKind, Goal, ProjectPolicy, WorkspaceRecovery, WorkspaceState } from "./types.js";
 export const newId = (prefix: string) => `${prefix}_${globalThis.crypto.randomUUID().replaceAll("-", "").slice(0, 16)}`;
 export const defaultProjectPolicy = (): ProjectPolicy => ({
   shipPolicy: "external-approval",
@@ -6,13 +6,14 @@ export const defaultProjectPolicy = (): ProjectPolicy => ({
   revision: 1,
   updatedAt: new Date().toISOString(),
 });
-export const initialState = (): WorkspaceState => ({
+export const initialState = (recovery?: WorkspaceRecovery): WorkspaceState => ({
   version: 2,
   name: "我的工作台",
   projects: [{ id: "personal", name: "个人事项", policy: defaultProjectPolicy(), createdAt: new Date().toISOString() }],
   workflows: [],
   goals: [],
   decisions: [],
+  ...(recovery ? { recovery } : {}),
   concierge: { session: "crewvane", status: "not_ready" },
 });
 export function attentionGoals(goals: Goal[], now = Date.now()): Goal[] {

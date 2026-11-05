@@ -24,6 +24,7 @@ export interface DesktopApi {
   writeTerminal(session: string, data: string): Promise<void>;
   resizeTerminal(session: string, cols: number, rows: number): Promise<void>;
   openHerdr(goalId?: string): Promise<void>; openUrl(url: string): Promise<void>; showCli(): Promise<void>;
+  openRecoveryBackup(): Promise<void>;
   openTerminal(): Promise<void>;
   subscribe(listener: (event: any) => void): () => void;
 }

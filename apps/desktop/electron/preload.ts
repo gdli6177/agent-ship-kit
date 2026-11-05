@@ -25,5 +25,6 @@ contextBridge.exposeInMainWorld("crewvane", {
   writeTerminal: (session: string, data: string) => ipcRenderer.invoke("crewvane:terminal-write", session, data),
   resizeTerminal: (session: string, cols: number, rows: number) => ipcRenderer.invoke("crewvane:terminal-resize", session, cols, rows),
   openHerdr: (goalId?: string) => ipcRenderer.invoke("crewvane:open-herdr", goalId), openUrl: (url: string) => ipcRenderer.invoke("crewvane:open-url", url), showCli: () => ipcRenderer.invoke("crewvane:show-cli"),
+  openRecoveryBackup: () => ipcRenderer.invoke("crewvane:open-recovery-backup"),
   subscribe: (listener: (event: any) => void) => { const handler = (_: unknown, data: unknown) => listener(data); ipcRenderer.on("crewvane:event", handler); return () => ipcRenderer.removeListener("crewvane:event", handler); },
 });
