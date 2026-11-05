@@ -513,6 +513,12 @@ try {
   await page.getByLabel("下一步", { exact: true }).fill("等待下一次核对");
   await page.getByLabel("跟进提醒", { exact: true }).fill("2030-01-01T09:30");
   await page.getByRole("button", { name: "保存更新", exact: true }).click();
+  await page.waitForFunction(async goalId => {
+    const state = await window.crewvane.command({ type: "snapshot" });
+    const item = state.goals.find(goal => goal.id === goalId);
+    return item?.status === "waiting" &&
+      item.remindAt === new Date("2030-01-01T09:30").toISOString();
+  }, personal.id);
   let manual = (await service.read()).goals.find(item => item.title === "个人事项界面闭环");
   assert.equal(manual.status, "waiting");
   assert.equal(manual.remindAt, new Date("2030-01-01T09:30").toISOString());
@@ -548,6 +554,10 @@ try {
   await page.getByText("现在不用处理", { exact: true }).waitFor();
   assert.equal(await page.getByLabel("当前安排").count(), 0);
   await page.getByRole("button", { name: "1 小时后提醒", exact: true }).click();
+  await page.waitForFunction(async goalId => {
+    const state = await window.crewvane.command({ type: "snapshot" });
+    return Date.parse(state.goals.find(goal => goal.id === goalId)?.remindAt ?? "") > Date.now();
+  }, waiting.id);
   let waitingState = (await service.read()).goals.find(item => item.id === waiting.id);
   assert.ok(Date.parse(waitingState.remindAt) > Date.now());
   assert.equal(waitingState.status, "waiting");
