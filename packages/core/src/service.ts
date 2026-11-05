@@ -905,6 +905,9 @@ export class WorkspaceService {
             !["working", "idle", "done", "blocked", "unknown"].includes(command.live.state))
             throw new Error("无效的 Herdr 状态");
           const reference = command.reference;
+          if (reference?.processId !== undefined &&
+            (!Number.isSafeInteger(reference.processId) || reference.processId <= 0))
+            throw new Error("无效的管家进程 ID");
           const concierge: WorkspaceState["concierge"] = {
             session: reference?.session ?? "crewvane",
             ...(reference?.workspaceId === undefined ? {} : { workspaceId: reference.workspaceId }),
@@ -979,6 +982,8 @@ export class WorkspaceService {
           for (const item of state.goals) {
             const reference = item.herdr;
             if (["completed", "dropped"].includes(item.status) || !reference ||
+              (command.reference?.agent !== undefined &&
+                reference.agent !== command.reference.agent) ||
               (target.paneId !== undefined && reference.paneId !== target.paneId) ||
               (target.tabId !== undefined && reference.tabId !== target.tabId) ||
               (target.workspaceId !== undefined && reference.workspaceId !== target.workspaceId)) continue;
@@ -991,6 +996,39 @@ export class WorkspaceService {
               item.herdr = { ...reference, ...structuredClone(command.reference) };
             if (command.presence.state !== "blocked" && item.attention?.source === "live")
               item.attention = null;
+            matched += 1;
+          }
+          const concierge = state.concierge;
+          if (
+            (
+              command.presence.reachable === false ||
+              command.reference?.agent === concierge.agent
+            ) &&
+            (target.paneId === undefined || concierge.paneId === target.paneId) &&
+            (target.tabId === undefined || concierge.tabId === target.tabId) &&
+            (target.workspaceId === undefined || concierge.workspaceId === target.workspaceId)
+          ) {
+            if (command.reference) {
+              state.concierge = {
+                ...concierge,
+                ...structuredClone(command.reference),
+              };
+            }
+            const current = state.concierge;
+            current.live = {
+              state: command.presence.state,
+              checkedAt: iso(command.presence.checkedAt),
+              ...(command.presence.reachable === undefined
+                ? {}
+                : { reachable: Boolean(command.presence.reachable) }),
+            };
+            if (command.presence.reachable === false) {
+              current.status = "not_ready";
+              current.detail = "管家现场已关闭或不可达，请恢复管家。";
+            } else {
+              current.status = "ready";
+              delete current.detail;
+            }
             matched += 1;
           }
           return { matched };

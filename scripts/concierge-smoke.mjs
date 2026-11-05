@@ -84,7 +84,7 @@ try {
   await page.getByRole("button", { name: "回到现场", exact: true }).click();
   await wait((state) => state.concierge.status === "ready", "准备管家", 120_000);
   await page.locator(".terminal-panel").waitFor({ timeout: 120_000 });
-  await page.getByRole("button", { name: "展开现场面板" }).click();
+  await page.getByRole("button", { name: "全屏显示现场" }).click();
   const remindAt = new Date(Date.now() + 90_000).toISOString();
   if (!resume) await say(`这是隔离工作区的真实产品试用。请直接落实三个事项，不要求我填写表单：第一，在项目 Alpha 创建目标“交付样稿”，请你创建名为 trial-owner 的真实负责人会话完成，给它身份和任务，不要自己代做。负责人在 alpha/result.md 写入一段包含 READY 的说明，并实际运行一个读取该文件且断言 READY 存在的命令，检查通过后提交交付，记录真实文件位置、实际命令和结果，绑定真实负责人现场。第二，在项目 Beta 创建“等待 YR 审批”，现在等 YR，下一步是确认审批结果，提醒时间 ${remindAt}，不发送外部消息。第三，在个人事项创建“确认出行日期”，这个日期必须由我决定，给我“周四还是周五出行？”这个问题。先把三个事项全部记录，然后推进负责人交付；其中一个事项等待人，不要停止另外两个事项。`);
   if (resume) await captureAgents("resumed");

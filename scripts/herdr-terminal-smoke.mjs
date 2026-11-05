@@ -3,11 +3,34 @@ import { mkdir, mkdtemp, readFile, rm } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { tmpdir } from "node:os";
 import { randomUUID } from "node:crypto";
-import { execFile } from "node:child_process";
+import { execFile, spawn } from "node:child_process";
 import { promisify } from "node:util";
 import assert from "node:assert/strict";
 
 const exec = promisify(execFile);
+async function readSystemClipboard() {
+  return (await exec("/usr/bin/pbpaste", [], {
+    timeout: 5_000,
+    maxBuffer: 2_000_000,
+  })).stdout;
+}
+async function writeSystemClipboard(value) {
+  await new Promise((resolveWrite, rejectWrite) => {
+    const child = spawn("/usr/bin/pbcopy", [], {
+      stdio: ["pipe", "ignore", "pipe"],
+    });
+    let stderr = "";
+    child.stderr.setEncoding("utf8");
+    child.stderr.on("data", chunk => { stderr += chunk; });
+    child.once("error", rejectWrite);
+    child.once("close", code => {
+      if (code === 0) resolveWrite();
+      else rejectWrite(new Error(`pbcopy exited with ${code}: ${stderr.trim()}`));
+    });
+    child.stdin.end(value);
+  });
+}
+const originalClipboard = await readSystemClipboard().catch(() => undefined);
 const home = await mkdtemp(join(tmpdir(), "crewvane-embedded-terminal-"));
 const workspace = join(home, "workspace"), session = `crewvane-tty-${randomUUID().slice(0, 8)}`;
 await mkdir(workspace);
@@ -49,6 +72,47 @@ try {
   await page.locator(".xterm-accessibility").filter({ hasText: marker }).waitFor({ state: "attached" });
   const firstPid = await app.evaluate(({ app }) => app.getAppMetrics().filter(item => item.name === "Crewvane Herdr terminal").map(item => item.pid));
   assert.equal(firstPid.length, 1);
+  // Exercise the same system clipboard path a real Mac uses. Selecting a
+  // rendered accessibility row drives xterm's own selection model; Cmd+C then
+  // goes through the custom key handler exposed by the embedded terminal.
+  const textarea = page.locator(".xterm-helper-textarea");
+  await textarea.focus();
+  const selected = await page.evaluate((value) => {
+    const tree = document.querySelector(".xterm-accessibility-tree");
+    if (!tree) throw new Error("xterm accessibility tree is missing");
+    const walker = document.createTreeWalker(tree, NodeFilter.SHOW_TEXT);
+    let node;
+    while ((node = walker.nextNode())) {
+      const offset = node.data.indexOf(value);
+      if (offset < 0) continue;
+      const range = document.createRange();
+      range.setStart(node, offset);
+      range.setEnd(node, offset + value.length);
+      const selection = window.getSelection();
+      if (!selection) throw new Error("document selection is unavailable");
+      selection.removeAllRanges();
+      selection.addRange(range);
+      document.dispatchEvent(new Event("selectionchange"));
+      return selection.toString();
+    }
+    throw new Error("terminal marker was not found in the accessibility tree");
+  }, marker);
+  assert.equal(selected, marker);
+  await page.keyboard.press("Meta+C");
+  await expect.poll(readSystemClipboard, { timeout: 10_000 }).toBe(marker);
+  // Paste a shell command from the real system clipboard, then submit it with
+  // Enter. The file is authoritative evidence that the PTY received it.
+  const pasteMarker = `paste_${randomUUID().replaceAll("-", "")}`;
+  const pasteFile = join(workspace, "terminal-paste.txt");
+  const pasteCommand = `/usr/bin/printf '%s' '${pasteMarker}' > '${pasteFile}'`;
+  await writeSystemClipboard(pasteCommand);
+  await textarea.focus();
+  await page.keyboard.press("Meta+V");
+  await page.waitForFunction((value) =>
+    document.querySelector(".xterm-accessibility-tree")?.textContent?.includes(value),
+  pasteMarker, { timeout: 10_000 });
+  await page.keyboard.press("Enter");
+  await expect.poll(() => readFile(pasteFile, "utf8").catch(() => ""), { timeout: 30_000 }).toBe(pasteMarker);
   await page.getByRole("button", { name: "隐藏终端", exact: true }).click();
   assert.equal(await page.locator(".terminal-panel").isVisible(), false);
   await page.locator(".top-actions").getByRole("button", { name: "新目标", exact: true }).click();
@@ -66,6 +130,19 @@ try {
   await page.locator(".xterm-accessibility").filter({ hasText: marker }).waitFor({ state: "attached" });
   const nextPid = await app.evaluate(({ app }) => app.getAppMetrics().filter(item => item.name === "Crewvane Herdr terminal").map(item => item.pid));
   assert.deepEqual(nextPid, firstPid);
+  const panel = page.getByRole("region", { name: "Herdr 工作现场" });
+  const beforeExpandPid = await app.evaluate(({ app }) =>
+    app.getAppMetrics().filter(item => item.name === "Crewvane Herdr terminal").map(item => item.pid));
+  await page.getByRole("button", { name: "全屏显示现场", exact: true }).click();
+  await expect(panel).toHaveClass(/expanded/);
+  const expandedPid = await app.evaluate(({ app }) =>
+    app.getAppMetrics().filter(item => item.name === "Crewvane Herdr terminal").map(item => item.pid));
+  assert.deepEqual(expandedPid, beforeExpandPid);
+  await page.getByRole("button", { name: "退出全屏现场", exact: true }).click();
+  await expect(panel).not.toHaveClass(/expanded/);
+  const collapsedPid = await app.evaluate(({ app }) =>
+    app.getAppMetrics().filter(item => item.name === "Crewvane Herdr terminal").map(item => item.pid));
+  assert.deepEqual(collapsedPid, beforeExpandPid);
   const herdr = async (args) => JSON.parse((await exec("herdr", ["--session", session, ...args], {
     timeout: 20_000,
   })).stdout);
@@ -98,8 +175,6 @@ try {
     stillOpen = (Array.isArray(tabList) ? tabList : Object.values(tabList)).some(item =>
       (item?.tab_id ?? item?.id) === tabId);
   assert.equal(stillOpen, false);
-  await page.getByRole("button", { name: "展开现场面板" }).click();
-  await page.locator(".terminal-panel.expanded").waitFor();
   await page.screenshot({ path: join(home, "embedded-dark.png") });
   await page.getByRole("button", { name: "浅色模式" }).click();
   await page.screenshot({ path: join(home, "embedded-light.png") });
@@ -111,7 +186,9 @@ try {
   assert.deepEqual(errors, []);
   console.log(JSON.stringify({ ok: true, home, session, checks: [
     "real Herdr TUI in embedded PTY", "real shell input/output", "collapse/reopen reuses PID",
-    "expanded panel", "dark/light", "reject unrelated terminal input", "terminal events preserve modal draft and input",
+    "system clipboard copy/paste through the PTY",
+    "fullscreen toggle reuses the terminal process", "dark/light", "reject unrelated terminal input",
+    "terminal events preserve modal draft and input",
     "ended goal closes its real Herdr tab",
   ] }));
 } catch (error) {
@@ -127,5 +204,7 @@ try {
     }, session).catch(() => {});
     await app.close();
   }
+  if (originalClipboard !== undefined)
+    await writeSystemClipboard(originalClipboard).catch(() => {});
   if (process.env.CREWVANE_KEEP_TEST_ARTIFACTS !== "1") await rm(home, { recursive: true, force: true });
 }

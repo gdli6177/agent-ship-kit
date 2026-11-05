@@ -1,0 +1,4 @@
+interface:
+  display_name: "Crewvane"
+  short_description: "Submit and inspect local Crewvane goals from another agent."
+  default_prompt: "Use $crewvane to submit or inspect goals in my local Crewvane workspace."

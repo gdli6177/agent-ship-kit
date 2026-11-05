@@ -83,13 +83,17 @@ test("Herdr plugin events update only their real owner pane and record exits", a
       else process.env.HERDR_PLUGIN_EVENT_JSON = previous;
     }
   };
-  const blocked = await ingest({ pane_id: "w1:p2", workspace_id: "w1", agent_status: "blocked" },
+  const blocked = await ingest({ pane_id: "w1:p2", workspace_id: "w1", agent_status: "blocked", agent_name: "owner" },
     "pane_agent_status_changed");
   assert.equal(blocked.code, 0, blocked.stderr);
   assert.deepEqual(blocked.json, { matched: 1 });
   let goal = (await new WorkspaceService(root).read()).goals[0]!;
   assert.equal(goal.live?.state, "blocked");
   assert.equal(goal.live?.reachable, true);
+  const replaced = await ingest({ pane_id: "w1:p2", workspace_id: "w1", agent_status: "working", agent_name: "manual-agent" },
+    "pane_agent_status_changed");
+  assert.deepEqual(replaced.json, { matched: 0 });
+  assert.equal((await new WorkspaceService(root).read()).goals[0]?.live?.state, "blocked");
 
   const unrelated = await ingest({ pane_id: "w1:p99", workspace_id: "w1", agent_status: "done" },
     "pane_agent_status_changed");

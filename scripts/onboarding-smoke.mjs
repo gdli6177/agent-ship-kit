@@ -1,7 +1,7 @@
 // Real packaged-app regression: Finder PATH, native picker boundary, official
 // Herdr download and a real interactive custom CLI (no model credentials).
 import { _electron as electron, expect } from "@playwright/test";
-import { mkdtemp, mkdir, writeFile, readFile, realpath, stat, rm } from "node:fs/promises";
+import { access, mkdtemp, mkdir, writeFile, readFile, realpath, stat, rm } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { randomUUID } from "node:crypto";
 import { execFile } from "node:child_process";
@@ -86,6 +86,15 @@ try {
   await page.getByRole("button", { name: "我的工作台", exact: true }).click();
   assert.equal(await page.getByRole("dialog").count(), 0, "workspace overview is navigation, not a directory picker");
   await page.getByRole("button", { name: "设置", exact: true }).click();
+  await page.getByText("让外部 Agent 会使用 Crewvane", { exact: true }).waitFor();
+  await page.getByRole("button", { name: "安装 / 更新 Skills", exact: true }).click();
+  await expect.poll(() => access(join(home, ".agents/skills/crewvane/SKILL.md"))
+    .then(() => true).catch(() => false)).toBe(true);
+  assert.match(await readFile(join(home, ".agents/skills/crewvane/SKILL.md"), "utf8"), /crewvane ask/);
+  await page.evaluate(async () => {
+    await window.crewvane.writeClipboardText("Crewvane clipboard round trip");
+  });
+  assert.equal(await page.evaluate(() => window.crewvane.readClipboardText()), "Crewvane clipboard round trip");
   await page.getByRole("button", { name: "更换工作区", exact: true }).click();
   await page.getByRole("dialog").getByText("当前工作区", { exact: true }).waitFor();
   await page.getByRole("dialog").getByText(await realpath(rootA), { exact: true }).waitFor();
@@ -323,6 +332,20 @@ try {
   await page.getByRole("button", { name:"设置", exact:true }).click();
   await page.getByRole("button", { name: "打开 Herdr", exact: true }).click();
   await page.getByRole("region", { name: "Herdr 工作现场" }).waitFor();
+  const panel = page.getByRole("region", { name: "Herdr 工作现场" });
+  const beforeResize = await panel.boundingBox();
+  const resize = await page.getByLabel("拖动调整现场大小").boundingBox();
+  assert.ok(beforeResize && resize);
+  await page.mouse.move(resize.x + resize.width / 2, resize.y + resize.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(resize.x + 90, resize.y + 60);
+  await page.mouse.up();
+  const afterResize = await panel.boundingBox();
+  assert.ok(afterResize && afterResize.width > beforeResize.width && afterResize.height > beforeResize.height);
+  await page.getByRole("button", { name: "全屏显示现场", exact: true }).click();
+  await expect(panel).toHaveClass(/expanded/);
+  await page.getByRole("button", { name: "退出全屏现场", exact: true }).click();
+  await expect(panel).not.toHaveClass(/expanded/);
   await page.screenshot({ path: join(home, "onboarding-dark.png"), animations:"disabled" });
   await page.getByRole("button", { name: "隐藏终端", exact: true }).click();
   await page.getByRole("button", { name: "浅色模式" }).click();
@@ -347,14 +370,41 @@ try {
   assert.equal((await restored.evaluate(() => window.crewvane.command({type:"snapshot"}))).concierge.processId, firstReference.processId);
   assert.equal((await stat(installedExecutable)).mtimeMs, beforeRestart, "bundled or installed binary must be reused without replacing it");
   assert.equal((await readFile(log, "utf8")).split("\n").filter(line => line.includes('"kind":"start"')).length, 1);
-  // Simulate the CLI exiting. Dispatch must fail, never type task text into a shell.
+  // Let the real custom CLI exit, then occupy the old pane with a manually
+  // started process. Recovery must leave that process alone and open a new site.
   process.kill(firstReference.processId, "SIGTERM");
-  await new Promise(resolve => setTimeout(resolve, 500));
+  await expect.poll(async () => (await restored.evaluate(() => window.crewvane.command({type:"snapshot"})))
+    .concierge.status, { timeout: 20_000 }).toBe("not_ready");
+  await exec(installedExecutable, [
+    "--session", session, "pane", "run", firstReference.paneId, command,
+  ], { env: testEnvironment, timeout: 10_000 });
+  await expect.poll(() => readFile(log, "utf8").then(value =>
+    value.split("\n").filter(line => line.includes('"kind":"start"')).length),
+  { timeout: 10_000 }).toBe(2);
+  await restored.getByRole("button", { name: "找管家", exact: true }).click();
+  await expect.poll(async () => (await restored.evaluate(() => window.crewvane.command({type:"snapshot"})))
+    .concierge.status, { timeout: 90_000 }).toBe("ready");
+  const recovered = (await restored.evaluate(() => window.crewvane.command({type:"snapshot"}))).concierge;
+  assert.notEqual(recovered.paneId, firstReference.paneId);
+  assert.notEqual(recovered.processId, firstReference.processId);
+  await expect.poll(() => readFile(log, "utf8").then(value =>
+    value.split("\n").filter(line => line.includes('"kind":"start"')).length),
+  { timeout: 10_000 }).toBe(3);
+  // A pending goal created after recovery reaches the replacement, not the
+  // manually occupied pane.
+  const recoveredGoal = await restored.evaluate(() => window.crewvane.command({type:"goal.create", input:{
+    title:"恢复后仍能送达",projectId:"personal",mode:"concierge",
+  }}));
+  await expect.poll(async () => {
+    const state = await restored.evaluate(() => window.crewvane.command({type:"snapshot"}));
+    return state.goals.find(goal => goal.id === recoveredGoal.id)?.dispatch?.status;
+  }, {timeout:60_000}).toBe("sent");
+  await expect.poll(() => readFile(log, "utf8"), {timeout:10_000}).toContain(recoveredGoal.id);
+  // The old reference must still reject messages even though its pane now holds
+  // a manual process.
   const exitedGoal = await restored.evaluate(() => window.crewvane.command({type:"goal.create", input:{
     title:"退出后的任务",projectId:"personal",mode:"manual",
   }}));
-  // Automatic preparation may create a replacement; verify the old reference
-  // itself cannot receive messages using the real Herdr transport.
   const { HerdrClient } = await import("../apps/desktop/electron/herdr.ts");
   const runner = { async run(args) {
     return (await exec(installedExecutable, args, {env:{...testEnvironment, HERDR_SESSION:session},timeout:10_000})).stdout;
@@ -367,12 +417,15 @@ try {
     "real Herdr plugin action creates a one-line goal",
     "real Herdr pane close event reaches the matching goal",
     "same directory feedback", "cancel preserves state", "invalid workspace preserves state and shows readable error", "workspace switching",
+    "packaged Crewvane skill installs into detected agent directories", "system clipboard round trip",
     "arbitrary CLI saves and starts", "native argv preserved", "reuse custom concierge",
     "real goal and delegation-only role delivered to CLI stdin", "raw Herdr opens independently", "restart reuses installed latest and running CLI",
     "visible goal feedback reaches CLI without replacing the next step",
     "waiting resume reaches CLI", "follow-up preserves waiting and reminder", "snooze and manual takeover",
     "external CLI decision wakes desktop pending dispatch and reaches the concierge",
-    "exited CLI rejects dispatch",
+    "terminal panel resizes and toggles fullscreen", "closed concierge reconciles offline",
+    "manual process in old pane is preserved while concierge recovery uses a new site",
+    "pending goal reaches the recovered concierge", "exited CLI rejects dispatch",
   ] }));
 } catch (error) {
   if (app) await (await app.firstWindow()).screenshot({path:join(home,"failure.png")}).catch(() => {});

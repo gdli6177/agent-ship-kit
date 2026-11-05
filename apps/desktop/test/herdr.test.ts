@@ -56,21 +56,22 @@ test("inspects and opens a persisted blocked concierge without prompting or chan
   assert.equal(mock.calls.some(args => args[0] === "agent" && args[1] === "prompt"), false);
 });
 
-test("closes an orphaned concierge without a governed launch reference", async () => {
+test("never mistakes a different agent in the old pane for the concierge", async () => {
   const mock = fake({
     "agent list": JSON.stringify({ result: { agents: [{
-      name: "concierge", agent_status: "idle", workspace_id: "w7", tab_id: "w7:t1", pane_id: "w7:p1",
+      name: "manual-agent", agent_status: "idle", workspace_id: "w7", tab_id: "w7:t1", pane_id: "w7:p1",
     }] } }),
-    "tab close": "{}",
   });
-  const reference = await new HerdrClient(mock.runner, "crewvane-test").findConcierge();
+  const reference = await new HerdrClient(mock.runner, "crewvane-test").findConcierge({
+    session: "crewvane-test", workspaceId: "w7", tabId: "w7:t1", paneId: "w7:p1",
+    agent: "concierge", launchPolicy: "control-plane-v1",
+  });
   assert.equal(reference, undefined);
-  assert.deepEqual(mock.calls.at(-1), ["tab", "close", "w7:t1"]);
+  assert.equal(mock.calls.some(args => args[0] === "tab" && args[1] === "close"), false);
 });
 
-test("closes an old ungoverned concierge once before rebuilding the control plane", async () => {
+test("does not silently close a same-named agent without a governed reference", async () => {
   const mock = fake({
-    "tab close": "{}",
     "agent list": JSON.stringify({ result: { agents: [{
       name: "concierge", agent_status: "idle", workspace_id: "w7", tab_id: "w7:t1", pane_id: "w7:p1",
     }] } }),
@@ -79,7 +80,44 @@ test("closes an old ungoverned concierge once before rebuilding the control plan
     session: "crewvane-test", workspaceId: "w7", tabId: "w7:t1", paneId: "w7:p1", agent: "concierge",
   });
   assert.equal(reference, undefined);
-  assert.deepEqual(mock.calls, [["agent", "list"], ["tab", "close", "w7:t1"]]);
+  assert.ok(mock.calls.every(args => args[0] === "agent" && args[1] === "list"));
+});
+
+test("records the exact foreground PID and follows a moved concierge agent", async () => {
+  const mock = fake({
+    "agent list": JSON.stringify({ result: { agents: [{
+      name: "concierge", agent_status: "idle", workspace_id: "w7", tab_id: "w7:t2", pane_id: "w7:p2",
+    }] } }),
+    "pane process-info": JSON.stringify({ result: { process_info: {
+      shell_pid: 12,
+      foreground_processes: [{ pid: 42, name: "codex" }],
+    } } }),
+  });
+  const current = await new HerdrClient(mock.runner, "crewvane-test").findConcierge({
+    session: "crewvane-test", workspaceId: "w7", tabId: "w7:t1", paneId: "w7:p1",
+    agent: "concierge", launchPolicy: "control-plane-v1",
+  });
+  assert.deepEqual(current, {
+    session: "crewvane-test", workspaceId: "w7", tabId: "w7:t2", paneId: "w7:p2",
+    agent: "concierge", launchPolicy: "control-plane-v1", processId: 42,
+  });
+});
+
+test("a recorded PID stops matching when the agent was replaced", async () => {
+  const mock = fake({
+    "agent list": JSON.stringify({ result: { agents: [{
+      name: "concierge", agent_status: "idle", workspace_id: "w7", tab_id: "w7:t1", pane_id: "w7:p1",
+    }] } }),
+    "pane process-info": JSON.stringify({ result: { process_info: {
+      shell_pid: 12,
+      foreground_processes: [{ pid: 99, name: "other-agent" }],
+    } } }),
+  });
+  const current = await new HerdrClient(mock.runner, "crewvane-test").findConcierge({
+    session: "crewvane-test", workspaceId: "w7", tabId: "w7:t1", paneId: "w7:p1",
+    agent: "concierge", processId: 42, launchPolicy: "control-plane-v1",
+  });
+  assert.equal(current, undefined);
 });
 
 test("new goals notify the same concierge without creating an owner or another session", async () => {
@@ -202,7 +240,7 @@ test("starts one replacement only after a stale pane is rejected", async () => {
   assert.equal(mock.calls.filter((args) => args[0] === "workspace" && args[1] === "create").length, 1);
   const start = mock.calls.find((args) => args[0] === "agent" && args[1] === "start");
   assert.deepEqual(start?.slice(0, 6), ["agent", "start", "concierge", "--kind", "codex", "--pane"]);
-  assert.ok(mock.calls.some(args => args[0] === "tab" && args[1] === "close" && args[2] === "w1:t1"));
+  assert.equal(mock.calls.some(args => args[0] === "tab" && args[1] === "close"), false);
   assert.ok(!start?.includes("workspace-write"));
   assert.ok(!start?.includes("sandbox_workspace_write.network_access=true"));
   assert.ok(!start?.includes("danger-full-access"));
@@ -215,6 +253,41 @@ test("starts one replacement only after a stale pane is rejected", async () => {
     assert.match(instructions!, /不得只写「已回答」/);
   assert.doesNotMatch(instructions!, /workflow list|--stage|工序快照/);
   assert.doesNotMatch(instructions!, /简单事项你可以自己完成/);
+});
+
+test("starts a fresh governed concierge when the old pane contains a manual agent", async () => {
+  const mock = fake({
+    "agent list": JSON.stringify({ result: { agents: [] } }),
+    "pane get": JSON.stringify({ result: { pane: {
+      pane_id: "w1:p1", workspace_id: "w1", tab_id: "w1:t1",
+    } } }),
+    "pane process-info": JSON.stringify({ result: { process_info: {
+      shell_pid: 12,
+      foreground_processes: [{ pid: 99, name: "manual-agent" }],
+    } } }),
+    "workspace create": JSON.stringify({ result: {
+      workspace: { workspace_id: "w8" }, tab: { tab_id: "w8:t1" }, root_pane: { pane_id: "w8:p1" },
+    } }),
+    "pane run": "{}", "pane wait-output": "{}", "agent start": "{}", "agent prompt": "{}",
+    "tab focus": "{}",
+  });
+  const reference = await new HerdrClient(mock.runner, "crewvane-test").prepareConcierge(
+    "/tmp/workspace",
+    {
+      session: "crewvane-test", workspaceId: "w1", tabId: "w1:t1", paneId: "w1:p1",
+      agent: "concierge", launchPolicy: "control-plane-v1",
+    },
+    "codex",
+    "/tmp/bin",
+    "/home/test/.local/bin",
+    "/home/test/.local/bin",
+  );
+  assert.equal(reference.paneId, "w8:p1");
+  assert.ok(mock.calls.some(args => args[0] === "workspace" && args[1] === "create"));
+  assert.equal(mock.calls.some(args =>
+    args[0] === "pane" && args[1] === "run" && args[2] === "w1:p1"), false);
+  assert.equal(mock.calls.some(args =>
+    args[0] === "tab" && args[1] === "close" && args[2] === "w1:t1"), false);
 });
 
 test("custom commands start in the real pane, preserve argv and reuse the recorded foreground process", async () => {

@@ -131,6 +131,62 @@ test("concierge readiness and live state stay independent when the agent is bloc
     /无效的 Herdr 状态/,
   );
 });
+test("Herdr plugin events immediately reconcile the concierge and its moved pane", async () => {
+  const { service } = await fixture(), checkedAt = new Date().toISOString();
+  await service.execute({
+    type: "concierge.status",
+    status: "ready",
+    reference: {
+      session: "crewvane-test", workspaceId: "w1", tabId: "w1:t1",
+      paneId: "w1:p1", agent: "concierge", processId: 42,
+      launchPolicy: "control-plane-v1",
+    },
+    live: { state: "idle", checkedAt, reachable: true },
+  });
+  await service.execute({
+    type: "live.event",
+    target: { paneId: "w1:p1", workspaceId: "w1" },
+    reference: { paneId: "w1:p2", tabId: "w1:t2", agent: "concierge" },
+    presence: { state: "working", checkedAt, reachable: true },
+  });
+  let state = await service.read();
+  assert.equal(state.concierge.paneId, "w1:p2");
+  assert.equal(state.concierge.tabId, "w1:t2");
+  assert.equal(state.concierge.status, "ready");
+  assert.equal(state.concierge.live?.state, "working");
+
+  await service.execute({
+    type: "live.event",
+    target: { paneId: "w1:p2", workspaceId: "w1" },
+    presence: { state: "unknown", checkedAt, reachable: false },
+  });
+  state = await service.read();
+  assert.equal(state.concierge.status, "not_ready");
+  assert.equal(state.concierge.live?.reachable, false);
+  assert.match(state.concierge.detail ?? "", /已关闭|不可达/);
+});
+test("a different agent in a stale concierge pane cannot make it online", async () => {
+  const { service } = await fixture(), checkedAt = new Date().toISOString();
+  await service.execute({
+    type: "concierge.status",
+    status: "not_ready",
+    reference: {
+      session: "crewvane-test", workspaceId: "w1", tabId: "w1:t1",
+      paneId: "w1:p1", agent: "concierge",
+    },
+    live: { state: "unknown", checkedAt, reachable: false },
+  });
+  const result = await service.execute({
+    type: "live.event",
+    target: { paneId: "w1:p1", workspaceId: "w1" },
+    reference: { paneId: "w1:p1", workspaceId: "w1", agent: "manual-agent" },
+    presence: { state: "working", checkedAt, reachable: true },
+  }) as { matched: number };
+  assert.equal(result.matched, 0);
+  const state = await service.read();
+  assert.equal(state.concierge.status, "not_ready");
+  assert.equal(state.concierge.live?.reachable, false);
+});
 test("new goals no longer use workflow definitions", async () => {
   const { service } = await fixture();
   const item = await create(service);
