@@ -13,6 +13,8 @@ body { margin: 0; min-width: 900px; }
 .terminal-heading button { cursor: pointer; }
 .terminal-heading strong { font-size: var(--fs-body); font-weight: 550; }
 .terminal-heading small { color: var(--muted); font-size: var(--fs-caption); letter-spacing: .5px; }
+.terminal-heading .terminal-clipboard-status { max-width: min(36vw, 360px); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.terminal-heading .icon-button:disabled { opacity: .35; cursor: default; }
 .scene-context { display: flex; align-items: center; gap: 12px; min-height: 58px; margin: 0 0 9px; padding: 9px 11px; border: 1px solid color-mix(in srgb, var(--accent) 20%, var(--line)); border-radius: 9px; background: color-mix(in srgb, var(--accent-soft) 28%, var(--surface)); }
 .scene-context button { display: inline-flex; flex-shrink: 0; align-items: center; gap: 6px; min-height: 32px; padding: 6px 9px; border-radius: 7px; font-size: var(--fs-caption); white-space: nowrap; }
 .scene-attention { color: var(--secondary); background: var(--surface-soft); }
