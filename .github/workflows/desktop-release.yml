@@ -70,15 +70,15 @@ jobs:
         run: |
           set -euo pipefail
           cat > notes.md <<'NOTES'
-          Crewvane｜协航 0.6.1 · macOS Apple Silicon
+          Crewvane｜协航 0.6.2 · macOS Apple Silicon
 
           ## 本版更新
 
-          - 修复首行超过 160 字、但正文本身合法的单段目标被错误提示“请提供有效的目标”的问题。
-          - 新建目标与 Herdr 直聊使用相同的自动标题规则：取首个非空行，并按最多 80 个 Unicode 字符生成标题。
-          - 自动标题只影响列表显示，提交的 20,000 字以内完整正文与附件保持不变。
+          - 修复到期跟进 follow_up Webhook 重复 POST：delivery id 改用稳定身份（goalId + kind + remindAt）。notification.sent 改写 attention.since 后，同一条到期提醒不会再次投递。
+          - 设置页高风险文案补上「修改上线策略」，与后端 9 类高风险动作一致。
+          - 文档与实现对齐：高风险动作是应用层协议约束，不是操作系统沙箱；审查按目标计数；审批人仅展示；附件清理按目标结束后的保留期触发；永久删除与关闭 Tab 失败后可以重试。install.sh、adapters、events schema 与 ship-* 技能标注为 legacy。
 
-          0.6.0 的注意力、场景优先、工作区恢复和 Herdr 同步能力不变。
+          0.6.1 的长文本目标标题规则，以及 0.6.0 的注意力、场景优先、工作区恢复和 Herdr 同步能力不变。
 
           ## 安装
 

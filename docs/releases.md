@@ -14,6 +14,14 @@ GitHub 自动生成的 **Source code** 是源码，不是可安装应用。安�
 
 安装替换应用后，打开设置重新安装 Crewvane CLI，确保 `~/.local/bin/crewvane` 指向当前应用。工作区位于用户选择的目录，不会被覆盖。
 
+## 0.6.2 安装与验收
+
+0.6.2 修复到期跟进 Webhook 在通知已发送后重复投递的问题。`follow_up` 的 delivery id 使用 `goalId`、`kind` 与 `remindAt`，不再随 `attention.since` 变化。设置中的高风险说明包含「修改上线策略」，与后端 9 类一致。说明文档与当前实现一致：九类高风险动作由 core 做协议约束，不是操作系统沙箱；审查按目标计数；审批人只展示；附件在目标结束后按保留期清理；永久删除与关闭 Tab 失败后可以重试。`install.sh`、adapters、events schema 与 `ship-*` 技能标为 legacy。
+
+1. 安装 DMG 或 ZIP 后，在设置中重新安装 Crewvane CLI。
+2. 将目标设为到期跟进并配置 Webhook。到点后应只收到一次 `follow_up`；应用记录 `notification.sent` 后，同一提醒不应再次 POST。
+3. 打开设置中的高风险说明，确认包含「修改上线策略」。
+
 ## 0.6.1 安装与验收
 
 0.6.1 修复合法长文本目标被错误拒绝的问题。正文仍允许最多 20,000 字；列表标题改为从首个非空行生成并最多保留 80 个 Unicode 字符，不再先用 160 字上限校验整段单行正文。新建目标与 Herdr 直聊使用同一规则。
