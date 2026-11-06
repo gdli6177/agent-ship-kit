@@ -106,6 +106,9 @@ Herdr 提供持久终端会话和 Agent 通信。桌面应用自带经过校验�
 8. 修改权限；或
 9. 修改上线策略。
 
+这九类动作由 Crewvane core 作为应用层协议约束判定，不是操作系统沙箱；第三方
+Agent 的文件与网络权限仍由它自己的 CLI 决定。
+
 ### 默认本地优先
 
 目标、消息、附件、决定和事件保存在所选工作区的 `.crewvane/` 中。桌面应用与 CLI
@@ -208,7 +211,7 @@ crewvane goal review <goal-id> \
 apps/desktop/       Electron 桌面壳、React UI、应用内 Herdr 终端、插件
 packages/core/      目标、注意力、策略、存储、附件与工作区恢复
 cli/                人类消息入口与明确的 Agent 状态协议
-skills/             面向受支持 Agent 环境的 Crewvane 使用说明
+skills/             随应用打包的 Crewvane 技能；ship-* 为遗留技能
 scripts/            桌面、Herdr、首次启动与安装包验收测试
 docs/               产品规格、架构、QA 与发布说明
 ```

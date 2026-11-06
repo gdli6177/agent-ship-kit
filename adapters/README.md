@@ -1,5 +1,10 @@
 # Adapters
 
+> **Legacy (0.2-era):** these adapter notes describe the retired manual-contract
+> captain workflow. Crewvane 0.6 does not orchestrate workers through this
+> interface; see `docs/crewvane.md` and `skills/crewvane/` for the current flow.
+> The files are kept for historical reference.
+
 crewvane does not orchestrate workers. It describes three calls a
 captain may make, and leaves the transport to a thin note. Swapping Herdr for
 Orca, Multica, or a plain extra agent session must not change the contract

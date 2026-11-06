@@ -45,7 +45,7 @@ crewvane direct --current "再参考这张图" --attachment ~/Desktop/detail.jpg
 crewvane direct --new "从终端新建并带图" --attachment ~/Desktop/context.png
 ```
 
-CLI 只接受 PNG、JPEG、WebP、GIF；单张最多 10 MB，每个目标最多 8 张且总计不超过 30 MB。文件按魔数校验后复制到 `<workspace>/.crewvane/attachments/`，状态与分析事件只保存相对路径、大小和 SHA-256，不保存 Base64。`goal show` 的普通文本输出会列出可直接读取的绝对路径。目标结束 30 天后，桌面启动时清理原图；也可以在目标详情逐张删除，或永久删除整个已结束目标。完成或放弃目标时，应用会关闭对应负责人 Tab。
+CLI 只接受 PNG、JPEG、WebP、GIF；单张最多 10 MB，每个目标最多 8 张且总计不超过 30 MB。文件按魔数校验后复制到 `<workspace>/.crewvane/attachments/`，状态与分析事件只保存相对路径、大小和 SHA-256，不保存 Base64。`goal show` 的普通文本输出会列出可直接读取的绝对路径。目标结束 30 天后，桌面启动时清理原图；也可以在目标详情逐张删除，或永久删除整个已结束目标。完成或放弃目标时，应用会关闭对应负责人 Tab；关闭请求失败时保留现场引用，巡检恢复后自动重试。永久删除已结束目标前也会先关闭对应 Tab，Herdr 不可达时删除失败并保留目标，现场关闭后可再次删除。
 
 管家首次派发目标时使用 `crewvane owner launch`。该命令只接受当前受管案卷，默认读取已保存的目标原文和下一步，创建独立 Herdr Tab，清除管家继承的协调者环境，按设置中的负责人启动命令与完整参数启动 Agent，绑定真实现场后再发送任务。长补充说明使用当前工作区内的 `--task-file`，避免受 Agent 终端约 1 KB 的单次命令行输入限制。已有负责人时直接复用原现场。
 
@@ -100,8 +100,8 @@ crewvane goal drop <ID> --reason "不再需要"
 - 新项目默认 `external-approval`。项目可在桌面设置中改为 `auto` 或 `auto-merge-manual-deploy`；策略只能由人修改，受管管家 CLI 没有修改入口。
 - `goal ship` 先要求检查通过。`external-approval` 的合并与部署、`auto-merge-manual-deploy` 的部署会产生人类审批；有审批记录后再次判断会放行。
 - 人批准或拒绝决定后写入 `.crewvane/decisions.md` 或 `.crewvane/rejected.md`，保存原话、时间、来源、项目、目标与稳定动作键。`goal decide` 自动查账本，命中后不再重复进入注意力。
-- `delete-data`、`stop-service`、`spend-money`、`external-message`、`product-direction`、`create-secret`、`rotate-secret`、`change-permissions`、`change-ship-policy` 九类动作始终通过 `goal risk` 升级；这条规则不受项目上线策略影响。
-- 同一 PR 的审查最多三轮。第四次提交被拦截并升级；人在注意力面板明确允许后才增加一轮。审查只报告会导致错误的问题。
+- `delete-data`、`stop-service`、`spend-money`、`external-message`、`product-direction`、`create-secret`、`rotate-secret`、`change-permissions`、`change-ship-policy` 九类动作始终通过 `goal risk` 升级；这条规则不受项目上线策略影响。它由 core 的应用层协议判定，不是操作系统沙箱；第三方 Agent 的文件与网络权限仍由其自身 CLI 决定。
+- 同一目标的审查最多三轮，轮次按目标累计；第四次提交被拦截并升级，人在注意力面板明确允许后才增加一轮。审查只报告会导致错误的问题，风格建议不占用轮次。
 
 Herdr 现场由 Agent 使用真实 ID 关联：
 

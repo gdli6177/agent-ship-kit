@@ -1820,7 +1820,7 @@ function GovernanceEditor({
       <h2>上线策略与决定账本</h2>
       <small>{decisions.length} 条已记住的决定</small>
     </div>
-    <p>默认要求外部审批。自动策略只跳过审批，不跳过检查；删数据、停服、花钱、外部发消息、改产品方向、新建或轮换密钥、改权限始终会进入注意力。</p>
+    <p>默认要求外部审批。自动策略只跳过审批，不跳过检查；删数据、停服、花钱、外部发消息、改产品方向、新建或轮换密钥、改权限、修改上线策略始终会进入注意力。</p>
     <div className="policy-list">
       {projects.map(project => {
         const open = editing === project.id;

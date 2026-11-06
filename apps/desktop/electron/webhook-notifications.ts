@@ -377,14 +377,20 @@ export class WebhookNotifier {
   private event(notification: AttentionNotification, endpoint: string) {
     const { goal, kind, workspace } = notification,
       attention = goal.attention,
-      fingerprint = [
-        workspace.name, goal.id, goal.status, kind,
-        attention?.since ?? goal.remindAt ?? goal.updatedAt,
-        attention?.summary ?? goal.next,
-        endpoint,
-      ].join("\u0000"),
+      // notification.sent stamps a follow-up attention.since with the notification
+      // time, so use the reminder itself as the stable episode identity.
+      occurrence = kind === "follow_up"
+        ? goal.remindAt ?? attention?.since ?? goal.updatedAt
+        : attention?.since ?? goal.updatedAt,
+      fingerprint = kind === "follow_up"
+        ? [workspace.name, goal.id, kind, occurrence, endpoint].join("\u0000")
+        : [
+            workspace.name, goal.id, goal.status, kind, occurrence,
+            attention?.summary ?? goal.next,
+            endpoint,
+          ].join("\u0000"),
       id = createHash("sha256").update(fingerprint).digest("hex"),
-      occurredAt = attention?.since ?? goal.remindAt ?? goal.updatedAt;
+      occurredAt = occurrence;
     return {
       id,
       body: {

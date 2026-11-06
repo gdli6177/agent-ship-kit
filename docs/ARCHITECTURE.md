@@ -69,7 +69,7 @@ Herdr 0.9.5 的插件事件不暴露用户提交的 prompt 文本。用户直接
 
 ## 上线策略与决定账本
 
-`Project.policy` 包含 `shipPolicy`、可选审批人、修订号与更新时间。默认 `external-approval`；`auto` 允许检查通过后合并和部署，`auto-merge-manual-deploy` 只自动放行合并。策略设置命令要求 `actor="你"`，桌面设置是唯一提供的入口，受管 CLI 不提供参数。这个校验是应用层约束，不是操作系统账户认证。
+`Project.policy` 包含 `shipPolicy`、可选审批人、修订号与更新时间。默认 `external-approval`；`auto` 允许检查通过后合并和部署，`auto-merge-manual-deploy` 只自动放行合并。审批人只用于展示，不参与身份校验。策略设置命令要求 `actor="你"`，桌面设置是唯一提供的入口，受管 CLI 不提供参数。这个校验是应用层约束，不是操作系统账户认证。
 
 `goal ship` 先拒绝未通过检查。需要审批时只建立 `decision` 注意力，不会执行外部动作；人批准后写入账本，再次调用才返回 `allowed=true`。`goal risk` 覆盖删除数据、停服、花钱、外部发消息、产品方向、新建或轮换密钥、修改权限和修改上线策略，九类动作无论项目策略为何都先问人。
 
@@ -87,7 +87,7 @@ Herdr 的 `pane.agent_status_changed`、`pane.exited`、`pane.closed`、`pane.mo
 
 通知送达与负责人现场登记是两个独立事实。系统通知和可选 Webhook 消费明确的目标状态变化与只读注意力；状态变化可按五种状态分别订阅，Webhook 配置保存在应用数据目录且不回传令牌；普通 HTTP 2xx 记为送达，飞书 / Lark 和企业微信还要求响应业务码为 0，失败按 5 分钟退避，稳定投递键跨重启去重，投递失败不回滚目标。未登记现场的活动目标在一分钟启动宽限期后交由管家巡检，不把通知成功显示成已经执行。`session.set` 拒绝把管家现场或其他未结束目标的现场登记成当前目标负责人；真实连接仍由 Herdr presence 核实，包括自定义 CLI 的前台 PID。Webhook 载荷与适配器边界见 [消息通知](product/notifications.md)。
 
-`goal.accept`、`goal.drop` 和已结束目标的永久删除会释放负责人现场。桌面立即关闭对应 Herdr Tab，并通过 `session.release` 清理已结束目标的引用；关闭请求失败时保留引用，巡检恢复后继续重试。目标删除只开放给 `completed` / `dropped`，同时删除附件文件；项目决定账本不随目标删除。
+`goal.accept`、`goal.drop` 和已结束目标的永久删除会释放负责人现场。桌面立即关闭对应 Herdr Tab，并通过 `session.release` 清理已结束目标的引用；关闭请求失败时保留引用，巡检恢复后继续重试。永久删除会先尝试关闭现场，关闭失败时不执行删除。目标删除只开放给 `completed` / `dropped`，同时删除附件文件；项目决定账本不随目标删除。
 
 ## 桌面 IPC
 
