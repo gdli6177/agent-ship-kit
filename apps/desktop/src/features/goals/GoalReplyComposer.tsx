@@ -9,6 +9,7 @@ import {
   Send,
   X,
 } from "lucide-react";
+import { Button } from "../../ui/index.js";
 import type { Goal } from "../../../../../packages/core/src/types.js";
 import type { GoalDetailService } from "./goalService.js";
 
@@ -317,10 +318,14 @@ export function GoalReplyComposer({
       )}
       <div className="reply-composer-footer">
         <span>{labels.note}</span>
-        <button className="primary" disabled={busy || !message.trim()}>
-          <Send size={15} />
+        <Button
+          type="submit"
+          variant="primary"
+          disabled={busy || !message.trim()}
+          icon={<Send size={15} />}
+        >
           {labels.submit}
-        </button>
+        </Button>
       </div>
     </form>
   );
