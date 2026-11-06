@@ -5,7 +5,7 @@ import { mkdtemp, readFile, rm, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { WebhookNotifier } from "../electron/webhook-notifications.ts";
-import type { Goal } from "../../../packages/core/src/index.js";
+import { WorkspaceService, attentionKind, type Goal } from "../../../packages/core/src/index.js";
 
 async function webhookServer() {
   const received: { headers: Record<string, string | string[] | undefined>; body: any }[] = [];
@@ -324,6 +324,58 @@ test("uses WeCom's robot payload and surfaces a non-zero errcode", async () => {
     assert.match((await notifier.status()).lastError ?? "", /invalid webhook url/);
   } finally {
     await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("a due follow-up posts once even after notification.sent stamps the attention time", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "crewvane-webhook-follow-up-")),
+    root = await mkdtemp(join(tmpdir(), "crewvane-webhook-follow-up-workspace-")),
+    hook = await webhookServer();
+  try {
+    const service = new WorkspaceService(root),
+      notifier = new WebhookNotifier(directory, "0.6.1", fetch, () => new Date("2026-11-06T09:00:00.000Z"));
+    await notifier.save({ enabled: true, url: hook.url });
+    const created = await service.execute({
+      type: "goal.create",
+      input: { title: "跟进合同", projectId: "personal", mode: "concierge" },
+    }) as Goal;
+    await service.execute({
+      type: "goal.wait",
+      goalId: created.id,
+      reason: "等待合同审批",
+      owner: "法务",
+      remindAt: "2026-11-06T08:00:00.000Z",
+    });
+    const due = (await service.read()).goals[0]!;
+    assert.equal(attentionKind(due, Date.parse("2026-11-06T09:00:00.000Z")), "follow_up");
+    assert.equal(due.attention, null);
+
+    assert.deepEqual(
+      await notifier.deliver({ workspace: { name: "产品工作区" }, goal: due, kind: "follow_up" }),
+      { sent: true },
+    );
+    await service.execute({
+      type: "notification.sent",
+      goalId: created.id,
+      kind: "follow_up",
+      at: "2026-11-06T09:00:00.000Z",
+    });
+
+    const notified = (await service.read()).goals[0]!;
+    assert.equal(notified.attention?.kind, "follow_up");
+    assert.equal(notified.attention?.since, "2026-11-06T09:00:00.000Z");
+    assert.notEqual(notified.attention?.since, notified.remindAt);
+    assert.deepEqual(
+      await notifier.deliver({ workspace: { name: "产品工作区" }, goal: notified, kind: "follow_up" }),
+      { sent: false, reason: "duplicate" },
+    );
+    assert.equal(hook.received.length, 1);
+    assert.equal(hook.received[0]?.body.goal.remindAt, "2026-11-06T08:00:00.000Z");
+    assert.equal(hook.received[0]?.body.occurredAt, "2026-11-06T08:00:00.000Z");
+  } finally {
+    await hook.close();
+    await rm(directory, { recursive: true, force: true });
+    await rm(root, { recursive: true, force: true });
   }
 });
 

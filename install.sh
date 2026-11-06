@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+# LEGACY: 0.2-era manual-contract skill installer. The current 0.6 app installs
+# its CLI and the crewvane skill from Settings; this script and the ship-*
+# skills are kept for historical reference and are not part of the 0.6 flow.
 # One-command install for crewvane. No git clone and no sudo.
 #   curl -fsSL https://raw.githubusercontent.com/gdli6177/crewvane/main/install.sh | bash
 # Pin a tag:  curl -fsSL .../install.sh | bash -s -- --ref v0.1.0

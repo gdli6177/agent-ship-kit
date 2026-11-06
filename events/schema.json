@@ -1,5 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$comment": "LEGACY (0.2-era): describes the retired manual-contract event log. Crewvane 0.6 uses .crewvane/state.json and .crewvane/events.jsonl with the core protocol; this schema is kept for historical reference.",
   "$id": "https://github.com/gdli6177/crewvane/blob/main/events/schema.json",
   "title": "crewvane event",
   "description": "Acceptance and attention events emitted around the captain. An event never authorizes a merge to main or a production deploy. needs_review, blocked, and needs_approval are inbox items a human acts on. review_decided closes one of those items. The other types are lifecycle siblings that share this envelope.",

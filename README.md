@@ -116,6 +116,10 @@ to automatic shipping:
 8. changing permissions; or
 9. changing the shipping policy.
 
+These categories are an application-level protocol check in Crewvane's core,
+not an operating-system sandbox. A third-party agent's file and network
+permissions still come from its own CLI.
+
 ### Local-first by default
 
 Goals, messages, attachments, decisions, and events are stored under
@@ -224,7 +228,7 @@ Run `crewvane --help` after installation to see the complete protocol.
 apps/desktop/       Electron shell, React UI, in-app Herdr terminal, plugin
 packages/core/      Goals, attention, policy, storage, attachments, recovery
 cli/                Human commands and explicit agent state protocol
-skills/             Packaged instructions for supported agent environments
+skills/             Packaged crewvane skill; ship-* skills are legacy
 scripts/            Desktop, Herdr, onboarding, and installer acceptance tests
 docs/               Product specification, architecture, QA, and release notes
 ```
