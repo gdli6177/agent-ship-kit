@@ -21,9 +21,21 @@ import { GoalActionDock } from "./GoalActionDock.js";
 import { GoalAttachments } from "./GoalAttachments.js";
 import { GoalHistory } from "./GoalActivity.js";
 import { GoalDeliveryEvidence } from "./GoalDeliveryEvidence.js";
+import { Button, IconButton, StatusPill } from "../../ui/index.js";
+import type { BadgeTone } from "../../ui/index.js";
 import type { GoalReplyMode } from "./GoalReplyComposer.js";
 import { presentGoal, time } from "./goalPresentation.js";
+import type { GoalTone } from "./goalPresentation.js";
 import type { GoalDetailService } from "./goalService.js";
+
+const goalToneBadge: Record<GoalTone, BadgeTone> = {
+  running: "neutral",
+  reply: "accent",
+  review: "mint",
+  waiting: "warm",
+  blocked: "danger",
+  done: "mint",
+};
 
 function ContextAttachments({
   goal,
@@ -152,12 +164,11 @@ export function GoalDetail({
                   <span>{goal.herdr ? "回到现场" : "找管家"}</span>
                 </button>
               )}
-              <span className={`goal-state-pill ${view.tone}`}>
-                <i />
-                {view.label}
-              </span>
-              <Dialog.Close className="icon-button" aria-label="关闭">
-                <X size={18} />
+              <StatusPill tone={goalToneBadge[view.tone]}>{view.label}</StatusPill>
+              <Dialog.Close asChild>
+                <IconButton label="关闭">
+                  <X size={18} />
+                </IconButton>
               </Dialog.Close>
             </div>
           </header>
@@ -282,28 +293,17 @@ export function GoalDetail({
                 </summary>
                 <p>用于人工接管、纠正记录或结束目标。日常推进优先使用底部操作。</p>
                 <div className="modal-actions">
-                  <button
-                    type="button"
-                    className="secondary"
-                    disabled={busy}
-                    onClick={edit}
-                  >
+                  <Button variant="secondary" disabled={busy} onClick={edit}>
                     编辑目标
-                  </button>
+                  </Button>
                   {goal.status !== "review" && (
-                    <button
-                      type="button"
-                      className="secondary"
-                      disabled={busy}
-                      onClick={submit}
-                    >
+                    <Button variant="secondary" disabled={busy} onClick={submit}>
                       提交成果
-                    </button>
+                    </Button>
                   )}
                   {!view.ended && goal.mode === "concierge" && (
-                    <button
-                      type="button"
-                      className="secondary"
+                    <Button
+                      variant="secondary"
                       disabled={busy}
                       onClick={async () => {
                         try {
@@ -318,12 +318,11 @@ export function GoalDetail({
                       }}
                     >
                       我来处理
-                    </button>
+                    </Button>
                   )}
                   {!view.ended && goal.mode === "manual" && (
-                    <button
-                      type="button"
-                      className="secondary"
+                    <Button
+                      variant="secondary"
                       disabled={busy}
                       onClick={async () => {
                         try {
@@ -338,26 +337,16 @@ export function GoalDetail({
                       }}
                     >
                       交给管家
-                    </button>
+                    </Button>
                   )}
                   {view.ended ? (
-                    <button
-                      type="button"
-                      className="secondary danger-action"
-                      disabled={busy}
-                      onClick={deleteGoal}
-                    >
+                    <Button variant="danger" disabled={busy} onClick={deleteGoal}>
                       永久删除目标
-                    </button>
+                    </Button>
                   ) : (
-                    <button
-                      type="button"
-                      className="secondary danger-action"
-                      disabled={busy}
-                      onClick={() => setReplyMode("drop")}
-                    >
+                    <Button variant="danger" disabled={busy} onClick={() => setReplyMode("drop")}>
                       放弃目标
-                    </button>
+                    </Button>
                   )}
                 </div>
               </details>

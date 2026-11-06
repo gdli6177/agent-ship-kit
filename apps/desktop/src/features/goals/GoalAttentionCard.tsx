@@ -19,6 +19,7 @@ import { GoalAttachments } from "./GoalAttachments.js";
 import type { GoalReplyMode } from "./GoalReplyComposer.js";
 import { presentGoal, time } from "./goalPresentation.js";
 import type { GoalDetailService } from "./goalService.js";
+import { IconButton } from "../../ui/index.js";
 
 export function GoalAttentionCard({
   goal,
@@ -61,7 +62,7 @@ export function GoalAttentionCard({
                 onClick={() => void service.openHerdr(goal.id)}>
                 <SquareTerminal size={15} /><span>{goal.herdr ? "回到现场" : "找管家"}</span>
               </button>
-              <Dialog.Close className="icon-button" aria-label="关闭"><X size={18} /></Dialog.Close>
+              <Dialog.Close asChild><IconButton label="关闭"><X size={18} /></IconButton></Dialog.Close>
             </div>
           </header>
           <Dialog.Title className="goal-attention-title">{goal.title}</Dialog.Title>

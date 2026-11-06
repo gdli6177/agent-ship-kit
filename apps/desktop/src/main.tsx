@@ -1,6 +1,5 @@
-import { lazy, Suspense, useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from "react";
+import { lazy, Suspense, useEffect, useMemo, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
-import * as Dialog from "@radix-ui/react-dialog";
 import {
   ArrowRight,
   ArrowUpRight,
@@ -47,6 +46,23 @@ import { GoalAttentionCard } from "./features/goals/GoalAttentionCard.js";
 import { goalEntryDestination } from "./features/goals/goalEntry.js";
 import { presentSceneContext } from "./features/goals/goalPresentation.js";
 import type { GoalDetailService } from "./features/goals/goalService.js";
+import {
+  Button,
+  Checkbox,
+  EmptyState,
+  Field,
+  IconButton,
+  LoadingState,
+  Modal,
+  SectionHeading,
+  Select,
+  SettingsSection,
+  StatusPill,
+  TextArea,
+  TextInput,
+  Toggle,
+} from "./ui/index.js";
+import type { BadgeTone } from "./ui/index.js";
 import type { WebhookSettings } from "../electron/webhook-notifications.js";
 import pixelMark from "../assets/brand/crewvane-mage.png";
 import "./style.css";
@@ -64,6 +80,21 @@ const statusLabel = {
   dropped: "已放弃",
 };
 const goalStatusOptions = Object.entries(statusLabel) as [Goal["status"], string][];
+const goalStatusTone: Record<Goal["status"], BadgeTone> = {
+  active: "mint",
+  waiting: "warm",
+  review: "accent",
+  completed: "neutral",
+  dropped: "neutral",
+};
+function goalRowTone(item: Goal): BadgeTone {
+  const kind = attentionKind(item);
+  if (kind === "decision") return "accent";
+  if (kind === "review") return "mint";
+  if (kind === "follow_up") return "warm";
+  if (kind === "intervention") return "danger";
+  return goalStatusTone[item.status];
+}
 const attentionLabel = {
   decision: "需要你决定",
   review: "等待你验收",
@@ -86,74 +117,6 @@ const time = (value?: string) =>
         minute: "2-digit",
       }).format(new Date(value))
     : "";
-function IconButton({
-  children,
-  label,
-  onClick,
-}: {
-  children: ReactNode;
-  label: string;
-  onClick: () => void;
-}) {
-  return (
-    <button
-      type="button"
-      className="icon-button"
-      aria-label={label}
-      title={label}
-      onClick={onClick}
-    >
-      {children}
-    </button>
-  );
-}
-function Modal({
-  title,
-  description,
-  children,
-  onClose,
-  wide = false,
-  error,
-}: {
-  title: string;
-  description?: string;
-  children: ReactNode;
-  onClose: () => void;
-  wide?: boolean;
-  error?: string;
-}) {
-  return (
-    <Dialog.Root
-      open
-      onOpenChange={(open) => {
-        if (!open) onClose();
-      }}
-    >
-      <Dialog.Portal>
-        <Dialog.Overlay className="overlay" />
-        <Dialog.Content className={`modal ${wide ? "wide" : ""}`}>
-          <div className="modal-heading">
-            <div>
-              <Dialog.Title>{title}</Dialog.Title>
-              {description && (
-                <Dialog.Description>{description}</Dialog.Description>
-              )}
-            </div>
-            <Dialog.Close className="icon-button" aria-label="关闭">
-              <X size={18} />
-            </Dialog.Close>
-          </div>
-          {error && (
-            <p className="modal-error" role="alert">
-              {error}
-            </p>
-          )}
-          {children}
-        </Dialog.Content>
-      </Dialog.Portal>
-    </Dialog.Root>
-  );
-}
 type IntakeImage = { key: string; file: File; preview: string };
 const attachmentFormats = new Set(["image/png", "image/jpeg", "image/webp", "image/gif"]);
 function imageFile(file: File) {
@@ -225,13 +188,13 @@ function GoalIntakeForm({
   }
   return (
     <Modal
-      error={error || validation}
+      error={error}
       title="把事情放下。"
       description="文字、截图或图片一起交给管家。"
       onClose={onClose}
     >
       <form
-        className="form"
+        className="ui-form"
         onSubmit={async event => {
           event.preventDefault();
           const data = new FormData(event.currentTarget);
@@ -243,6 +206,12 @@ function GoalIntakeForm({
           }
         }}
       >
+        <Field
+          label="要交给管家的事情"
+          htmlFor="goal-intake-input"
+          connect={false}
+          error={validation}
+        >
         <div
           className={`goal-intake-zone ${dragging ? "dragging" : ""}`}
           onDragEnter={event => {
@@ -266,14 +235,16 @@ function GoalIntakeForm({
             addFiles(Array.from(event.dataTransfer.files));
           }}
         >
-          <textarea
+          <TextArea
+            id="goal-intake-input"
             className="goal-intake"
             name="request"
             required
             autoFocus
             maxLength={20000}
             rows={5}
-            aria-label="要交给管家的事情"
+            aria-invalid={validation ? true : undefined}
+            aria-describedby={validation ? "goal-intake-input-message" : undefined}
             placeholder="直接说：要做什么、知道哪些背景、怎样算完成…"
             onPaste={event => {
               const files = Array.from(event.clipboardData.files);
@@ -289,10 +260,9 @@ function GoalIntakeForm({
             }}
           />
           <div className="goal-intake-tools">
-            <button type="button" className="secondary" disabled={busy} onClick={() => input.current?.click()}>
-              <ImagePlus size={14} />
+            <Button size="sm" variant="secondary" disabled={busy} onClick={() => input.current?.click()} icon={<ImagePlus size={14} />}>
               添加图片
-            </button>
+            </Button>
             <span>{images.length ? `${images.length}/8 张 · 可直接在输入框粘贴或拖入` : "可粘贴截图、拖入图片，或从本机选择"}</span>
           </div>
           <input
@@ -308,6 +278,7 @@ function GoalIntakeForm({
             }}
           />
         </div>
+        </Field>
         {images.length > 0 && (
           <div className="intake-attachments" aria-label="待提交图片">
             {images.map(item => (
@@ -324,20 +295,15 @@ function GoalIntakeForm({
             ))}
           </div>
         )}
-        <p className="intake-hint">图片只保存在本机，目标结束 30 天后自动清理。⌘ / Ctrl + Enter 提交。</p>
-        {busy && (
-          <p className="form-progress" role="status">
-            正在保存图片并联系管家，首次准备可能需要几十秒…
-          </p>
-        )}
+        <p className="ui-form__note">图片只保存在本机，目标结束 30 天后自动清理。⌘ / Ctrl + Enter 提交。</p>
+        {busy && <LoadingState label="正在保存图片并联系管家，首次准备可能需要几十秒…" />}
         <div className="modal-actions">
-          <button type="button" className="secondary" disabled={busy} onClick={onClose}>
+          <Button variant="secondary" disabled={busy} onClick={onClose}>
             取消
-          </button>
-          <button className="primary" disabled={busy}>
-            <Sparkles size={15} />
+          </Button>
+          <Button type="submit" variant="primary" disabled={busy} icon={<Sparkles size={15} />}>
             {busy ? "正在交给管家…" : "交给管家"}
-          </button>
+          </Button>
         </div>
       </form>
     </Modal>
@@ -750,14 +716,14 @@ function App() {
               <i />
               {conciergeStatus}
             </span>
-            <button
-              className="primary"
+            <Button
+              variant="primary"
               onClick={() => setModal("new")}
               disabled={!workspace}
+              icon={<Plus size={16} />}
             >
-              <Plus size={16} />
               新目标
-            </button>
+            </Button>
           </div>
         </header>
         {error && (
@@ -777,10 +743,9 @@ function App() {
               <p>{state.recovery.detail} 已创建兼容的新工作区，旧数据没有被删除。</p>
               <code title={state.recovery.archivedPath}>{state.recovery.archivedPath}</code>
             </div>
-            <button className="secondary" type="button" onClick={() => void api.openRecoveryBackup().catch(showError)}>
-              <Folder size={14} />
+            <Button variant="secondary" size="sm" onClick={() => void api.openRecoveryBackup().catch(showError)} icon={<Folder size={14} />}>
               打开备份
-            </button>
+            </Button>
             <IconButton
               label="关闭恢复提示"
               onClick={() => void execute({ type: "workspace.recovery.dismiss" })
@@ -795,9 +760,9 @@ function App() {
           <div className={`setup-status ${herdr.phase}`} role="status" aria-live="polite">
             <SquareTerminal size={16} />
             <span>{herdr.detail || "正在检查 Herdr…"}</span>
-            {herdr.phase === "error" && <button className="secondary" onClick={() => {
+            {herdr.phase === "error" && <Button variant="secondary" size="sm" onClick={() => {
               void api.installHerdr().catch(showError);
-            }}>重试准备 Herdr</button>}
+            }}>重试准备 Herdr</Button>}
           </div>
         )}
         <main>
@@ -815,14 +780,14 @@ function App() {
                 <br />
                 只有真正需要你的时刻，才打扰你。
               </p>
-              <button
-                className="primary large"
+              <Button
+                variant="primary"
                 disabled={pickingWorkspace}
                 onClick={() => void pickWorkspace()}
+                trailing={<ArrowRight size={17} />}
               >
                 {pickingWorkspace ? "正在准备工作区…" : "选择存储位置并开始"}
-                <ArrowRight size={17} />
-              </button>
+              </Button>
             </section>
           ) : page === "home" ? (
             <div className="content home">
@@ -860,17 +825,15 @@ function App() {
                 </div>
               </section>
               <section className="attention-section">
-                <div className="section-heading">
-                  <h2>
-                    需要你处理{" "}
-                    {attention.length > 0 && <span>{attention.length}</span>}
-                  </h2>
-                  <small>
-                    {attention.length
+                <SectionHeading
+                  title="需要你处理"
+                  count={attention.length}
+                  description={
+                    attention.length
                       ? "不必盯着其他会话"
-                      : "内部进展不会打扰你"}
-                  </small>
-                </div>
+                      : "内部进展不会打扰你"
+                  }
+                />
                 {attention.length ? (
                   <div className="attention-list">
                     {attention.map((item) => {
@@ -913,25 +876,21 @@ function App() {
                     })}
                   </div>
                 ) : (
-                  <div className="clear">
-                    <span>✦</span>
-                    <div>
-                      <h3>此刻，没有等你处理的事。</h3>
-                      <p>
-                        {waiting.length ? `${waiting.length} 件在等待` : "没有被搁置的事项"}
-                        {active.length ? `，${active.length} 件正在推进` : ""}。
-                        到了该出现的时候再告诉你。
-                      </p>
-                    </div>
-                  </div>
+                  <EmptyState
+                    inline
+                    tone="mint"
+                    icon={<Sparkles size={18} />}
+                    title="此刻，没有等你处理的事。"
+                    description={`${waiting.length ? `${waiting.length} 件在等待` : "没有被搁置的事项"}${active.length ? `，${active.length} 件正在推进` : ""}。到了该出现的时候再告诉你。`}
+                  />
                 )}
               </section>
               {waiting.length > 0 && (
                 <section className="waiting-section">
-                  <div className="section-heading">
-                    <h2>在等待</h2>
-                    <small>不用一直记着</small>
-                  </div>
+                  <SectionHeading
+                    title="在等待"
+                    description="不用一直记着"
+                  />
                   {waiting.map((item) => (
                     <button
                       className="waiting-row"
@@ -963,15 +922,17 @@ function App() {
                   </span>
                   <span>·</span>
                   <span>工作时不会打扰你</span>
-                  <button
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    trailing={<ArrowUpRight size={13} />}
                     onClick={() => {
                       setFilter("active");
                       setPage("goals");
                     }}
                   >
                     查看进展
-                    <ArrowUpRight size={13} />
-                  </button>
+                  </Button>
                 </div>
               )}
             </div>
@@ -1008,8 +969,9 @@ function App() {
                     {label}
                   </button>
                 ))}
-                <input
+                <TextInput
                   aria-label="搜索目标"
+                  className="filter-search"
                   placeholder="搜索目标…"
                   value={query}
                   onChange={(event) => setQuery(event.target.value)}
@@ -1028,18 +990,66 @@ function App() {
                         <strong>{item.title}</strong>
                         <p>{item.next}</p>
                       </div>
-                      <span className={`status-pill ${item.status}`}>
+                      <StatusPill tone={goalRowTone(item)}>
                         {goalRowLabel(item)}
-                      </span>
+                      </StatusPill>
                       <ChevronRight />
                     </button>
                   ))
+                ) : state.goals.length === 0 ? (
+                  <EmptyState
+                    className="goal-empty"
+                    icon={<Sparkles size={19} />}
+                    title="这里还没有目标"
+                    description="记录一件事，或把它交给管家。每一步都会留在这里。"
+                    action={
+                      <Button
+                        variant="secondary"
+                        size="sm"
+                        icon={<Plus size={14} />}
+                        onClick={() => setModal("new")}
+                      >
+                        记录第一个目标
+                      </Button>
+                    }
+                  />
+                ) : projectId && !state.goals.some((goal) => goal.projectId === projectId) ? (
+                  <EmptyState
+                    className="goal-empty"
+                    icon={<Folder size={19} />}
+                    title="这个项目还没有目标"
+                    description="把第一件事交给管家，项目会从这里开始积累。"
+                    action={
+                      <Button
+                        variant="secondary"
+                        size="sm"
+                        icon={<Plus size={14} />}
+                        onClick={() => setModal("new")}
+                      >
+                        记录第一个目标
+                      </Button>
+                    }
+                  />
                 ) : (
-                  <div className="empty">
-                    <Sparkles />
-                    <h3>这里还没有目标</h3>
-                    <p>记录一件事，或把它交给管家。</p>
-                  </div>
+                  <EmptyState
+                    className="goal-empty"
+                    icon={<Sparkles size={19} />}
+                    title="没有符合条件的目标"
+                    description="换个关键词，或清除筛选查看全部目标。"
+                    action={
+                      <Button
+                        variant="secondary"
+                        size="sm"
+                        onClick={() => {
+                          setQuery("");
+                          setFilter("all");
+                          setProjectId("");
+                        }}
+                      >
+                        清除筛选
+                      </Button>
+                    }
+                  />
                 )}
               </div>
             </div>
@@ -1126,10 +1136,10 @@ function App() {
         </div>
         <p className="workspace-help">要处理某个代码项目，请在左侧「项目」旁点 + 添加。切换工作区后，将显示所选目录自己的目标和管家。</p>
         <div className="form-actions">
-          <button className="secondary" onClick={() => setModal("")}>返回设置</button>
-          <button className="primary" disabled={pickingWorkspace} onClick={() => void pickWorkspace()}>
+          <Button variant="secondary" onClick={() => setModal("")}>返回设置</Button>
+          <Button variant="primary" disabled={pickingWorkspace} onClick={() => void pickWorkspace()}>
             {pickingWorkspace ? "正在打开工作区…" : workspace ? "选择其他工作区文件夹" : "选择工作区文件夹"}
-          </button>
+          </Button>
         </div>
       </Modal>}
       {modal === "webhook" && (
@@ -1140,7 +1150,7 @@ function App() {
           onClose={() => setModal("")}
         >
           <form
-            className="form webhook-form"
+            className="ui-form webhook-form"
             onSubmit={async event => {
               event.preventDefault();
               setBusy(true);
@@ -1167,66 +1177,68 @@ function App() {
               }
             }}
           >
-            <label className="webhook-switch">
-              <input name="enabled" type="checkbox" defaultChecked={webhook.enabled} disabled={busy} />
-              <span>
-                <strong>状态更新和需要你处理时发送</strong>
-                <small>目标状态变化会通知；决定、验收、到期跟进和升级事项另有注意力通知。普通聊天不会触发。</small>
-              </span>
-            </label>
+            <Toggle
+              name="enabled"
+              defaultChecked={webhook.enabled}
+              disabled={busy}
+              label="状态更新和需要你处理时发送"
+              description="目标状态变化会通知；决定、验收、到期跟进和升级事项另有注意力通知。普通聊天不会触发。"
+            />
             <fieldset className="webhook-statuses">
               <legend>订阅这些状态变化</legend>
               <div>
                 {goalStatusOptions.map(([value, label]) => (
-                  <label className="webhook-status-option" key={value}>
-                    <input
-                      name="statuses"
-                      type="checkbox"
-                      value={value}
-                      defaultChecked={webhook.statuses.includes(value)}
-                      disabled={busy}
-                    />
-                    <span>{label}</span>
-                  </label>
+                  <Checkbox
+                    name="statuses"
+                    value={value}
+                    defaultChecked={webhook.statuses.includes(value)}
+                    disabled={busy}
+                    label={label}
+                    key={value}
+                  />
                 ))}
               </div>
               <small>全部取消后仍会接收“需要你处理”的注意力通知。</small>
             </fieldset>
-            <label>
-              Webhook 地址
-              <input
+            <Field
+              label="Webhook 地址"
+              hint={
+                webhook.configured
+                  ? `已配置 ${webhook.endpoint ?? ""}，留空保持不变`
+                  : "远程地址必须使用 HTTPS，本机 localhost 可使用 HTTP。"
+              }
+            >
+              <TextInput
                 name="url"
                 type="url"
                 required={!webhook.configured}
                 disabled={busy}
                 placeholder={webhook.configured
-                  ? `已配置 ${webhook.endpoint ?? ""}，留空保持不变`
+                  ? "留空保持不变"
                   : "https://hooks.example.com/crewvane"}
               />
-            </label>
-            <label>
-              Bearer 令牌（可选）
-              <input
+            </Field>
+            <Field
+              label="Bearer 令牌（可选）"
+              hint={webhook.tokenConfigured ? "令牌已保存，留空保持不变。" : "留空则不添加 Authorization。"}
+            >
+              <TextInput
                 name="token"
                 type="password"
                 autoComplete="new-password"
                 disabled={busy}
-                placeholder={webhook.tokenConfigured ? "令牌已保存，留空保持不变" : "留空则不添加 Authorization"}
+                placeholder={webhook.tokenConfigured ? "留空保持不变" : "留空则不添加 Authorization"}
               />
-            </label>
+            </Field>
             {webhook.tokenConfigured && (
-              <label className="webhook-clear-token">
-                <input name="clearToken" type="checkbox" disabled={busy} />
-                清除已保存的令牌
-              </label>
+              <Checkbox name="clearToken" disabled={busy} label="清除已保存的令牌" />
             )}
-            <p className="webhook-payload-note">
-              通用 Webhook 收到 JSON；飞书、Lark 和企业微信机器人地址会自动使用文本消息格式。内容仅含工作区名称、目标标题、状态、摘要和 `goalId`，不包含聊天历史、附件或本机路径。远程地址必须使用 HTTPS，本机 localhost 可使用 HTTP。
+            <p className="ui-form__note">
+              通用 Webhook 收到 JSON；飞书、Lark 和企业微信机器人地址会自动使用文本消息格式。内容仅含工作区名称、目标标题、状态、摘要和 `goalId`，不包含聊天历史、附件或本机路径。
             </p>
             <div className="modal-actions webhook-actions">
-              <button
-                type="button"
-                className="secondary"
+              <Button
+                variant="secondary"
                 disabled={busy || !webhook.configured}
                 onClick={async () => {
                   setBusy(true);
@@ -1243,10 +1255,10 @@ function App() {
                 }}
               >
                 测试当前配置
-              </button>
-              <button className="primary" disabled={busy}>
+              </Button>
+              <Button type="submit" variant="primary" disabled={busy}>
                 {busy ? "正在保存…" : "保存设置"}
-              </button>
+              </Button>
             </div>
           </form>
         </Modal>
@@ -1280,7 +1292,7 @@ function App() {
           onClose={() => setModal("")}
         >
           <form
-            className="form"
+            className="ui-form"
             onSubmit={async (event) => {
               event.preventDefault();
               const data = new FormData(event.currentTarget);
@@ -1297,22 +1309,30 @@ function App() {
               }
             }}
           >
-            <label>
-              项目名称
-              <input
+            <Field label="项目名称">
+              <TextInput
                 name="name"
                 required
                 autoFocus
                 placeholder="例如：数据平台"
               />
-            </label>
-            <label>
-              项目目录（可选）
+            </Field>
+            <Field
+              label="项目目录（可选）"
+              htmlFor="project-path"
+              connect={false}
+              hint="可留空，仍由同一位管家统筹。"
+            >
               <div className="file-input">
-                <input name="path" readOnly placeholder="选择本机目录" />
-                <button
-                  className="secondary"
-                  type="button"
+                <TextInput
+                  id="project-path"
+                  name="path"
+                  readOnly
+                  placeholder="选择本机目录"
+                  aria-describedby="project-path-message"
+                />
+                <Button
+                  variant="secondary"
                   onClick={async () => {
                     const selected = await api.selectProject();
                     const input =
@@ -1323,13 +1343,13 @@ function App() {
                   }}
                 >
                   选择目录
-                </button>
+                </Button>
               </div>
-            </label>
+            </Field>
             <div className="modal-actions">
-              <button className="primary" disabled={busy}>
+              <Button type="submit" variant="primary" disabled={busy}>
                 添加项目
-              </button>
+              </Button>
             </div>
           </form>
         </Modal>
@@ -1431,7 +1451,7 @@ function GoalEditor({
       onClose={onClose}
     >
       <form
-        className="form"
+        className="ui-form"
         onSubmit={async (event) => {
           event.preventDefault();
           const data = new FormData(event.currentTarget);
@@ -1460,56 +1480,48 @@ function GoalEditor({
           }
         }}
       >
-        <label>
-          目标名称
-          <input
+        <Field label="目标名称" hint="改标题不会改变目标状态或验收记录。">
+          <TextInput
             name="title"
             defaultValue={goal.title}
             maxLength={160}
             required
           />
-        </label>
-        <label>
-          背景与完成标准
-          <textarea
+        </Field>
+        <Field label="背景与完成标准">
+          <TextArea
             name="description"
-            aria-label="背景与完成标准"
             defaultValue={goal.description}
             required
           />
-        </label>
-        {goal.status !== "review" && (
-          <label>
-            当前安排
-            <select name="status" defaultValue={goal.status}>
-              <option value="active">继续推进</option>
-              <option value="waiting">等待他人 / 到时跟进</option>
-            </select>
-          </label>
-        )}
-        <label>
-          下一步
-          <textarea aria-label="下一步" name="next" defaultValue={goal.next} required />
-        </label>
-        <label>
-          等待对象 / 负责人
-          <input name="owner" defaultValue={goal.owner} required />
-        </label>
-        <label>
-          跟进提醒
-          <input
-            name="remindAt"
-            type="datetime-local"
-            defaultValue={localReminder}
-          />
-        </label>
-        <p className="quiet-copy">
-          选择“等待他人 / 到时跟进”后，到提醒时间会进入注意力面板。
-        </p>
+        </Field>
+        <div className="ui-form__grid">
+          {goal.status !== "review" && (
+            <Field label="当前安排">
+              <Select name="status" defaultValue={goal.status}>
+                <option value="active">继续推进</option>
+                <option value="waiting">等待他人 / 到时跟进</option>
+              </Select>
+            </Field>
+          )}
+          <Field label="等待对象 / 负责人">
+            <TextInput name="owner" defaultValue={goal.owner} required />
+          </Field>
+          <Field label="跟进提醒" hint="到提醒时间会进入注意力面板。">
+            <TextInput
+              name="remindAt"
+              type="datetime-local"
+              defaultValue={localReminder}
+            />
+          </Field>
+        </div>
+        <Field label="下一步">
+          <TextArea name="next" defaultValue={goal.next} required />
+        </Field>
         <div className="modal-actions">
-          <button className="primary" disabled={busy}>
+          <Button type="submit" variant="primary" disabled={busy}>
             保存更新
-          </button>
+          </Button>
         </div>
       </form>
     </Modal>
@@ -1531,7 +1543,7 @@ function DeliveryEditor({
       onClose={onClose}
     >
       <form
-        className="form"
+        className="ui-form"
         onSubmit={async (event) => {
           event.preventDefault();
           const data = new FormData(event.currentTarget);
@@ -1559,45 +1571,42 @@ function DeliveryEditor({
           }
         }}
       >
-        <label>
-          成果摘要
-          <textarea name="summary" placeholder="实际完成了什么？" required />
-        </label>
-        <label>
-          成果位置（可选）
-          <input
+        <Field label="成果摘要">
+          <TextArea name="summary" placeholder="实际完成了什么？" required />
+        </Field>
+        <Field label="成果位置（可选）">
+          <TextInput
             name="location"
             placeholder="文件位置、文档或其他可核对的位置"
           />
-        </label>
-        <label>
-          检查名称
-          <input
-            name="checkName"
-            placeholder="例如：人工核对审批结果"
-            required
-          />
-        </label>
-        <label>
-          实际检查操作
-          <input
-            name="checkCommand"
-            placeholder="实际执行的命令或人工检查步骤"
-            required
-          />
-        </label>
-        <label>
-          通过依据
-          <textarea
+        </Field>
+        <div className="ui-form__grid">
+          <Field label="检查名称">
+            <TextInput
+              name="checkName"
+              placeholder="例如：人工核对审批结果"
+              required
+            />
+          </Field>
+          <Field label="实际检查操作">
+            <TextInput
+              name="checkCommand"
+              placeholder="实际执行的命令或人工检查步骤"
+              required
+            />
+          </Field>
+        </div>
+        <Field label="通过依据" hint="未检查通过时请继续处理，不要提交验收。">
+          <TextArea
             name="checkNote"
-            placeholder="写下实际观察到的结果；未检查通过时请继续处理。"
+            placeholder="写下实际观察到的结果"
             required
           />
-        </label>
+        </Field>
         <div className="modal-actions">
-          <button className="primary" disabled={busy}>
+          <Button type="submit" variant="primary" disabled={busy}>
             提交验收
-          </button>
+          </Button>
         </div>
       </form>
     </Modal>
@@ -1631,170 +1640,201 @@ function Settings({
           <p>没有运行时管理。你已有的工具，在 Herdr 里自然相遇。</p>
         </div>
       </section>
-      <AgentPreferencesEditor key={workspace} preferences={state.agents ?? { concierge: "codex" }} options={agentOptions}
-        busy={busy} onSave={saveAgents} />
-      <GovernanceEditor projects={state.projects} decisions={state.decisions ?? []} busy={busy} onSave={savePolicy} />
-      <section className="setting">
-        <div>
-          <SquareTerminal />
-          <span>
-            <h3>Herdr 与全局管家</h3>
-            <p>会话由 Herdr 托管，关闭 Crewvane 窗口也不会终止。</p>
-            <p>启动时自动检查最新版，并安装 Crewvane 注意力面板插件，无需 Homebrew。</p>
-            {herdr?.session && <p>外部终端连接同一现场：<code>herdr session attach {herdr.session}</code></p>}
-            <p>裸跑 herdr 默认连接 default Session，不会自动显示这个工作区。</p>
-            {herdr?.executable && <code className="tool-location">{herdr.executable}</code>}
-          </span>
-        </div>
-        <div>
-          {herdr?.installed ? (
-            <span className="ready">
-              <i />
-              已安装 {herdr.version}
-              {herdr.plugin?.phase === "ready" ? " · 注意力面板已接入" : ""}
-            </span>
-          ) : <span className="setting-progress">{herdr?.detail || "正在检测…"}</span>}
-          {herdr?.plugin?.phase === "error" && <span className="setting-progress">{herdr.plugin.detail}</span>}
-          <button className="secondary" disabled={busy || herdr?.phase === "checking" || herdr?.phase === "downloading"}
-            onClick={() => void onAction("herdr")}>
-            {herdr?.phase === "downloading" ? "正在自动安装…" : herdr?.phase === "checking" ? "正在检查…" : herdr?.installed ? "检查更新" : "重试准备"}
-          </button>
-          <button
-            className="secondary"
-            disabled={busy}
-            onClick={() => void onAction("concierge")}
-          >
-            {busy ? "正在准备…" : "准备管家"}
-          </button>
-          <button className="secondary" disabled={busy} onClick={openHerdr}>
-            打开 Herdr
-          </button>
-        </div>
-      </section>
-      <section className="setting">
-        <div>
-          <Zap />
-          <span>
-            <h3>Crewvane 命令行</h3>
-            <p>管家通过它读写当前案卷，不能列出或修改其他目标。应用内置，无需另外安装 Node。</p>
-            <code>{cli?.path}</code>
-          </span>
-        </div>
-        <button
-          className="secondary"
-          disabled={busy}
-          onClick={() => void onAction("cli")}
+      <div className="ui-settings-grid">
+        <AgentPreferencesEditor
+          key={workspace}
+          preferences={state.agents ?? { concierge: "codex" }}
+          options={agentOptions}
+          busy={busy}
+          onSave={saveAgents}
+        />
+        <GovernanceEditor
+          projects={state.projects}
+          decisions={state.decisions ?? []}
+          busy={busy}
+          onSave={savePolicy}
+        />
+        <SettingsSection
+          wide
+          icon={<SquareTerminal />}
+          title="Herdr 与全局管家"
+          description="会话由 Herdr 托管，关闭 Crewvane 窗口也不会终止；启动时自动检查最新版，并接入 Crewvane 注意力面板。"
         >
-          {cli?.installed ? "重新安装" : "安装到 ~/.local/bin"}
-        </button>
-      </section>
-      <section className="setting">
-        <div>
-          <Bot />
-          <span>
-            <h3>让外部 Agent 会使用 Crewvane</h3>
-            <p>安装随应用打包的 Crewvane Skill。Codex、Claude Code、Cursor 或其他读取通用 Agent Skills 目录的工具，可以直接提交目标、查看目标并追加说明。</p>
-            {skills?.targets?.length ? (
-              <div className="skill-targets">
-                {skills.targets.map((target: any) => (
-                  <small
-                    key={target.id}
-                    className={target.phase === "conflict" ? "conflict" : target.phase}
-                    title={target.path}
-                  >
-                    {target.label}
-                    <i />
-                    {target.phase === "installed" ? "已安装"
-                      : target.phase === "outdated" ? `可更新 ${target.managedVersion ?? ""}`
-                        : target.phase === "conflict" ? "已有同名 Skill，已保护"
-                          : "未安装"}
-                  </small>
-                ))}
-              </div>
-            ) : <small className="setting-progress">正在检测 Agent Skills 目录…</small>}
-          </span>
-        </div>
-        <div>
-          <span className="setting-count">
-            {skills ? `${skills.installed}/${skills.available} 已就绪` : ""}
-          </span>
-          <button
-            className="secondary"
-            disabled={busy}
-            onClick={() => void onAction("skills")}
-          >
-            {skills?.targets?.length && skills.installed === skills.available
-              ? "重新安装 Skills"
-              : "安装 / 更新 Skills"}
-          </button>
-        </div>
-      </section>
-      <section className="setting">
-        <div>
-          <Folder />
-          <span>
-            <h3>工作区存储位置</h3>
-            <p>
-              {workspace}
-              <br />
-              目标保存在此目录的 .crewvane 中。
-            </p>
-          </span>
-        </div>
-        <button className="secondary" onClick={() => void pickWorkspace()}>
-          更换工作区
-        </button>
-      </section>
-      <section className="setting">
-        <div>
-          <Bell />
-          <span>
-            <h3>需要你时，主动通知</h3>
-            <p>系统通知默认开启；可接一个 Webhook，同步目标状态变化，并把决定、验收、到期跟进和真正需要介入的事项推到你的工作流。</p>
+          <div className="settings-facts">
+            {herdr?.session && (
+              <p>
+                外部终端连接同一现场：
+                <code>herdr session attach {herdr.session}</code>
+              </p>
+            )}
+            <p>裸跑 herdr 默认连接 default Session，不会自动显示这个工作区。</p>
+            {herdr?.executable && <code>{herdr.executable}</code>}
+          </div>
+          <div className="settings-inline">
+            {herdr?.installed ? (
+              <span className="settings-status ready">
+                <i />
+                已安装 {herdr.version}
+                {herdr.plugin?.phase === "ready" ? " · 注意力面板已接入" : ""}
+              </span>
+            ) : (
+              <LoadingState label={herdr?.detail || "正在检测运行环境…"} />
+            )}
+            {herdr?.plugin?.phase === "error" && (
+              <span className="ui-field__error">{herdr.plugin.detail}</span>
+            )}
+          </div>
+          <div className="ui-settings-card__actions">
+            <Button
+              variant="secondary"
+              size="sm"
+              disabled={busy || herdr?.phase === "checking" || herdr?.phase === "downloading"}
+              onClick={() => void onAction("herdr")}
+            >
+              {herdr?.phase === "downloading" ? "正在自动安装…" : herdr?.phase === "checking" ? "正在检查…" : herdr?.installed ? "检查更新" : "重试准备"}
+            </Button>
+            <Button
+              variant="secondary"
+              size="sm"
+              disabled={busy}
+              onClick={() => void onAction("concierge")}
+            >
+              {busy ? "正在准备…" : "准备管家"}
+            </Button>
+            <Button variant="ghost" size="sm" disabled={busy} onClick={openHerdr}>
+              打开 Herdr
+            </Button>
+          </div>
+        </SettingsSection>
+        <SettingsSection
+          icon={<Zap />}
+          title="Crewvane 命令行"
+          description="管家通过它读写当前案卷，不能列出或修改其他目标。应用内置，无需另外安装 Node。"
+        >
+          <div className="settings-facts">
+            <code>{cli?.path}</code>
+          </div>
+          <div className="ui-settings-card__actions">
+            <Button
+              variant="secondary"
+              size="sm"
+              disabled={busy}
+              onClick={() => void onAction("cli")}
+            >
+              {cli?.installed ? "重新安装" : "安装到 ~/.local/bin"}
+            </Button>
+          </div>
+        </SettingsSection>
+        <SettingsSection
+          icon={<Bot />}
+          title="让外部 Agent 会使用 Crewvane"
+          description="安装随应用打包的 Crewvane Skill。Codex、Claude Code、Cursor 或其他读取通用 Agent Skills 目录的工具，可以直接提交目标、查看目标并追加说明。"
+        >
+          {skills?.targets?.length ? (
+            <div className="skill-targets">
+              {skills.targets.map((target: any) => (
+                <small
+                  key={target.id}
+                  className={target.phase === "conflict" ? "conflict" : target.phase}
+                  title={target.path}
+                >
+                  {target.label}
+                  <i />
+                  {target.phase === "installed" ? "已安装"
+                    : target.phase === "outdated" ? `可更新 ${target.managedVersion ?? ""}`
+                      : target.phase === "conflict" ? "已有同名 Skill，已保护"
+                        : "未安装"}
+                </small>
+              ))}
+            </div>
+          ) : (
+            <LoadingState label="正在检测 Agent Skills 目录…" />
+          )}
+          <div className="ui-settings-card__actions">
+            <span className="settings-status">
+              {skills ? `${skills.installed}/${skills.available} 已就绪` : ""}
+            </span>
+            <Button
+              variant="secondary"
+              size="sm"
+              disabled={busy}
+              onClick={() => void onAction("skills")}
+            >
+              {skills?.targets?.length && skills.installed === skills.available
+                ? "重新安装 Skills"
+                : "安装 / 更新 Skills"}
+            </Button>
+          </div>
+        </SettingsSection>
+        <SettingsSection
+          icon={<Folder />}
+          title="工作区存储位置"
+          description="目标保存在此目录的 .crewvane 中。切换工作区后，界面会显示该目录自己的目标。"
+        >
+          <div className="settings-facts">
+            <code>{workspace}</code>
+          </div>
+          <div className="ui-settings-card__actions">
+            <Button variant="secondary" size="sm" onClick={() => void pickWorkspace()}>
+              更换工作区
+            </Button>
+          </div>
+        </SettingsSection>
+        <SettingsSection
+          icon={theme === "dark" ? <Moon /> : <Sun />}
+          title="外观"
+          description="深夜像素或清爽日光，任务始终清晰。"
+        >
+          <div className="settings-inline">
+            <span className="settings-status">
+              <i />
+              当前：{theme === "dark" ? "深色" : "浅色"}
+            </span>
+          </div>
+          <div className="ui-settings-card__actions">
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={() => setTheme(theme === "dark" ? "light" : "dark")}
+            >
+              {theme === "dark" ? "切换到浅色" : "切换到深色"}
+            </Button>
+          </div>
+        </SettingsSection>
+        <SettingsSection
+          wide
+          icon={<Bell />}
+          title="需要你时，主动通知"
+          description="系统通知默认开启；可接一个 Webhook，同步目标状态变化，并把决定、验收、到期跟进和真正需要介入的事项推到你的工作流。"
+        >
+          <div className="settings-facts">
             {webhook.configured && (
-              <code>
+              <p>
                 {webhook.endpoint} · {webhook.enabled ? "已启用" : "已暂停"}
                 {webhook.tokenConfigured ? " · Bearer 认证" : ""}
                 {" · "}
                 {webhook.statuses.length ? `${webhook.statuses.length} 种状态` : "不订阅状态变化"}
-              </code>
+              </p>
             )}
-            {webhook.lastSuccessAt && (
-              <small className="webhook-last-success">
-                最近送达：{time(webhook.lastSuccessAt)}
-              </small>
-            )}
+            {webhook.lastSuccessAt && <p>最近送达：{time(webhook.lastSuccessAt)}</p>}
             {webhook.lastError && (
-              <small className="webhook-error">
+              <p className="ui-field__error">
                 上次发送失败：{webhook.lastError}
                 {webhook.lastErrorAt ? ` · ${time(webhook.lastErrorAt)}` : ""}
-              </small>
+              </p>
             )}
-          </span>
-        </div>
-        <button className="secondary" onClick={openWebhook}>
-          {webhook.configured ? "管理 Webhook" : "配置 Webhook"}
-        </button>
-      </section>
-      <section className="setting">
-        <div>
-          {theme === "dark" ? <Moon /> : <Sun />}
-          <span>
-            <h3>外观</h3>
-            <p>深夜像素或清爽日光，任务始终清晰。</p>
-          </span>
-        </div>
-        <button
-          className="secondary"
-          onClick={() => setTheme(theme === "dark" ? "light" : "dark")}
-        >
-          {theme === "dark" ? "切换到浅色" : "切换到深色"}
-        </button>
-      </section>
-      <p className="setting-foot">
-        Crewvane {version} · 一位管家 · {state.projects.length} 个空间 ·{" "}
-        {state.goals.length} 个目标
-      </p>
+          </div>
+          <div className="ui-settings-card__actions">
+            <Button variant="secondary" size="sm" onClick={openWebhook}>
+              {webhook.configured ? "管理 Webhook" : "配置 Webhook"}
+            </Button>
+          </div>
+        </SettingsSection>
+        <p className="settings-foot">
+          Crewvane {version} · 一位管家 · {state.projects.length} 个空间 ·{" "}
+          {state.goals.length} 个目标
+        </p>
+      </div>
     </div>
   );
 }
@@ -1815,57 +1855,84 @@ function GovernanceEditor({
   onSave: (projectId: string, policy: { shipPolicy: ShipPolicy; approvers: string[] }) => Promise<void>;
 }) {
   const [editing, setEditing] = useState<string>();
-  return <section className="governance-editor" aria-label="上线策略与决定账本">
-    <div className="section-heading">
-      <h2>上线策略与决定账本</h2>
-      <small>{decisions.length} 条已记住的决定</small>
-    </div>
-    <p>默认要求外部审批。自动策略只跳过审批，不跳过检查；删数据、停服、花钱、外部发消息、改产品方向、新建或轮换密钥、改权限、修改上线策略始终会进入注意力。</p>
-    <div className="policy-list">
-      {projects.map(project => {
-        const open = editing === project.id;
-        return <div className="policy-row" key={project.id}>
-          <div>
-            <strong>{project.name}</strong>
-            <span>{shipPolicyLabels[project.policy.shipPolicy]}</span>
-            {project.policy.approvers.length > 0 && <small>审批人：{project.policy.approvers.join("、")}</small>}
-          </div>
-          {!open ? <button className="secondary" disabled={busy} onClick={() => setEditing(project.id)}>配置</button> :
-            <form key={`${project.id}-${project.policy.revision}`} onSubmit={async event => {
-              event.preventDefault();
-              const data = new FormData(event.currentTarget);
-              try {
-                await onSave(project.id, {
-                  shipPolicy: String(data.get("shipPolicy")) as ShipPolicy,
-                  approvers: String(data.get("approvers"))
-                    .split(/[\n,，、]/).map(value => value.trim()).filter(Boolean),
-                });
-                setEditing(undefined);
-              } catch {
-                /* The parent shows the server error. */
-              }
-            }}>
-              <label>
-                上线策略
-                <select name="shipPolicy" defaultValue={project.policy.shipPolicy} disabled={busy}>
-                  {Object.entries(shipPolicyLabels).map(([value, label]) =>
-                    <option value={value} key={value}>{label}</option>)}
-                </select>
-              </label>
-              <label>
-                外部审批人（可选）
-                <input name="approvers" defaultValue={project.policy.approvers.join("、")}
-                  placeholder="例如：YR、平台组" disabled={busy} />
-              </label>
-              <div className="policy-actions">
-                <button type="button" className="secondary" disabled={busy} onClick={() => setEditing(undefined)}>取消</button>
-                <button className="primary" disabled={busy}>保存策略</button>
+  return (
+    <SettingsSection
+      wide
+      icon={<Settings2 />}
+      title="上线策略与决定账本"
+      description="默认要求外部审批。自动策略只跳过审批，不跳过检查；删数据、停服、花钱、外部发消息、改产品方向、新建或轮换密钥、改权限、修改上线策略始终会进入注意力。"
+    >
+      <span className="settings-status">{decisions.length} 条已记住的决定</span>
+      <div className="policy-list">
+        {projects.map(project => {
+          const open = editing === project.id;
+          return (
+            <div className="policy-row" key={project.id}>
+              <div>
+                <strong>{project.name}</strong>
+                <span>{shipPolicyLabels[project.policy.shipPolicy]}</span>
+                {project.policy.approvers.length > 0 && (
+                  <small>审批人：{project.policy.approvers.join("、")}</small>
+                )}
               </div>
-            </form>}
-        </div>;
-      })}
-    </div>
-  </section>;
+              {!open ? (
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  disabled={busy}
+                  onClick={() => setEditing(project.id)}
+                >
+                  配置
+                </Button>
+              ) : (
+                <form
+                  key={`${project.id}-${project.policy.revision}`}
+                  onSubmit={async event => {
+                    event.preventDefault();
+                    const data = new FormData(event.currentTarget);
+                    try {
+                      await onSave(project.id, {
+                        shipPolicy: String(data.get("shipPolicy")) as ShipPolicy,
+                        approvers: String(data.get("approvers"))
+                          .split(/[\n,，、]/).map(value => value.trim()).filter(Boolean),
+                      });
+                      setEditing(undefined);
+                    } catch {
+                      /* The parent shows the server error. */
+                    }
+                  }}
+                >
+                  <Field label="上线策略">
+                    <Select name="shipPolicy" defaultValue={project.policy.shipPolicy} disabled={busy}>
+                      {Object.entries(shipPolicyLabels).map(([value, label]) => (
+                        <option value={value} key={value}>{label}</option>
+                      ))}
+                    </Select>
+                  </Field>
+                  <Field label="外部审批人（可选）">
+                    <TextInput
+                      name="approvers"
+                      defaultValue={project.policy.approvers.join("、")}
+                      placeholder="例如：YR、平台组"
+                      disabled={busy}
+                    />
+                  </Field>
+                  <div className="policy-actions">
+                    <Button variant="secondary" size="sm" disabled={busy} onClick={() => setEditing(undefined)}>
+                      取消
+                    </Button>
+                    <Button type="submit" variant="primary" size="sm" disabled={busy}>
+                      保存策略
+                    </Button>
+                  </div>
+                </form>
+              )}
+            </div>
+          );
+        })}
+      </div>
+    </SettingsSection>
+  );
 }
 function AgentPreferencesEditor({ preferences, options, busy, onSave }: {
   preferences: AgentPreferences;
@@ -1876,28 +1943,59 @@ function AgentPreferencesEditor({ preferences, options, busy, onSave }: {
   const [commands, setCommands] = useState(preferences);
   useEffect(() => { setCommands(preferences); }, [preferences.concierge, preferences.owner, preferences.worker]);
   const installed = options.filter(option => option.installed);
-  return <section className="agent-preferences" aria-label="Agent 偏好">
-    <div className="section-heading"><h2>Agent 启动命令</h2><small>使用 CLI 原生参数</small></div>
-    <p>填写每个角色的启动命令，可附带模型等原生参数。Crewvane 不替换 CLI，也不借用 Codex 等运行时专属的沙箱参数；已有会话继续工作，新会话使用保存后的命令。</p>
-    <form onSubmit={async event => {
-      event.preventDefault();
-      const data = new FormData(event.currentTarget);
-      try { await onSave({ concierge: String(data.get("concierge")),
-        owner: String(data.get("owner")) || undefined, worker: String(data.get("worker")) || undefined }); }
-      catch { /* Parent keeps the existing preferences and displays the error. */ }
-    }}>
-      <div className="agent-role-grid">
-        {(["concierge", "owner", "worker"] as const).map((role, index) => <label key={role}>
-          <span>{["管家", "负责人", "工人"][index]}启动命令</span>
-          <input name={role} aria-label={`${["管家", "负责人", "工人"][index]}启动命令`} list="installed-agent-commands"
-            value={commands[role] ?? ""} onChange={event => setCommands(current => ({ ...current, [role]: event.target.value }))}
-            placeholder={role === "concierge" ? "codex" : role === "owner" ? "留空跟随管家" : "留空跟随负责人"}
-            required={role === "concierge"} maxLength={2000} disabled={busy} spellCheck={false} />
-        </label>)}
-      </div>
-      <datalist id="installed-agent-commands">{installed.map(option => <option key={option.kind} value={option.kind} />)}</datalist>
-      <div className="agent-preference-footer"><small>填写本机任意交互式 CLI 和参数，例如 codex --model gpt-5、npx --yes my-agent。支持绝对路径与 ~/ 路径；自定义 CLI 直接在终端启动，无需 Herdr 类型适配。管家案卷边界由 Crewvane CLI 约束，不是操作系统文件沙箱。环境变量和 shell 表达式请放入自己的启动脚本。</small><button className="secondary" disabled={busy}>保存偏好</button></div>
-    </form>
-  </section>;
+  return (
+    <SettingsSection
+      wide
+      icon={<Bot />}
+      title="Agent 启动命令"
+      description="填写每个角色的启动命令，可附带模型等原生参数。Crewvane 不替换 CLI，也不借用 Codex 等运行时专属的沙箱参数；已有会话继续工作，新会话使用保存后的命令。"
+    >
+      <form
+        className="ui-form"
+        onSubmit={async event => {
+          event.preventDefault();
+          const data = new FormData(event.currentTarget);
+          try {
+            await onSave({
+              concierge: String(data.get("concierge")),
+              owner: String(data.get("owner")) || undefined,
+              worker: String(data.get("worker")) || undefined,
+            });
+          } catch {
+            /* Parent keeps the existing preferences and displays the error. */
+          }
+        }}
+      >
+        <div className="agent-role-grid ui-form__grid">
+          {(["concierge", "owner", "worker"] as const).map((role, index) => (
+            <Field label={`${["管家", "负责人", "工人"][index]}启动命令`} key={role}>
+              <TextInput
+                name={role}
+                list="installed-agent-commands"
+                value={commands[role] ?? ""}
+                onChange={event => setCommands(current => ({ ...current, [role]: event.target.value }))}
+                placeholder={role === "concierge" ? "codex" : role === "owner" ? "留空跟随管家" : "留空跟随负责人"}
+                required={role === "concierge"}
+                maxLength={2000}
+                disabled={busy}
+                spellCheck={false}
+              />
+            </Field>
+          ))}
+        </div>
+        <datalist id="installed-agent-commands">
+          {installed.map(option => <option key={option.kind} value={option.kind} />)}
+        </datalist>
+        <div className="ui-form__footer">
+          <p className="ui-form__note">
+            填写本机任意交互式 CLI 和参数，例如 codex --model gpt-5、npx --yes my-agent。支持绝对路径与 ~/ 路径；自定义 CLI 直接在终端启动，无需 Herdr 类型适配。管家案卷边界由 Crewvane CLI 约束，不是操作系统文件沙箱。环境变量和 shell 表达式请放入自己的启动脚本。
+          </p>
+          <Button type="submit" variant="secondary" disabled={busy}>
+            保存偏好
+          </Button>
+        </div>
+      </form>
+    </SettingsSection>
+  );
 }
 createRoot(document.getElementById("root")!).render(<App />);
