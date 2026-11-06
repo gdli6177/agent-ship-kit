@@ -78,7 +78,8 @@ try {
   await page.evaluate(async ({ session, marker, resultFile }) => {
     const quote = text => `'${text.replaceAll("'", "'\\''")}'`;
     await window.crewvane.writeTerminal(session,
-      `/usr/bin/printf '%s' ${quote(marker)} > ${quote(resultFile)} && /bin/cat ${quote(resultFile)}\r`);
+      `/usr/bin/printf '%s' ${quote(marker)} > ${quote(resultFile)} && ` +
+      `/usr/bin/printf '\\033[?1000h\\n%s\\n' ${quote(marker)}\r`);
   }, { session, marker, resultFile });
   // TUI redraws can split or omit unchanged bytes in the PTY stream. Require an
   // actual shell-side effect rather than mistaking echoed input for execution.
@@ -86,12 +87,12 @@ try {
   await page.locator(".xterm-accessibility").filter({ hasText: marker }).waitFor({ state: "attached" });
   const firstPid = await app.evaluate(({ app }) => app.getAppMetrics().filter(item => item.name === "Crewvane Herdr terminal").map(item => item.pid));
   assert.equal(firstPid.length, 1);
-  // Exercise the same system clipboard path a real Mac uses. Selecting a
-  // rendered accessibility row drives xterm's own selection model; Cmd+C then
-  // goes through the custom key handler exposed by the embedded terminal.
+  // Herdr enables application mouse reporting. A normal drag is therefore sent
+  // to Herdr and creates no terminal selection; macOS terminal convention is
+  // Option-drag, which must force xterm's own selection model.
   const textarea = page.locator(".xterm-helper-textarea");
   await textarea.focus();
-  const selected = await page.evaluate((value) => {
+  const selectionRect = await page.evaluate((value) => {
     const tree = document.querySelector(".xterm-accessibility-tree");
     if (!tree) throw new Error("xterm accessibility tree is missing");
     const walker = document.createTreeWalker(tree, NodeFilter.SHOW_TEXT);
@@ -102,17 +103,30 @@ try {
       const range = document.createRange();
       range.setStart(node, offset);
       range.setEnd(node, offset + value.length);
-      const selection = window.getSelection();
-      if (!selection) throw new Error("document selection is unavailable");
-      selection.removeAllRanges();
-      selection.addRange(range);
-      document.dispatchEvent(new Event("selectionchange"));
-      return selection.toString();
+      const rect = range.getBoundingClientRect();
+      return { x: rect.x, y: rect.y, width: rect.width, height: rect.height };
     }
     throw new Error("terminal marker was not found in the accessibility tree");
   }, marker);
-  assert.equal(selected, marker);
+  await writeSystemClipboard("before-terminal-copy");
+  await page.keyboard.down("Alt");
+  await page.mouse.move(selectionRect.x + 1, selectionRect.y + selectionRect.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(
+    selectionRect.x + selectionRect.width - 1,
+    selectionRect.y + selectionRect.height / 2,
+    { steps: 15 },
+  );
+  await page.mouse.up();
+  await page.keyboard.up("Alt");
+  await expect(page.getByRole("button", { name: "复制终端选区", exact: true })).toBeEnabled();
   await page.keyboard.press("Meta+C");
+  await expect.poll(readSystemClipboard, { timeout: 10_000 }).toBe(marker);
+  await expect(page.getByRole("status")).toContainText("已复制");
+  // The explicit button is the discoverable fallback when the native keyboard
+  // path is intercepted by a terminal application.
+  await writeSystemClipboard("before-terminal-copy-button");
+  await page.getByRole("button", { name: "复制终端选区", exact: true }).click();
   await expect.poll(readSystemClipboard, { timeout: 10_000 }).toBe(marker);
   // Paste a shell command from the real system clipboard, then submit it with
   // Enter. The file is authoritative evidence that the PTY received it.
